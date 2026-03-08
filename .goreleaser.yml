@@ -21,7 +21,7 @@ builds:
       - -X github.com/takaaki-s/claude-code-valet/internal/version.Date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
