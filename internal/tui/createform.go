@@ -183,7 +183,7 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Success - set env var for parent TUI to detect
 		if tc, err := tmux.NewMgrClient(); err == nil {
-			tc.SetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION", msg.sessionID)
+			_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION", msg.sessionID)
 		}
 		return m, tea.Quit
 	}

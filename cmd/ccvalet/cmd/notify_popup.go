@@ -32,7 +32,7 @@ var notifyPopupCmd = &cobra.Command{
 		if m, ok := finalModel.(tui.NotifyModel); ok && m.Selected() != "" {
 			tc, err := tmux.NewMgrClient()
 			if err == nil {
-				tc.SetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION", m.Selected())
+				_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION", m.Selected())
 			}
 		}
 

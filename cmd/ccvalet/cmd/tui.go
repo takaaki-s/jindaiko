@@ -95,63 +95,63 @@ func createAndAttachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 	}
 
 	// Normalize indices to 0-based (override user's .tmux.conf settings)
-	tc.SetOption("base-index", "0", true)
-	tc.SetOption("pane-base-index", "0", true)
+	_ = tc.SetOption("base-index", "0", true)
+	_ = tc.SetOption("pane-base-index", "0", true)
 
 	// Get TUI pane ID (the only pane so far, use window target to avoid index issues)
 	windowTarget := tmux.SessionName + ":" + tmux.UIWindowName
 	tuiPaneID, _ := tc.GetPaneID(windowTarget)
 
 	// Configure the outer session
-	tc.SetupAutoCleanDeadPanes() // Safety net: auto-kill untagged dead panes
+	_ = tc.SetupAutoCleanDeadPanes() // Safety net: auto-kill untagged dead panes
 	if tuiPaneID != "" {
-		tc.TagManagedPane(tuiPaneID) // TUI pane survives exit
+		_ = tc.TagManagedPane(tuiPaneID) // TUI pane survives exit
 	}
-	tc.SetOption("status", "off", true) // Hide tmux status bar
-	tc.SetOption("mouse", "on", true)
-	tc.SetOption("focus-events", "on", true)      // Enable focus reporting for Bubble Tea FocusMsg/BlurMsg
-	tc.SetOption("set-clipboard", "on", true)     // Enable clipboard via OSC 52 for copy-mode
-	tc.SetOption("allow-passthrough", "on", true) // Allow OSC 52 passthrough from inner tmux
+	_ = tc.SetOption("status", "off", true) // Hide tmux status bar
+	_ = tc.SetOption("mouse", "on", true)
+	_ = tc.SetOption("focus-events", "on", true)      // Enable focus reporting for Bubble Tea FocusMsg/BlurMsg
+	_ = tc.SetOption("set-clipboard", "on", true)     // Enable clipboard via OSC 52 for copy-mode
+	_ = tc.SetOption("allow-passthrough", "on", true) // Allow OSC 52 passthrough from inner tmux
 
 	// Pane border: color and session name display
-	tc.SetOption("pane-active-border-style", "fg=green", true)
-	tc.SetOption("pane-border-style", "fg=colour240", true)
-	tc.SetOption("pane-border-status", "top", true)
-	tc.SetOption("pane-border-format", "#{?#{@session_name}, #{@session_name} ,}", true)
+	_ = tc.SetOption("pane-active-border-style", "fg=green", true)
+	_ = tc.SetOption("pane-border-style", "fg=colour240", true)
+	_ = tc.SetOption("pane-border-status", "top", true)
+	_ = tc.SetOption("pane-border-format", "#{?#{@session_name}, #{@session_name} ,}", true)
 
 	// prefix=None: prevent outer tmux from capturing user keystrokes
-	tc.SetOption("prefix", "None", true)
-	tc.SetOption("prefix2", "None", true)
+	_ = tc.SetOption("prefix", "None", true)
+	_ = tc.SetOption("prefix2", "None", true)
 
 	// Create right pane (75%) for session display.
 	// Split using window target (not pane index) to avoid pane-base-index issues.
-	tc.SplitWindow(windowTarget, true, 75, tmux.PlaceholderCmd)
+	_ = tc.SplitWindow(windowTarget, true, 75, tmux.PlaceholderCmd)
 
 	// After split, the new pane (display) is the active pane. Get its ID.
 	displayPaneID, _ := tc.GetPaneID(windowTarget)
 	if displayPaneID != "" {
-		tc.TagManagedPane(displayPaneID) // Display pane survives exit
+		_ = tc.TagManagedPane(displayPaneID) // Display pane survives exit
 	}
 
 	// Store pane IDs for runTUIInner to use
 	if tuiPaneID != "" {
-		tc.SetEnvironment(tmux.SessionName, "CCVALET_TUI_PANE", tuiPaneID)
+		_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_TUI_PANE", tuiPaneID)
 	}
 	if displayPaneID != "" {
-		tc.SetEnvironment(tmux.SessionName, "CCVALET_DISPLAY_PANE", displayPaneID)
+		_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_DISPLAY_PANE", displayPaneID)
 	}
 	// Propagate SSH_AUTH_SOCK to tmux session so popups can access it
 	if sshAuthSock := os.Getenv("SSH_AUTH_SOCK"); sshAuthSock != "" {
-		tc.SetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK", sshAuthSock)
+		_ = tc.SetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK", sshAuthSock)
 	}
 
 	// Focus TUI pane (left)
 	if tuiPaneID != "" {
-		tc.SelectPane(tuiPaneID)
+		_ = tc.SelectPane(tuiPaneID)
 	}
 
 	// Bind detach key to switch to TUI pane (prefix-free binding, works with prefix=None)
-	tc.BindKey(detachTmuxKey, "select-pane", "-L")
+	_ = tc.BindKey(detachTmuxKey, "select-pane", "-L")
 
 	return attachToSession(tc)
 }
@@ -159,36 +159,36 @@ func createAndAttachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 // reattachTmux reattaches to an existing outer tmux session, respawning dead panes.
 func reattachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 	// Ensure pane-died hook is active (handles upgrade from older version)
-	tc.SetupAutoCleanDeadPanes()
+	_ = tc.SetupAutoCleanDeadPanes()
 	// Update SSH_AUTH_SOCK in tmux session (may have changed on reconnect)
 	if sshAuthSock := os.Getenv("SSH_AUTH_SOCK"); sshAuthSock != "" {
-		tc.SetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK", sshAuthSock)
+		_ = tc.SetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK", sshAuthSock)
 	}
-	tc.SetOption("focus-events", "on", true)      // Ensure focus reporting is enabled
-	tc.SetOption("set-clipboard", "on", true)     // Enable clipboard via OSC 52 for copy-mode
-	tc.SetOption("allow-passthrough", "on", true) // Allow OSC 52 passthrough from inner tmux
-	tc.SetOption("pane-border-status", "top", true)
-	tc.SetOption("pane-border-format", "#{?#{@session_name}, #{@session_name} ,}", true)
+	_ = tc.SetOption("focus-events", "on", true)      // Ensure focus reporting is enabled
+	_ = tc.SetOption("set-clipboard", "on", true)     // Enable clipboard via OSC 52 for copy-mode
+	_ = tc.SetOption("allow-passthrough", "on", true) // Allow OSC 52 passthrough from inner tmux
+	_ = tc.SetOption("pane-border-status", "top", true)
+	_ = tc.SetOption("pane-border-format", "#{?#{@session_name}, #{@session_name} ,}", true)
 
 	tuiPaneID := tc.GetEnvironment(tmux.SessionName, "CCVALET_TUI_PANE")
 
 	if tuiPaneID != "" {
 		if tc.IsPaneDead(tuiPaneID) {
 			// TUI pane exists but dead → respawn it
-			tc.RespawnPane(tuiPaneID, tuiInnerCmd)
+			_ = tc.RespawnPane(tuiPaneID, tuiInnerCmd)
 		}
 		// Select TUI pane
-		tc.SelectPane(tuiPaneID)
+		_ = tc.SelectPane(tuiPaneID)
 	} else {
 		// No tracked TUI pane → respawn in UI window pane 0
-		tc.RespawnPane(tmux.UITarget(0), tuiInnerCmd)
-		tc.SelectWindow(tmux.SessionName + ":" + tmux.UIWindowName)
+		_ = tc.RespawnPane(tmux.UITarget(0), tuiInnerCmd)
+		_ = tc.SelectWindow(tmux.SessionName + ":" + tmux.UIWindowName)
 	}
 
 	// Restore right pane if dead
 	displayPaneID := tc.GetEnvironment(tmux.SessionName, "CCVALET_DISPLAY_PANE")
 	if displayPaneID != "" && tc.IsPaneDead(displayPaneID) {
-		tc.RespawnPane(displayPaneID, tmux.PlaceholderCmd)
+		_ = tc.RespawnPane(displayPaneID, tmux.PlaceholderCmd)
 	}
 
 	return attachToSession(tc)
@@ -230,10 +230,10 @@ func runTUIInner() error {
 		tuiPaneID = tc.GetEnvironment(tmux.SessionName, "CCVALET_TUI_PANE")
 	}
 	if tuiPaneID != "" {
-		tc.SetEnvironment(tmux.SessionName, "CCVALET_TUI_PANE", tuiPaneID)
-		tc.TagManagedPane(tuiPaneID)
+		_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_TUI_PANE", tuiPaneID)
+		_ = tc.TagManagedPane(tuiPaneID)
 		// Rebind detach key to focus TUI pane by ID (works from any pane)
-		tc.BindKey(detachTmuxKey, "run-shell",
+		_ = tc.BindKey(detachTmuxKey, "run-shell",
 			fmt.Sprintf("tmux -L %s select-pane -t %s", tmux.MgrSocketName, tuiPaneID))
 	}
 
@@ -260,7 +260,7 @@ func runTUIInner() error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if displayPaneID != "" {
-		tc.SetEnvironment(tmux.SessionName, "CCVALET_DISPLAY_PANE", displayPaneID)
+		_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_DISPLAY_PANE", displayPaneID)
 	}
 
 	model := tui.NewModelWithTmux(client, tc, tuiPaneID, displayPaneID)
@@ -272,6 +272,6 @@ func runTUIInner() error {
 
 	// Detach the client instead of killing the session.
 	// The outer tmux session stays alive with CC processes running in inner tmux.
-	tc.DetachClient(tmux.SessionName)
+	_ = tc.DetachClient(tmux.SessionName)
 	return nil
 }

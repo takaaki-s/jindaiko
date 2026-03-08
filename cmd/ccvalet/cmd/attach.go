@@ -67,7 +67,7 @@ var attachCmd = &cobra.Command{
 				return fmt.Errorf("host not found: %s", sess.HostID)
 			}
 
-			host.EnsureSSHMaster(*hostConfig)
+			_ = host.EnsureSSHMaster(*hostConfig)
 			attachExec := host.AttachCommand(*hostConfig, windowName)
 			attachExec.Stdin = os.Stdin
 			attachExec.Stdout = os.Stdout

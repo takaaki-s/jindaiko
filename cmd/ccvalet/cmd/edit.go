@@ -64,7 +64,7 @@ Examples:
 
 		// ターミナル状態を復元
 		if oldState != nil {
-			term.Restore(int(os.Stdin.Fd()), oldState)
+			_ = term.Restore(int(os.Stdin.Fd()), oldState)
 		}
 
 		return runErr

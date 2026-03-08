@@ -355,12 +355,6 @@ func cursorSettledCmd(seq int) tea.Cmd {
 // after tmux pane operations (ZoomPane).
 type resizeSettledMsg struct{}
 
-func resizeSettledCmd() tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
-		return resizeSettledMsg{}
-	})
-}
-
 // switchToSession displays the given session in the right pane via RespawnPane.
 // For local sessions, attaches to the inner tmux session (-L ccvalet).
 // For remote sessions, runs SSH attach command.
@@ -401,10 +395,10 @@ func (m *Model) switchToSession(sessionID string) {
 				sess.Name, sess.Status,
 			)
 		}
-		m.tmuxClient.RespawnPane(m.displayPaneID, placeholderCmd)
+		_ = m.tmuxClient.RespawnPane(m.displayPaneID, placeholderCmd)
 		m.currentSessionID = sessionID
-		m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
-		m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
+		_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
+		_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 		return
 	}
 
@@ -416,17 +410,17 @@ func (m *Model) switchToSession(sessionID string) {
 	// Remote session: use SSH attach command
 	if sess.HostID != "" && sess.HostID != "local" {
 		m.switchToRemoteSession(sess)
-		m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
+		_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 		return
 	}
 
 	// Local: respawn right pane with inner tmux attach
 	attachCmd := fmt.Sprintf("tmux -L %s attach -t %s", tmux.SocketName, sess.TmuxWindowName)
-	m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
+	_ = m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
 
 	m.currentSessionID = sessionID
-	m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
-	m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
+	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
+	_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 }
 
 // isSessionAlive returns true if the session status indicates an active process.
@@ -453,14 +447,14 @@ func (m *Model) switchToRemoteSession(sess *session.Info) {
 	// Ensure a background ControlMaster SSH connection exists for this host.
 	// This is separate from the tmux pane process, so RespawnPane won't kill it.
 	// Subsequent SSH connections (slaves) reuse the master for near-instant connection.
-	host.EnsureSSHMaster(*hostConfig)
+	_ = host.EnsureSSHMaster(*hostConfig)
 
 	// Generate SSH attach command string (slave connection via ControlMaster)
 	attachCmd := host.AttachCommandString(*hostConfig, sess.TmuxWindowName)
-	m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
+	_ = m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
 
 	m.currentSessionID = sess.ID
-	m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sess.ID)
+	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sess.ID)
 }
 
 // openVSCode opens VS Code for the given session's working directory.
@@ -484,12 +478,12 @@ func (m *Model) openVSCode(sess *session.Info) {
 		if hostConfig == nil || hostConfig.Type != "ssh" {
 			return
 		}
-		exec.Command("code", "--remote", "ssh-remote+"+hostConfig.Host, workDir).Start()
+		_ = exec.Command("code", "--remote", "ssh-remote+"+hostConfig.Host, workDir).Start()
 		return
 	}
 
 	// ローカルセッション
-	exec.Command("code", workDir).Start()
+	_ = exec.Command("code", workDir).Start()
 }
 
 // handleAttach attaches to the currently selected session.
@@ -525,7 +519,7 @@ func (m Model) handleAttach() (tea.Model, tea.Cmd) {
 		}
 		m.switchToSession(sess.ID)
 		if m.displayPaneID != "" {
-			m.tmuxClient.SelectPane(m.displayPaneID)
+			_ = m.tmuxClient.SelectPane(m.displayPaneID)
 		}
 		return m, m.fetchSessions
 	}
@@ -549,9 +543,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// TUI pane width control: cap at max, enforce minimum.
 		if m.tmuxClient != nil && m.tuiPaneID != "" && m.displayPaneID != "" {
 			if m.width > maxTUIWidth {
-				m.tmuxClient.ResizePaneWidth(m.tuiPaneID, maxTUIWidth)
+				_ = m.tmuxClient.ResizePaneWidth(m.tuiPaneID, maxTUIWidth)
 			} else if m.width < minTUIWidth {
-				m.tmuxClient.ResizePaneWidth(m.tuiPaneID, minTUIWidth)
+				_ = m.tmuxClient.ResizePaneWidth(m.tuiPaneID, minTUIWidth)
 			}
 		}
 		// ZoomPane後のリサイズ完了を検知
@@ -754,7 +748,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open session creation form in a tmux popup
 			if m.tmuxClient != nil {
 				selfBin, _ := os.Executable()
-				m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+				_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
 					Width:  "80%",
 					Height: "80%",
 					Cmd:    fmt.Sprintf("'%s' create-popup", selfBin),
@@ -793,7 +787,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Help):
 			if m.tmuxClient != nil {
 				selfBin, _ := os.Executable()
-				m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+				_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
 					Width:  "60%",
 					Height: "60%",
 					Cmd:    fmt.Sprintf("'%s' help-popup", selfBin),
@@ -828,7 +822,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Notifications):
 			if m.tmuxClient != nil {
 				selfBin, _ := os.Executable()
-				m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+				_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
 					Width:  "70%",
 					Height: "60%",
 					Cmd:    fmt.Sprintf("'%s' notify-popup", selfBin),
@@ -881,7 +875,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// セッションがなくなった場合はplaceholderに戻す
 				if m.tmuxClient != nil && m.displayPaneID != "" {
-					m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
+					_ = m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
 				}
 			}
 			m.processingMsg = ""
@@ -894,7 +888,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.currentSessionID != "_empty" {
 				m.currentSessionID = "_empty"
 				if m.tmuxClient != nil && m.displayPaneID != "" {
-					m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
+					_ = m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
 				}
 			}
 			m.processingMsg = ""
@@ -915,7 +909,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
 					m.switchToSession(pageSessions[m.cursor].ID)
 				} else if m.tmuxClient != nil && m.displayPaneID != "" {
-					m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
+					_ = m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
 				}
 			}
 		}
@@ -950,12 +944,12 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Poll for session created via tmux popup
 		if m.tmuxClient != nil {
 			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION"); id != "" {
-				m.tmuxClient.UnsetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION")
+				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION")
 				m.focusSessionID = id
 			}
 			// Poll for session selected from notification history popup
 			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION"); id != "" {
-				m.tmuxClient.UnsetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION")
+				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION")
 				m.focusSessionID = id
 			}
 		}
@@ -1285,33 +1279,6 @@ func truncateFromEndToWidth(s string, maxWidth int) string {
 		width += w
 	}
 	return string(runes[startIdx:])
-}
-
-// getInUseStyle returns a style for the "in use" indicator based on session status.
-func getInUseStyle(status session.Status) lipgloss.Style {
-	switch status {
-	case session.StatusThinking, session.StatusPermission:
-		return lipgloss.NewStyle().Foreground(warningColor)
-	case session.StatusRunning, session.StatusCreating:
-		return lipgloss.NewStyle().Foreground(secondaryColor)
-	default:
-		return lipgloss.NewStyle().Foreground(dimColor)
-	}
-}
-
-// formatInUseIndicator returns a formatted "in use" indicator string.
-// Format: [status: session-name], truncated to maxWidth.
-func formatInUseIndicator(sess session.Info, maxWidth int) string {
-	statusStr := string(sess.Status)
-	name := sess.Name
-	// "[" + status + ": " + name + "]"
-	overhead := len(statusStr) + 4 // "[", ": ", "]"
-	availableForName := maxWidth - overhead
-	if availableForName < 3 {
-		return fmt.Sprintf("[%s]", statusStr)
-	}
-	name = truncateString(name, availableForName)
-	return fmt.Sprintf("[%s: %s]", statusStr, name)
 }
 
 // timeAgo returns a human-readable relative time string

@@ -106,10 +106,10 @@ func (n *Notifier) notify(sessionID, title, message string) {
 	// Send notification asynchronously
 	if remoteHost != "" {
 		// Remote notification via TCP (for headless servers)
-		go sendRemoteNotification(remoteHost, remotePort, title, message)
+		go func() { _ = sendRemoteNotification(remoteHost, remotePort, title, message) }()
 	} else {
 		// Local desktop notification
-		go sendDesktopNotification(title, message)
+		go func() { _ = sendDesktopNotification(title, message) }()
 	}
 }
 
@@ -149,7 +149,9 @@ func sendRemoteNotification(host, port, title, message string) error {
 	defer conn.Close()
 
 	// Set write deadline
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
 
 	// Send JSON payload
 	payload := map[string]string{

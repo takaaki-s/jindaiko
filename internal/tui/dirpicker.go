@@ -698,7 +698,7 @@ func getRemoteHome(hc *config.HostConfig) (string, error) {
 // listRemoteDirectories lists subdirectories of the given path on a remote host via SSH.
 func listRemoteDirectories(hc *config.HostConfig, remotePath string, showHidden bool) ([]string, error) {
 	// Use ls to list directories (compatible with most systems)
-	remoteCmd := "ls -1 -p " + remotePath + " 2>/dev/null | grep '/$' | sed 's|/$||'"
+	var remoteCmd string
 	if !showHidden {
 		remoteCmd = "ls -1 -p " + remotePath + " 2>/dev/null | grep '/$' | grep -v '^\\..*/$' | sed 's|/$||'"
 	} else {

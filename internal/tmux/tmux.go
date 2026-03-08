@@ -402,7 +402,9 @@ func (c *Client) SetupAutoCleanDeadPanes() error {
 // Also sets remain-on-exit at the pane level, so only managed panes stay
 // after process exit. User-added panes (untagged) are immediately destroyed.
 func (c *Client) TagManagedPane(target string) error {
-	c.SetPaneOption(target, "remain-on-exit", "on")
+	if err := c.SetPaneOption(target, "remain-on-exit", "on"); err != nil {
+		return err
+	}
 	return c.SetPaneOption(target, PaneKeepTag, "1")
 }
 

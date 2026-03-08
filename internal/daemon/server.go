@@ -184,7 +184,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 
 	resp := s.handleRequest(&req)
-	encoder.Encode(resp)
+	_ = encoder.Encode(resp)
 }
 
 func (s *Server) handleRequest(req *Request) Response {
@@ -327,7 +327,7 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 	// Start session in background if requested
 	if req.Start {
 		if err := s.manager.StartBackground(sess.ID); err != nil {
-			s.manager.Delete(sess.ID)
+			_ = s.manager.Delete(sess.ID)
 			return Response{Success: false, Error: err.Error()}
 		}
 	}

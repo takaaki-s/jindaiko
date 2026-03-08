@@ -19,9 +19,6 @@ const (
 
 	// localSocketDir はトンネル用ローカルソケットの配置ディレクトリ
 	localSocketDir = "/tmp/ccvalet-tunnels"
-
-	// healthCheckInterval はトンネルのヘルスチェック間隔
-	healthCheckInterval = 30 * time.Second
 )
 
 // Tunnel はリモートホストへのトンネル接続を表す
@@ -70,7 +67,7 @@ func (m *Manager) OpenSSH(hostConfig config.HostConfig) (string, error) {
 			return t.LocalSocket, nil
 		}
 		// 死んでいたらクリーンアップして再接続
-		m.closeLocked(hostConfig.ID)
+		_ = m.closeLocked(hostConfig.ID)
 	}
 
 	// ローカルソケットパスを生成
@@ -137,7 +134,7 @@ func (m *Manager) OpenSSH(hostConfig config.HostConfig) (string, error) {
 
 	// ソケットが利用可能になるまで待つ
 	if err := m.waitForSocket(localSocket, 10*time.Second); err != nil {
-		m.closeLocked(hostConfig.ID)
+		_ = m.closeLocked(hostConfig.ID)
 		return "", fmt.Errorf("SSH tunnel to %s started but socket not available: %w", hostConfig.Host, err)
 	}
 
@@ -160,7 +157,7 @@ func (m *Manager) OpenDocker(hostConfig config.HostConfig) (string, error) {
 	// 例: docker run -v /tmp/ccvalet-tunnels/docker-dev:/root/.ccvalet/run container
 	//     → /tmp/ccvalet-tunnels/docker-dev/daemon.sock でアクセス
 	localSocket := filepath.Join(localSocketDir, hostConfig.ID, "daemon.sock")
-	os.MkdirAll(filepath.Dir(localSocket), 0700)
+	_ = os.MkdirAll(filepath.Dir(localSocket), 0700)
 
 	tunnel := &Tunnel{
 		HostID:      hostConfig.ID,
@@ -187,7 +184,7 @@ func (m *Manager) CloseAll() {
 	defer m.mu.Unlock()
 
 	for hostID := range m.tunnels {
-		m.closeLocked(hostID)
+		_ = m.closeLocked(hostID)
 	}
 }
 
@@ -223,9 +220,9 @@ func (m *Manager) closeLocked(hostID string) error {
 
 	// SSHプロセスを終了
 	if t.process != nil {
-		t.process.Kill()
+		_ = t.process.Kill()
 		if t.cmd != nil {
-			t.cmd.Wait()
+			_ = t.cmd.Wait()
 		}
 	}
 
