@@ -5,11 +5,13 @@ Claude Codeの複数セッションをtmux TUIで管理するCLIツール。
 ## Build & Test
 
 ```
-make build       # → bin/ccvalet
-make test        # go test -v ./...
-make fmt         # go fmt ./...
-make lint        # go vet ./...
-make install     # go install ./cmd/ccvalet
+make build          # → bin/ccvalet
+make test           # go test -v ./...
+make test-race      # go test -race ./...
+make test-coverage  # カバレッジレポート生成
+make fmt            # go fmt ./...
+make lint           # golangci-lint run ./...
+make install        # go install ./cmd/ccvalet
 ```
 
 ## Project Layout
@@ -73,4 +75,9 @@ Go 1.24.5 / cobra (CLI) / bubbletea (TUI) / viper (config) / lipgloss (styling)
 
 ## Testing
 
-テストファイルは未整備。新規コードには `_test.go` を追加すること。
+カバレッジ約40%。標準ライブラリのみ使用（testify等なし）。
+同一パッケージテスト（`package X`）で非公開関数もテスト可能。
+新規コードには `_test.go` を追加すること。
+
+テスタビリティのため `tmux.Runner` インターフェースを導入済み（`internal/tmux/interfaces.go`）。
+session.Manager のテストでは `mockTmuxRunner`（`internal/session/mock_tmux_test.go`）を使用。
