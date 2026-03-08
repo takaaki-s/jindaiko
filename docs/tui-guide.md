@@ -2,89 +2,89 @@
 
 ## Architecture
 
-BubbleTea (Elm Architecture) ベースの TUI。
-メイン画面（セッションリスト）は `model.go` が担当し、作成フォーム・ヘルプ・通知履歴は tmux popup で独立プロセスとして起動する。
+BubbleTea (Elm Architecture) based TUI.
+The main screen (session list) is handled by `model.go`, while the create form, help, and notification history are launched as independent processes via tmux popup.
 
 ```
 internal/tui/
-├─ model.go       ... メインModel（セッションリスト）, Update(), View() (~1430行)
-├─ createform.go  ... セッション作成フォーム (popup用, ~540行)
-├─ dirpicker.go   ... ディレクトリピッカー (createform内で使用, ~730行)
-├─ notifyview.go  ... 通知履歴表示 (popup用, ~180行)
-├─ helpview.go    ... ヘルプ表示 (popup用, ~100行)
-└─ styles.go      ... lipglossスタイル定義 (Tokyo Night配色)
+├─ model.go       ... Main Model (session list), Update(), View() (~1430 lines)
+├─ createform.go  ... Session create form (for popup, ~540 lines)
+├─ dirpicker.go   ... Directory picker (used within createform, ~730 lines)
+├─ notifyview.go  ... Notification history view (for popup, ~180 lines)
+├─ helpview.go    ... Help view (for popup, ~100 lines)
+└─ styles.go      ... lipgloss style definitions (Tokyo Night color scheme)
 
 cmd/ccvalet/cmd/
-├─ create_popup.go  ... ccvalet create-popup (Hidden) → CreateFormModel起動
-├─ help_popup.go    ... ccvalet help-popup (Hidden)   → HelpModel起動
-└─ notify_popup.go  ... ccvalet notify-popup (Hidden) → NotifyModel起動
+├─ create_popup.go  ... ccvalet create-popup (Hidden) → launches CreateFormModel
+├─ help_popup.go    ... ccvalet help-popup (Hidden)   → launches HelpModel
+└─ notify_popup.go  ... ccvalet notify-popup (Hidden) → launches NotifyModel
 ```
 
-## Model構造
+## Model Structure
 
-`model.go` の `Model` がセッションリスト画面の状態を保持:
-- セッション一覧 + カーソル位置 + ページネーション
-- 検索モード（フィルタリング）
-- 確認ダイアログ（Kill/Delete）
-- daemon.Client（IPC通信用）
-- tmux.Client（popup起動・ペイン制御用）
-- ポーリングタイマー（tickMsg）
+`Model` in `model.go` holds the state of the session list screen:
+- Session list + cursor position + pagination
+- Search mode (filtering)
+- Confirmation dialog (Kill/Delete)
+- daemon.Client (for IPC communication)
+- tmux.Client (for popup launch and pane control)
+- Polling timer (tickMsg)
 
-## Update/View パターン
+## Update/View Pattern
 
 ```go
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     switch msg := msg.(type) {
     case tea.KeyMsg:
-        // updateListMode() に委譲
-        // confirmDelete/confirmKill/searching 等のモード判定
+        // Delegates to updateListMode()
+        // Mode checks: confirmDelete/confirmKill/searching etc.
     case tickMsg:
-        // 定期ポーリング（daemon.Client.List()）
-        // popup完了の検知（環境変数経由）
+        // Periodic polling (daemon.Client.List())
+        // Detect popup completion (via environment variables)
     case sessionsMsg:
-        // セッション一覧更新
+        // Update session list
     }
 }
 
 func (m Model) View() string {
     // processingMsg != "" → renderProcessingView()
-    // 通常 → renderListContent() + renderHelpLine()
+    // Normal → renderListContent() + renderHelpLine()
 }
 ```
 
-## ビューモード
+## View Modes
 
-### メイン画面（model.go 内）
+### Main Screen (within model.go)
 
-- **セッション一覧**: デフォルト画面、ステータス表示 + ページネーション
-- **検索モード**: `/` キーで起動、セッション名のインクリメンタルフィルタリング
-- **確認ダイアログ**: Kill/Delete時にヘルプラインに確認メッセージ表示
+- **Session list**: Default screen, status display + pagination
+- **Search mode**: Triggered by `/` key, incremental filtering by session name
+- **Confirmation dialog**: Shows confirmation message in help line for Kill/Delete
 
-### Popup（tmux popup で独立プロセス起動）
+### Popup (launched as independent process via tmux popup)
 
-- **作成フォーム**: `createform.go` の `CreateFormModel`（3ステップ: ホスト→WorkDir→名前）
-- **ヘルプ**: `helpview.go` の `HelpModel`（キーバインド一覧）
-- **通知履歴**: `notifyview.go` の `NotifyModel`（通知一覧 + セッション選択）
+- **Create form**: `CreateFormModel` in `createform.go` (3 steps: Host → WorkDir → Name)
+- **Help**: `HelpModel` in `helpview.go` (keybind list)
+- **Notification history**: `NotifyModel` in `notifyview.go` (notification list + session selection)
 
-Popup完了後は環境変数（`CCVALET_CREATED_SESSION`, `CCVALET_NOTIFY_SESSION`）経由で親TUIに結果を返す。親TUIは tickMsg のポーリングで検知する。
+After popup completion, results are returned to the parent TUI via environment variables (`CCVALET_CREATED_SESSION`, `CCVALET_NOTIFY_SESSION`). The parent TUI detects them during tickMsg polling.
 
-## スタイリング
+## Styling
 
-- `styles.go` で lipgloss スタイルを定義（Tokyo Night配色）
-- 生のANSIコードは使わない
-- カラーは lipgloss.Color() で指定
+- lipgloss styles are defined in `styles.go` (Tokyo Night color scheme)
+- Do not use raw ANSI codes
+- Specify colors with lipgloss.Color()
 
-## 新規Popup追加手順
+## Adding a New Popup
 
-1. `internal/tui/` に新しい `.go` ファイルを作成し、独立した `tea.Model` を実装
-2. `cmd/ccvalet/cmd/` に `xxx_popup.go` を作成（Hidden コマンドとして登録）
-3. popup内で `tea.NewProgram()` を使い独立した BubbleTea プログラムとして実行
-4. 結果を環境変数で親TUIに返す場合、`model.go` の `tick()` 内で検知ロジックを追加
-5. `model.go` の `updateListMode()` に popup 起動のキーバインドを追加
-6. 既存の create_popup.go / help_popup.go / notify_popup.go をパターン参考にする
+1. Create a new `.go` file in `internal/tui/` and implement an independent `tea.Model`
+2. Create `xxx_popup.go` in `cmd/ccvalet/cmd/` (register as a Hidden command)
+3. Use `tea.NewProgram()` inside the popup to run as an independent BubbleTea program
+4. If returning results via environment variables, add detection logic in `model.go`'s `tick()`
+5. Add a keybind for popup launch in `model.go`'s `updateListMode()`
+6. Refer to existing create_popup.go / help_popup.go / notify_popup.go as patterns
 
-## キーバインド
+## Keybindings
 
-キーバインドは `config.GetKeybindings()` から取得される。
-デフォルト値は `config.DefaultKeybindings()` で定義。
-ユーザーは `~/.ccvalet/config.yaml` の `keybindings` セクションでカスタマイズ可能。
+Keybindings are retrieved from `config.GetKeybindings()`.
+Default values are defined in `config.DefaultKeybindings()`.
+Users can customize them in the `keybindings` section of `~/.ccvalet/config.yaml`.

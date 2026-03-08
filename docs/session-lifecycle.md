@@ -27,35 +27,35 @@
                     StatusStopped
 ```
 
-Status定数 (session/session.go):
-- `creating`   - CC起動中（現在未使用、予約）
-- `stopped`    - プロセス停止
-- `running`    - 実行中（Hook未受信の初期状態）
-- `idle`       - 入力待ち（Stop hook）
-- `thinking`   - 処理中（UserPromptSubmit hook）
-- `permission` - 許可待ち（Notification hook）
+Status constants (session/session.go):
+- `creating`   - CC starting up (currently unused, reserved)
+- `stopped`    - Process stopped
+- `running`    - Running (initial state before any hook is received)
+- `idle`       - Waiting for input (Stop hook)
+- `thinking`   - Processing (UserPromptSubmit hook)
+- `permission` - Waiting for permission (Notification hook)
 
 ## Session Structure
 
 ```go
-Session (永続化)
-├─ ID              string    // UUID (Claude Code --session-id互換)
-├─ Name            string    // 表示名 (デフォルト: WorkDirのbasename)
-├─ WorkDir         string    // 作業ディレクトリ（hookのcwdで動的更新）
-├─ CreatedAt       time.Time // 作成日時
+Session (persisted)
+├─ ID              string    // UUID (compatible with Claude Code --session-id)
+├─ Name            string    // Display name (default: basename of WorkDir)
+├─ WorkDir         string    // Working directory (dynamically updated via hook cwd)
+├─ CreatedAt       time.Time // Creation timestamp
 ├─ Status          Status
 ├─ LastActiveAt    time.Time
-├─ ErrorMessage    string    // エラーメッセージ（起動失敗時等）
-├─ ClaudeSessionID string    // Claude Code セッションID
-├─ ClaudeSessionStarted bool // --resume vs --session-id の判定用
-├─ HostID          string    // "local" or リモートホスト名
-├─ TmuxWindowName  string    // inner tmuxセッション名
-└─ TmuxPaneID      string    // CC pane ID (例: "%42")
+├─ ErrorMessage    string    // Error message (e.g., on startup failure)
+├─ ClaudeSessionID string    // Claude Code session ID
+├─ ClaudeSessionStarted bool // Used to determine --resume vs --session-id
+├─ HostID          string    // "local" or remote host name
+├─ TmuxWindowName  string    // Inner tmux session name
+└─ TmuxPaneID      string    // CC pane ID (e.g., "%42")
 
-Session (ランタイムのみ, json:"-")
-├─ LastOutputTime  time.Time // idle安定性検出用
-├─ StartedAt      time.Time // 起動直後のエラー誤検出防止
-├─ SSHAuthSock    string    // git操作用
+Session (runtime only, json:"-")
+├─ LastOutputTime  time.Time // For idle stability detection
+├─ StartedAt      time.Time // Prevents false error detection right after startup
+├─ SSHAuthSock    string    // For git operations
 ├─ CurrentWorkDir string    // tmux pane_current_path
 ├─ CurrentBranch  string    // git branch
 └─ IsGitRepo      bool
@@ -63,33 +63,33 @@ Session (ランタイムのみ, json:"-")
 
 ## Creation Flow
 
-1. `Manager.CreateWithOptions()` で Session 生成 + Store 永続化
+1. `Manager.CreateWithOptions()` creates a Session and persists it via Store
 2. `Manager.StartBackground()` → `startSession()` → `startSessionTmux()`
-3. `ensureTmuxClient()` で inner tmux (`-L ccvalet`) を初期化
-4. `ensureClaudeTrustState()` で `~/.claude/settings.local.json` のtrust設定
-5. inner tmux session を作成、`claude --session-id {ID}` を実行
-6. `TagManagedPane()` で remain-on-exit 対象タグ付与
-7. `captureOutputTmux()` goroutine でポーリング開始
+3. `ensureTmuxClient()` initializes the inner tmux (`-L ccvalet`)
+4. `ensureClaudeTrustState()` sets trust config in `~/.claude/settings.local.json`
+5. Creates an inner tmux session and runs `claude --session-id {ID}`
+6. `TagManagedPane()` tags the pane for remain-on-exit
+7. Starts `captureOutputTmux()` goroutine for polling
 
-## Recovery (Daemon再起動時)
+## Recovery (On Daemon Restart)
 
 `RecoverTmuxSessions()`:
-1. 全永続化セッションをロード（Status=Stopped で初期化）
-2. TmuxWindowName があるセッションについて inner tmux 生存確認
-3. 生存 → StatusRunning + `captureOutputTmux()` 再開
-4. pane dead → StatusStopped（TmuxWindowName は保持、RespawnPane 用）
-5. session自体消失 → TmuxWindowName クリア + StatusStopped
+1. Loads all persisted sessions (initialized as Status=Stopped)
+2. For sessions with TmuxWindowName, checks if the inner tmux is alive
+3. Alive → StatusRunning + restart `captureOutputTmux()`
+4. Pane dead → StatusStopped (TmuxWindowName preserved for RespawnPane)
+5. Session itself gone → Clear TmuxWindowName + StatusStopped
 
-## Resume失敗時の自動リカバリ
+## Auto-Recovery on Resume Failure
 
-`captureOutputTmux()` 内で起動10秒以内のpane死亡を検出:
-1. `claude --resume` が失敗したと判断
-2. 新しいClaudeSessionIDを生成
-3. `claude --session-id {新ID}` で RespawnPane
-4. 成功すれば新セッションとして継続
+Inside `captureOutputTmux()`, detects pane death within 10 seconds of startup:
+1. Determines that `claude --resume` has failed
+2. Generates a new ClaudeSessionID
+3. Respawns pane with `claude --session-id {newID}`
+4. If successful, continues as a new session
 
-## WorkDir追従
+## WorkDir Tracking
 
-WorkDirは2つの経路で更新される:
-1. **Hook経由**: `HandleHookEvent()` の `cwd` フィールド（Claude Codeの実CWD）
-2. **Polling経由**: `captureOutputTmux()` の `GetPaneCurrentPath()`（tmux paneのCWD）
+WorkDir is updated through two paths:
+1. **Via Hook**: `HandleHookEvent()` `cwd` field (Claude Code's actual CWD)
+2. **Via Polling**: `captureOutputTmux()` `GetPaneCurrentPath()` (tmux pane's CWD)

@@ -2,8 +2,8 @@
 
 ## Overview
 
-ccvaletはClaude Codeの複数セッションをtmux上で管理するCLI/TUIツール。
-デーモンプロセスがUnix socketでIPCを提供し、CLIとTUIがクライアントとして接続する。
+ccvalet is a CLI/TUI tool that manages multiple Claude Code sessions on tmux.
+A daemon process provides IPC via Unix socket, with CLI and TUI connecting as clients.
 
 ## Data Flow
 
@@ -27,7 +27,7 @@ User
                                                    claude / claude --resume
 ```
 
-## Hook Flow (状態検出)
+## Hook Flow (State Detection)
 
 ```
 Claude Code (hook event)
@@ -35,13 +35,13 @@ Claude Code (hook event)
     → daemon.Client.Send("hook", HookRequest)
       → daemon.Server.handleHook()
         → session.Manager.HandleHookEvent()
-          → Session.Status 更新 + Store.Save + notify
+          → Session.Status update + Store.Save + notify
 ```
 
 Hook Events:
 - `UserPromptSubmit` → StatusThinking
-- `Stop` → StatusIdle + タスク完了通知
-- `Notification(permission_prompt)` → StatusPermission + 許可待ち通知
+- `Stop` → StatusIdle + task completion notification
+- `Notification(permission_prompt)` → StatusPermission + permission-waiting notification
 
 ## Package Dependency
 
@@ -63,18 +63,18 @@ notify/            → (external: OS notification)
 transcript/        → (file I/O: ~/.claude/projects/)
 ```
 
-configは多くのパッケージから参照される基盤パッケージ。
-sessionパッケージがコアドメインで最大のビジネスロジックを持つ。
+config is a foundational package referenced by many others.
+The session package is the core domain with the most business logic.
 
 ## Remote Architecture
 
-ローカルデーモン(Master)がリモートホスト上のデーモン(Slave)をSSHトンネル経由で制御する。
+The local daemon (Master) controls daemons on remote hosts (Slave) via SSH tunnels.
 
 ```
 Master daemon (local)
-  ├─ host.Registry     ... ホスト一覧管理
-  ├─ tunnel.Manager    ... SSH/Dockerトンネルのライフサイクル
-  └─ RemoteClient      ... Slave daemonへのIPC転送
+  ├─ host.Registry     ... Host list management
+  ├─ tunnel.Manager    ... SSH/Docker tunnel lifecycle
+  └─ RemoteClient      ... IPC forwarding to Slave daemon
        │ (SSH tunnel / Docker exec)
        ▼
 Slave daemon (remote)
@@ -82,18 +82,18 @@ Slave daemon (remote)
   └─ tmux.Client
 ```
 
-リモート宛リクエストは `forwardToSlave()` でhost_idを除去して転送される。
+Requests destined for remote hosts are forwarded via `forwardToSlave()`, which strips the host_id before forwarding.
 
 ## File Storage
 
 ```
 ~/.ccvalet/
-  ├─ config.yaml            ... ユーザー設定 (keybindings, hosts)
-  ├─ state.yaml             ... 永続状態 (StateManager)
+  ├─ config.yaml            ... User settings (keybindings, hosts)
+  ├─ state.yaml             ... Persistent state (StateManager)
   ├─ sessions/
-  │   └─ {uuid}.json        ... セッション永続化データ
+  │   └─ {uuid}.json        ... Session persistence data
   ├─ run/
   │   └─ daemon.sock        ... Unix domain socket
-  ├─ daemon-debug.log       ... デーモンデバッグログ
-  └─ hook-debug.log         ... hookデバッグログ
+  ├─ daemon-debug.log       ... Daemon debug log
+  └─ hook-debug.log         ... Hook debug log
 ```

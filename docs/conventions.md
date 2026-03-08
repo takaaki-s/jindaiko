@@ -3,59 +3,59 @@
 ## Language & Formatting
 
 - Go 1.24.5
-- `make fmt` (go fmt) を必ずコミット前に実行
-- コメントは日本語を継続（既存コードに合わせる）
-- Technical terms, struct/function名は英語のまま
+- Always run `make fmt` (go fmt) before committing
+- Comments should be in English
+- Technical terms, struct/function names remain in English
 
 ## Error Handling
 
-- エラーは呼び出し元に return で伝播させる
-- ログ出力は境界（daemon server, manager等）でのみ行う
-- `fmt.Errorf("context: %w", err)` でラップする
+- Propagate errors to the caller via return
+- Log only at boundaries (daemon server, manager, etc.)
+- Wrap with `fmt.Errorf("context: %w", err)`
 
 ## Debug Logging
 
-daemon と session パッケージに `debugEnabled` / `debugLog()` が重複配置されている（共通化されていない）。
+debugEnabled / debugLog() are duplicated in the daemon and session packages (not shared).
 
 ```go
 var debugEnabled = os.Getenv("CCVALET_DEBUG") == "1"
 
 func debugLog(format string, args ...interface{}) {
-    // ファイルに追記: [HH:MM:SS] message
+    // Append to file: [HH:MM:SS] message
 }
 ```
 
-新規パッケージにデバッグログが必要な場合は、同じパターンを複製する。
+If a new package needs debug logging, duplicate the same pattern.
 
 ## Configuration Access
 
-- 設定値は必ず `config.Manager` 経由で取得する
-- `viper` を直接呼び出してはならない（config パッケージ外では）
-- `config.Manager` と `config.StateManager` は別物
+- Always access settings through `config.Manager`
+- Do not call `viper` directly (outside the config package)
+- `config.Manager` and `config.StateManager` are separate instances
 
 ## Concurrency
 
-- `sync.RWMutex` のフィールド名は `mu`
-- Lock ordering: session.Manager.mu が中心的なロック
-- I/O操作（Store.Save, transcript読み取り）はロック外で実行する
-  - 例: `List()` は RLock でスナップショット取得後、ロック外でtranscript読み取り
+- `sync.RWMutex` field name is `mu`
+- Lock ordering: session.Manager.mu is the central lock
+- Perform I/O operations (Store.Save, transcript reads) outside the lock
+  - Example: `List()` takes a snapshot under RLock, then reads transcripts after releasing the lock
 
 ## Naming
 
-- パッケージ名: 単数形 (`session`, `daemon`, `host`)
+- Package names: singular (`session`, `daemon`, `host`)
 - JSON tags: snake_case (`json:"work_dir"`)
-- Runtime-onlyフィールド: `json:"-"` タグ
-- 定数: `StatusXxx` 形式 (`StatusRunning`, `StatusIdle`)
+- Runtime-only fields: `json:"-"` tag
+- Constants: `StatusXxx` format (`StatusRunning`, `StatusIdle`)
 
 ## Struct Design
 
-- `Session`: 永続化フィールド + ランタイムフィールド（`json:"-"`）
-- `Info`: 外部公開用の読み取り専用構造体（`ToInfo()` で変換）
-- `Request`/`Response`: IPCメッセージ（`json.RawMessage` で型柔軟性確保）
+- `Session`: Persisted fields + runtime fields (`json:"-"`)
+- `Info`: Read-only struct for external use (converted via `ToInfo()`)
+- `Request`/`Response`: IPC messages (type flexibility via `json.RawMessage`)
 
 ## Testing
 
-カバレッジ約40%。全パッケージにテストファイルが存在する。
-標準ライブラリのみ使用（testify等なし）。同一パッケージテスト（`package X`）で非公開関数もテスト可能。
-テスタビリティのため `tmux.Runner` インターフェースを導入済み。
-新規コードには `_test.go` を追加すること。
+Coverage ~40%. Test files exist for all packages.
+Uses only the standard library (no testify, etc.). Same-package tests (`package X`) allow testing unexported functions.
+The `tmux.Runner` interface was introduced for testability.
+Add `_test.go` files for new code.

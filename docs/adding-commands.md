@@ -1,12 +1,12 @@
 # Adding CLI Commands
 
-## 手順
+## Steps
 
-### 1. コマンドファイル作成
+### 1. Create the Command File
 
-`cmd/ccvalet/cmd/` に新規 `.go` ファイルを作成。
+Create a new `.go` file in `cmd/ccvalet/cmd/`.
 
-### 2. Cobra コマンド定義
+### 2. Define the Cobra Command
 
 ```go
 package cmd
@@ -17,21 +17,21 @@ var myCmd = &cobra.Command{
     Use:   "my-command",
     Short: "Short description",
     RunE: func(cmd *cobra.Command, args []string) error {
-        // 実装
+        // Implementation
         return nil
     },
 }
 
 func init() {
-    // トップレベルコマンドの場合:
+    // For a top-level command:
     rootCmd.AddCommand(myCmd)
 
-    // sessionサブコマンドの場合:
+    // For a session subcommand:
     // sessionCmd.AddCommand(myCmd)
 }
 ```
 
-### 3. デーモン通信が必要な場合
+### 3. If Daemon Communication Is Needed
 
 ```go
 import "github.com/takaaki-s/claude-code-valet/internal/daemon"
@@ -42,14 +42,14 @@ if err != nil {
 }
 defer client.Close()
 
-// IPC呼び出し
+// IPC call
 resp, err := client.Send(daemon.Request{
     Action: "my-action",
     Data:   data,
 })
 ```
 
-### 4. コマンド階層
+### 4. Command Hierarchy
 
 ```
 ccvalet (root)
@@ -65,14 +65,14 @@ ccvalet (root)
 ├─ tui (alias: ui)
 ├─ hook
 ├─ cleanup stopped
-├─ create-popup   (Hidden, TUI popup用)
-├─ help-popup     (Hidden, TUI popup用)
-├─ notify-popup   (Hidden, TUI popup用)
-└─ (新規コマンドはここに追加)
+├─ create-popup   (Hidden, for TUI popup)
+├─ help-popup     (Hidden, for TUI popup)
+├─ notify-popup   (Hidden, for TUI popup)
+└─ (add new commands here)
 ```
 
-## 参考ファイル
+## Reference Files
 
-- シンプルなコマンド: `kill.go`, `list.go`
-- フラグ付きコマンド: `new.go`
-- サブコマンドグループ: `session.go`
+- Simple commands: `kill.go`, `list.go`
+- Commands with flags: `new.go`
+- Subcommand groups: `session.go`

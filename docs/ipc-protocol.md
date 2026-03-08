@@ -3,7 +3,7 @@
 ## Transport
 
 - Unix domain socket: `~/.ccvalet/run/daemon.sock`
-- 1リクエスト/1レスポンスで接続クローズ（コネクションプーリングなし）
+- One request / one response per connection (no connection pooling)
 - JSON encoding/decoding
 
 ## Message Format
@@ -25,17 +25,17 @@ type Response struct {
 
 ## Actions
 
-| Action | Data Type | 説明 |
-|--------|-----------|------|
-| `new` | `NewRequest` | セッション作成 |
-| `list` | (なし) | 全セッション一覧 |
-| `start` | `IDRequest` | セッション開始 |
-| `kill` | `IDRequest` | セッション終了 |
-| `delete` | `IDRequest` | セッション削除 |
-| `stop` | (なし) | デーモン停止 |
-| `list-hosts` | (なし) | ホスト一覧 |
-| `hook` | `HookRequest` | Claude Code hookイベント |
-| `notification-history` | (なし) | 通知履歴取得 |
+| Action | Data Type | Description |
+|--------|-----------|-------------|
+| `new` | `NewRequest` | Create session |
+| `list` | (none) | List all sessions |
+| `start` | `IDRequest` | Start session |
+| `kill` | `IDRequest` | Kill session |
+| `delete` | `IDRequest` | Delete session |
+| `stop` | (none) | Stop daemon |
+| `list-hosts` | (none) | List hosts |
+| `hook` | `HookRequest` | Claude Code hook event |
+| `notification-history` | (none) | Get notification history |
 
 ## Request Types
 
@@ -64,13 +64,13 @@ type HookRequest struct {
 
 ## Remote Forwarding
 
-`host_id` が "local" 以外の場合、Masterデーモンが該当Slaveへリクエストを転送する。
-転送時に `host_id` フィールドを除去し、Slaveが再帰転送しないようにする。
+When `host_id` is not "local", the Master daemon forwards the request to the corresponding Slave.
+The `host_id` field is stripped before forwarding to prevent recursive forwarding by the Slave.
 
-## 新規Action追加パターン
+## Adding a New Action
 
-1. `server.go` の `handleRequest()` switch に case 追加
-2. 必要に応じて Request 型を定義
-3. `handle{Action}()` メソッドを実装
-4. `client.go` に対応するメソッド追加
-5. `cmd/ccvalet/cmd/` にCLIコマンド追加（→ docs/adding-commands.md）
+1. Add a case to the `handleRequest()` switch in `server.go`
+2. Define a Request type if needed
+3. Implement a `handle{Action}()` method
+4. Add a corresponding method in `client.go`
+5. Add a CLI command in `cmd/ccvalet/cmd/` (→ docs/adding-commands.md)

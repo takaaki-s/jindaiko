@@ -1,52 +1,52 @@
 # Gotchas
 
-エージェントが陥りやすい落とし穴と注意事項。
+Common pitfalls and caveats that agents tend to fall into.
 
 ## tmux
 
-- **remain-on-exit はペインレベル**で設定する（グローバルではない）。
-  `TagManagedPane()` で管理対象ペインにのみ適用される。
-  ユーザーが追加したペインは即座に破棄される。
-  (commit 980e99f で修正)
+- **remain-on-exit is set at the pane level** (not globally).
+  `TagManagedPane()` applies it only to managed panes.
+  Panes added by the user are destroyed immediately.
+  (Fixed in commit 980e99f)
 
-- **tmux session名** は `tmux.SessionName` 定数（"ccvalet"）。変更してはならない。
+- **tmux session name** is the `tmux.SessionName` constant ("ccvalet"). Do not change it.
 
-- **inner tmux**: ccvaletは独自のtmuxソケット (`-L ccvalet`) を使用する。
-  ユーザーのメインtmuxとは別のサーバープロセス。
+- **inner tmux**: ccvalet uses its own tmux socket (`-L ccvalet`).
+  It runs as a separate server process from the user's main tmux.
 
-- **base-index問題**: ユーザーの `~/.tmux.conf` で `base-index=1` が設定されている場合、
-  `:0.0` ターゲットが無効になる。pane ID (`%N`) を使用すること。
+- **base-index issue**: If `base-index=1` is set in the user's `~/.tmux.conf`,
+  the `:0.0` target becomes invalid. Use pane IDs (`%N`) instead.
 
 ## Hook
 
-- **セッション識別は `CCVALET_SESSION_ID` 環境変数**（最も信頼性が高い）。
-  Claude Code の session ID はフォールバック。
-  (commit a0bd6f7 で改善)
+- **Session identification uses the `CCVALET_SESSION_ID` environment variable** (most reliable).
+  Claude Code's session ID is used as a fallback.
+  (Improved in commit a0bd6f7)
 
-- **CWD追従は hookの `cwd` フィールド**で行う。
-  tmux の `pane_current_path` もポーリングで取得するが、hookが優先。
-  (commit a705a80 で追加)
+- **CWD tracking uses the hook's `cwd` field**.
+  tmux's `pane_current_path` is also polled, but the hook takes priority.
+  (Added in commit a705a80)
 
-## コード構造
+## Code Structure
 
-- **debugLog/debugEnabled は daemon と session パッケージに重複**している（共通化されていない）。
-  新規パッケージでデバッグログが必要な場合は同じパターンを複製する。
+- **debugLog/debugEnabled are duplicated** in the daemon and session packages (not shared).
+  If a new package needs debug logging, duplicate the same pattern.
 
-- **config.Manager と config.StateManager は別**のインスタンス。混同しない。
+- **config.Manager and config.StateManager are separate** instances. Do not confuse them.
 
-- **Session.WorkDir は動的に変更される**（hookやtmuxポーリングで更新）。
-  初期値 = 作成時のディレクトリだが、claudeがcdすると追従する。
+- **Session.WorkDir is dynamically updated** (via hooks and tmux polling).
+  Initial value = directory at creation time, but it follows when claude changes directory.
 
-## テスト
+## Testing
 
-- **テストカバレッジは約40%**。全パッケージにテストファイルが存在する。
-  標準ライブラリのみ使用（testify等なし）。新規コードにはテストを追加すること。
-  テスタビリティのため `tmux.Runner` インターフェースを導入済み。
+- **Test coverage is ~40%**. Test files exist for all packages.
+  Uses only the standard library (no testify, etc.). Add tests for new code.
+  The `tmux.Runner` interface was introduced for testability.
 
-## 排他制御
+## Concurrency
 
-- **セッション作成は `createMu` で排他制御**される（daemon.Server レベル）。
-  `session.Manager.mu` とは別のロック。
+- **Session creation is protected by `createMu`** (at the daemon.Server level).
+  This is a separate lock from `session.Manager.mu`.
 
-- **I/O操作はロック外で実行**する（deadlock防止）。
-  `List()` のパターンを参照: RLock でスナップショット → ロック解除 → transcript読み取り
+- **I/O operations should be performed outside the lock** (to prevent deadlocks).
+  Refer to the `List()` pattern: take a snapshot under RLock → release lock → read transcripts
