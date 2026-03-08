@@ -12,35 +12,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/claude-code-valet/internal/debug"
 	"github.com/takaaki-s/claude-code-valet/internal/notify"
 	"github.com/takaaki-s/claude-code-valet/internal/tmux"
 	"github.com/takaaki-s/claude-code-valet/internal/transcript"
 	"os/exec"
 )
 
-// debugEnabled controls debug logging output
-var debugEnabled = os.Getenv("CCVALET_DEBUG") == "1"
-var debugLogPath string
-
-func init() {
-	if debugEnabled {
-		home, _ := os.UserHomeDir()
-		debugLogPath = filepath.Join(home, ".ccvalet", "daemon-debug.log")
-	}
-}
-
-func debugLog(format string, args ...any) {
-	if !debugEnabled || debugLogPath == "" {
-		return
-	}
-	f, err := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("15:04:05"), msg)
-}
+var debugLog = debug.NewLogger("daemon-debug.log")
 
 // Manager manages multiple Claude Code sessions
 type Manager struct {

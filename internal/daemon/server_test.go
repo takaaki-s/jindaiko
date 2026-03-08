@@ -1,9 +1,6 @@
 package daemon
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -88,74 +85,3 @@ func TestReplaceEnv_PrefixCollision(t *testing.T) {
 	}
 }
 
-func TestDebugLog_Disabled(t *testing.T) {
-	// Save and restore original values
-	origEnabled := debugEnabled
-	origPath := debugLogPath
-	defer func() {
-		debugEnabled = origEnabled
-		debugLogPath = origPath
-	}()
-
-	dir := t.TempDir()
-	logFile := filepath.Join(dir, "debug.log")
-
-	debugEnabled = false
-	debugLogPath = logFile
-
-	debugLog("this message should not appear")
-
-	// Verify file was NOT created
-	if _, err := os.Stat(logFile); err == nil {
-		t.Error("debugLog created a file even though debugEnabled=false")
-	}
-}
-
-func TestDebugLog_Enabled(t *testing.T) {
-	// Save and restore original values
-	origEnabled := debugEnabled
-	origPath := debugLogPath
-	defer func() {
-		debugEnabled = origEnabled
-		debugLogPath = origPath
-	}()
-
-	dir := t.TempDir()
-	logFile := filepath.Join(dir, "debug.log")
-
-	debugEnabled = true
-	debugLogPath = logFile
-
-	debugLog("hello %s %d", "world", 42)
-
-	// Verify file was created and contains the message
-	data, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("failed to read log file: %v", err)
-	}
-	content := string(data)
-
-	if !strings.Contains(content, "hello world 42") {
-		t.Errorf("log file content %q does not contain expected message", content)
-	}
-	// Verify timestamp format [HH:MM:SS] is present
-	if !strings.Contains(content, "[") || !strings.Contains(content, "]") {
-		t.Errorf("log file content %q does not contain timestamp brackets", content)
-	}
-}
-
-func TestDebugLog_EmptyPath(t *testing.T) {
-	// Save and restore original values
-	origEnabled := debugEnabled
-	origPath := debugLogPath
-	defer func() {
-		debugEnabled = origEnabled
-		debugLogPath = origPath
-	}()
-
-	debugEnabled = true
-	debugLogPath = ""
-
-	// Should not panic
-	debugLog("this should be a no-op with empty path")
-}

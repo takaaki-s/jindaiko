@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/takaaki-s/claude-code-valet/internal/daemon"
+	"github.com/takaaki-s/claude-code-valet/internal/debug"
 )
 
 // hookInput represents the JSON input from Claude Code hooks (stdin)
@@ -20,24 +18,7 @@ type hookInput struct {
 	CWD              string `json:"cwd,omitempty"`
 }
 
-// hookLog writes a debug log line to ~/.ccvalet/hook-debug.log when CCVALET_DEBUG=1.
-func hookLog(format string, args ...interface{}) {
-	if os.Getenv("CCVALET_DEBUG") != "1" {
-		return
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	logPath := filepath.Join(home, ".ccvalet", "hook-debug.log")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("15:04:05.000"), msg)
-}
+var hookLog = debug.NewLogger("hook-debug.log")
 
 var hookCmd = &cobra.Command{
 	Use:    "hook",

@@ -29,8 +29,8 @@ Common pitfalls and caveats that agents tend to fall into.
 
 ## Code Structure
 
-- **debugLog/debugEnabled are duplicated** in the daemon and session packages (not shared).
-  If a new package needs debug logging, duplicate the same pattern.
+- **Debug logging uses `internal/debug.NewLogger`**.
+  Call `var debugLog = debug.NewLogger("filename.log")` to get a logger for any package.
 
 - **config.Manager and config.StateManager are separate** instances. Do not confuse them.
 
