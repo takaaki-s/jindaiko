@@ -26,7 +26,6 @@ internal/
   tunnel/            SSHトンネルライフサイクル
   notify/            デスクトップ通知 (macOS/Linux)
   transcript/        Claude Code transcript読取 (~/.claude/projects/)
-  worktree/          Git worktree管理
 ```
 
 ## Docs

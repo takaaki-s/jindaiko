@@ -15,7 +15,7 @@ import (
 	"github.com/takaaki-s/claude-code-valet/internal/notify"
 	"github.com/takaaki-s/claude-code-valet/internal/tmux"
 	"github.com/takaaki-s/claude-code-valet/internal/transcript"
-	"github.com/takaaki-s/claude-code-valet/internal/worktree"
+	"os/exec"
 )
 
 // debugEnabled controls debug logging output
@@ -618,7 +618,9 @@ func (m *Manager) captureOutputTmux(session *Session) {
 
 				// Always check git branch (git rev-parse is lightweight, <5ms)
 				// Branch can change without CWD changing (e.g. git checkout)
-				if branch, err := worktree.GetCurrentBranch(currentPath); err == nil {
+				cmd := exec.Command("git", "-C", currentPath, "rev-parse", "--abbrev-ref", "HEAD")
+				if output, err := cmd.Output(); err == nil {
+					branch := strings.TrimSpace(string(output))
 					m.mu.Lock()
 					session.CurrentBranch = branch
 					session.IsGitRepo = true

@@ -50,7 +50,7 @@ cmd/ccvalet/cmd/   → daemon (client), config, session (types only)
                       │
 daemon/            → session, config, host, notify, tmux, tunnel
                       │
-session/           → config, tmux, notify, transcript, worktree
+session/           → config, tmux, notify, transcript
                       │
 host/              → config, tunnel, daemon (client)
                       │
@@ -61,7 +61,6 @@ tmux/              → (external: tmux CLI)
 tunnel/            → (external: ssh, docker CLI)
 notify/            → (external: OS notification)
 transcript/        → (file I/O: ~/.claude/projects/)
-worktree/          → (external: git CLI)
 ```
 
 configは多くのパッケージから参照される基盤パッケージ。
