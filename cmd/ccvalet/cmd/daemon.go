@@ -91,7 +91,7 @@ var daemonStopCmd = &cobra.Command{
 			return err
 		}
 		// Wait for daemon to actually exit (handleStop calls os.Exit in a goroutine)
-		for i := 0; i < 30; i++ {
+		for range 30 {
 			if !client.IsRunning() {
 				fmt.Println("Daemon stopped")
 				return nil

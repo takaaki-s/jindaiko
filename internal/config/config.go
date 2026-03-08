@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -17,10 +18,8 @@ var supportedDetachKeys = []string{"ctrl+^", "ctrl+]", "ctrl+\\", "ctrl+g"}
 // ValidateDetachKey checks whether the detach key is supported.
 // Returns an error listing supported keys if the key is not supported.
 func ValidateDetachKey(key string) error {
-	for _, k := range supportedDetachKeys {
-		if key == k {
-			return nil
-		}
+	if slices.Contains(supportedDetachKeys, key) {
+		return nil
 	}
 	return fmt.Errorf("unsupported detach key %q: supported keys are %s",
 		key, strings.Join(supportedDetachKeys, ", "))

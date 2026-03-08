@@ -125,7 +125,7 @@ func TestStateManager_RecordDirUsage_MaxLimit(t *testing.T) {
 	}
 
 	// Add 25 entries → should be trimmed to 20
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		path := filepath.Join("/home/user", string(rune('a'+i)))
 		if err := sm.RecordDirUsage("local", path); err != nil {
 			t.Fatalf("RecordDirUsage(%d): %v", i, err)
@@ -175,7 +175,7 @@ func TestStateManager_GetDirHistory_MaxEntries(t *testing.T) {
 		t.Fatalf("NewStateManager: %v", err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_ = sm.RecordDirUsage("local", filepath.Join("/home/user", string(rune('a'+i))))
 		time.Sleep(time.Millisecond)
 	}

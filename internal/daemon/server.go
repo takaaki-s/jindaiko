@@ -34,7 +34,7 @@ func init() {
 	}
 }
 
-func debugLog(format string, args ...interface{}) {
+func debugLog(format string, args ...any) {
 	if !debugEnabled || debugLogPath == "" {
 		return
 	}

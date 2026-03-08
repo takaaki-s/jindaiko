@@ -233,14 +233,10 @@ func (m *Model) getItemsPerPage() int {
 	if m.searching {
 		availableLines-- // search bar takes 1 line
 	}
-	if availableLines < 4 {
-		availableLines = 4
-	}
+	availableLines = max(availableLines, 4)
 	// Each session takes ~4 lines (name + status + meta + time)
 	items := availableLines / 4
-	if items < 1 {
-		items = 1
-	}
+	items = max(items, 1)
 	return items
 }
 
@@ -252,9 +248,7 @@ func (m *Model) getTotalPages() int {
 	}
 	itemsPerPage := m.getItemsPerPage()
 	totalPages := (len(sessions) + itemsPerPage - 1) / itemsPerPage
-	if totalPages < 1 {
-		totalPages = 1
-	}
+	totalPages = max(totalPages, 1)
 	return totalPages
 }
 
@@ -967,13 +961,9 @@ func (m Model) View() string {
 	}
 
 	boxWidth := m.width - 2
-	if boxWidth < 20 {
-		boxWidth = 20
-	}
+	boxWidth = max(boxWidth, 20)
 	boxHeight := m.height - 3
-	if boxHeight < 5 {
-		boxHeight = 5
-	}
+	boxHeight = max(boxHeight, 5)
 	boxStyle := createBoxStyle(boxWidth, boxHeight, m.focused)
 	box := boxStyle.Render(m.renderListContent(boxWidth - 4))
 	helpLine := m.renderHelpLine()
@@ -1002,9 +992,7 @@ func (m Model) renderListContent(contentWidth int) string {
 	titleLen := lipgloss.Width(title)
 	timeLen := len(timeDisplay)
 	headerSpacing := contentWidth - titleLen - timeLen
-	if headerSpacing < 2 {
-		headerSpacing = 2
-	}
+	headerSpacing = max(headerSpacing, 2)
 
 	content.WriteString(title)
 	content.WriteString(strings.Repeat(" ", headerSpacing))
@@ -1177,9 +1165,7 @@ func (m Model) renderSession(sess session.Info, selected bool, width int) string
 		prefix := "  ├─ 👤 "
 		pWidth := lipgloss.Width(prefix)
 		msgWidth := width - pWidth
-		if msgWidth < 10 {
-			msgWidth = 10
-		}
+		msgWidth = max(msgWidth, 10)
 		msgStr := truncateString(sess.LastUserMessage, msgWidth)
 
 		if selected {
@@ -1195,9 +1181,7 @@ func (m Model) renderSession(sess session.Info, selected bool, width int) string
 		prefix := "  ├─ 🤖 "
 		pWidth := lipgloss.Width(prefix)
 		msgWidth := width - pWidth
-		if msgWidth < 10 {
-			msgWidth = 10
-		}
+		msgWidth = max(msgWidth, 10)
 		msgStr := truncateStringFromEnd(sess.LastAssistantMessage, msgWidth)
 
 		if selected {
@@ -1396,8 +1380,7 @@ func wrapText(text string, width int) []string {
 
 	var lines []string
 	// First split by existing newlines
-	rawLines := strings.Split(text, "\n")
-	for _, rawLine := range rawLines {
+	for rawLine := range strings.SplitSeq(text, "\n") {
 		if runewidth.StringWidth(rawLine) <= width {
 			lines = append(lines, rawLine)
 			continue

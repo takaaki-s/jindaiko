@@ -82,7 +82,7 @@ func isNotInstalled(output string, err error) bool {
 	// Detect shell errors like "ccvalet: command not found" or "ccvalet: not found"
 	// Only check lines containing "ccvalet" to distinguish from SSH infrastructure
 	// errors (ControlPath etc.) that also contain "not found"
-	for _, line := range strings.Split(lower, "\n") {
+	for line := range strings.SplitSeq(lower, "\n") {
 		if !strings.Contains(line, "ccvalet") {
 			continue
 		}

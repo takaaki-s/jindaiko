@@ -723,13 +723,9 @@ func TestGetItemsPerPage(t *testing.T) {
 			if tt.searching {
 				availableLines--
 			}
-			if availableLines < 4 {
-				availableLines = 4
-			}
+			availableLines = max(availableLines, 4)
 			expected := availableLines / 4
-			if expected < 1 {
-				expected = 1
-			}
+			expected = max(expected, 1)
 			if got != expected {
 				t.Errorf("getItemsPerPage() = %d, want %d (height=%d, searching=%v)",
 					got, expected, tt.height, tt.searching)

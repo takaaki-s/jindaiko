@@ -25,7 +25,7 @@ type Session struct {
 	Status    Status    `json:"status"`
 
 	// Last active time (persisted)
-	LastActiveAt time.Time `json:"last_active_at,omitempty"`
+	LastActiveAt time.Time `json:"last_active_at,omitzero"`
 
 	// Error info
 	ErrorMessage string `json:"error_message,omitempty"` // Error message
@@ -59,7 +59,7 @@ type Info struct {
 	WorkDir         string    `json:"work_dir"`
 	Status          Status    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
-	LastActiveAt    time.Time `json:"last_active_at,omitempty"`
+	LastActiveAt    time.Time `json:"last_active_at,omitzero"`
 	ErrorMessage    string    `json:"error_message,omitempty"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
 	TmuxWindowName  string    `json:"tmux_window_name,omitempty"`  // tmux window name

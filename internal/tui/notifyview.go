@@ -72,9 +72,7 @@ func (m NotifyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m NotifyModel) visibleLines() int {
 	// Account for header (2 lines) and footer (2 lines)
 	lines := m.height - 4
-	if lines < 1 {
-		lines = 1
-	}
+	lines = max(lines, 1)
 	return lines
 }
 
@@ -100,10 +98,7 @@ func (m NotifyModel) View() string {
 	}
 
 	visibleLines := m.visibleLines()
-	end := m.scrollTop + visibleLines
-	if end > len(m.entries) {
-		end = len(m.entries)
-	}
+	end := min(m.scrollTop+visibleLines, len(m.entries))
 
 	for i := m.scrollTop; i < end; i++ {
 		entry := m.entries[i]

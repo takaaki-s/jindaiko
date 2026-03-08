@@ -517,9 +517,7 @@ func (m DirPickerModel) View() string {
 				historyHeight = historyLen + 1
 			}
 			dirVisibleLines := visibleLines - historyHeight - 1 // -1 for "Directories" header
-			if dirVisibleLines < 3 {
-				dirVisibleLines = 3
-			}
+			dirVisibleLines = max(dirVisibleLines, 3)
 
 			// Calculate scroll offset for directory section
 			dirOffset := 0
@@ -534,9 +532,7 @@ func (m DirPickerModel) View() string {
 			}
 
 			end := dirOffset + dirVisibleLines
-			if end > len(m.filtered) {
-				end = len(m.filtered)
-			}
+			end = min(end, len(m.filtered))
 			for i := dirOffset; i < end; i++ {
 				entry := m.filtered[i]
 				displayName := entry + "/"
