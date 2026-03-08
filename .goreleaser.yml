@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: ccvalet
+
+builds:
+  - main: ./cmd/ccvalet
+    binary: ccvalet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/takaaki-s/claude-code-valet/internal/version.Version={{.Version}}
+      - -X github.com/takaaki-s/claude-code-valet/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/takaaki-s/claude-code-valet/internal/version.Date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: takaaki-s
+    name: claude-code-valet
+  draft: false
+  prerelease: auto

@@ -14,6 +14,17 @@
 
 ## インストール
 
+### GitHub Releases からダウンロード
+
+[Releases ページ](https://github.com/takaaki-s/claude-code-valet/releases)からお使いの OS/アーキテクチャに合ったバイナリをダウンロードしてください。
+
+```bash
+# 例: Linux amd64
+curl -Lo ccvalet.tar.gz https://github.com/takaaki-s/claude-code-valet/releases/latest/download/ccvalet_0.1.0_linux_amd64.tar.gz
+tar xzf ccvalet.tar.gz
+sudo mv ccvalet /usr/local/bin/
+```
+
 ### Go install
 
 ```bash

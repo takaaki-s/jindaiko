@@ -4,12 +4,14 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/takaaki-s/claude-code-valet/internal/version"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "ccvalet",
-	Short: "LLM session manager for Claude Code",
-	Long:  `A CLI tool to manage multiple Claude Code sessions with attach/detach support.`,
+	Use:     "ccvalet",
+	Short:   "LLM session manager for Claude Code",
+	Long:    `A CLI tool to manage multiple Claude Code sessions with attach/detach support.`,
+	Version: version.Version,
 }
 
 // Execute runs the root command
@@ -20,5 +22,5 @@ func Execute() {
 }
 
 func init() {
-	// Global flags can be added here
+	rootCmd.SetVersionTemplate("ccvalet " + version.Full() + "\n")
 }
