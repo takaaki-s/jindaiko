@@ -9,9 +9,7 @@ _backup/
 .serena/cache
 
 # セッション引き継ぎ（個人用）
-#context.md
-#design.md
-#milestone.md
+.contexts/
 .claude/settings.local.json
 
 # ログ
