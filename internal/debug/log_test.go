@@ -27,7 +27,9 @@ func TestNewLogger_Disabled(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create .ccvalet directory
-	os.MkdirAll(filepath.Join(dir, ".ccvalet"), 0755)
+	if err := os.MkdirAll(filepath.Join(dir, ".ccvalet"), 0755); err != nil {
+		t.Fatalf("failed to create .ccvalet dir: %v", err)
+	}
 
 	log := NewLogger(filename)
 	log("this message should not appear")
@@ -48,7 +50,9 @@ func TestNewLogger_Enabled(t *testing.T) {
 	os.Setenv("HOME", dir)
 	defer os.Setenv("HOME", origHome)
 
-	os.MkdirAll(filepath.Join(dir, ".ccvalet"), 0755)
+	if err := os.MkdirAll(filepath.Join(dir, ".ccvalet"), 0755); err != nil {
+		t.Fatalf("failed to create .ccvalet dir: %v", err)
+	}
 
 	log := NewLogger("test-enabled.log")
 	log("hello %s %d", "world", 42)
