@@ -50,10 +50,9 @@ func TestNotifier_NotifyPermission(t *testing.T) {
 	// Disable to prevent actual notification sending
 	n.SetEnabled(false)
 
-	// Re-enable just the enabled flag but clear remote host so no actual send happens
+	// Re-enable just the enabled flag
 	n.mu.Lock()
 	n.enabled = true
-	n.remoteHost = ""
 	n.mu.Unlock()
 
 	n.NotifyPermission("sess-1", "my-session")
@@ -83,9 +82,6 @@ func TestNotifier_NotifyPermission(t *testing.T) {
 
 func TestNotifier_NotifyTaskComplete(t *testing.T) {
 	n := NewNotifier()
-	n.mu.Lock()
-	n.remoteHost = ""
-	n.mu.Unlock()
 
 	n.NotifyTaskComplete("sess-2", "build-session")
 
@@ -111,9 +107,6 @@ func TestNotifier_NotifyTaskComplete(t *testing.T) {
 
 func TestNotifier_NotificationHistory(t *testing.T) {
 	n := NewNotifier()
-	n.mu.Lock()
-	n.remoteHost = ""
-	n.mu.Unlock()
 
 	n.NotifyPermission("s1", "session-alpha")
 	n.NotifyTaskComplete("s2", "session-beta")
@@ -150,7 +143,6 @@ func TestNotifier_Debounce(t *testing.T) {
 	// Set a long debounce interval so the second call is definitely within it
 	n.mu.Lock()
 	n.debounceInterval = 10 * time.Second
-	n.remoteHost = ""
 	n.mu.Unlock()
 
 	// First call should update lastNotify
@@ -195,9 +187,6 @@ func TestNotifier_Debounce(t *testing.T) {
 
 func TestNotifier_Disabled(t *testing.T) {
 	n := NewNotifier()
-	n.mu.Lock()
-	n.remoteHost = ""
-	n.mu.Unlock()
 
 	n.SetEnabled(false)
 

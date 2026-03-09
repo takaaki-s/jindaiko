@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/takaaki-s/claude-code-valet/internal/config"
 	"github.com/takaaki-s/claude-code-valet/internal/debug"
@@ -35,6 +36,7 @@ type Server struct {
 	createMu     sync.Mutex      // Mutual exclusion for session creation
 	hostRegistry *host.Registry  // Multi-host management
 	tunnelMgr    *tunnel.Manager // SSH tunnel management
+	stopPoll     chan struct{}    // Signal to stop remote notification polling
 }
 
 // Message types
@@ -135,6 +137,11 @@ func (s *Server) Start() error {
 
 // Stop stops the daemon server
 func (s *Server) Stop() {
+	// Stop remote notification polling
+	if s.stopPoll != nil {
+		close(s.stopPoll)
+	}
+
 	// Clean up tunnels
 	if s.tunnelMgr != nil {
 		s.tunnelMgr.CloseAll()
@@ -472,6 +479,54 @@ func (s *Server) initRemoteSlaves() {
 		client := NewRemoteClient(localSocket, h.ID)
 		s.hostRegistry.SetClient(h.ID, client)
 		debugLog("[REMOTE] Connected to slave %s via %s", h.ID, localSocket)
+	}
+
+	// Start polling remote notification histories for desktop notifications
+	s.stopPoll = make(chan struct{})
+	go s.pollRemoteNotifications()
+}
+
+// pollRemoteNotifications periodically fetches notification histories from remote
+// slaves and fires local desktop notifications for any new entries.
+func (s *Server) pollRemoteNotifications() {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	// Track the latest timestamp seen per host to detect new entries
+	lastSeen := make(map[string]time.Time)
+
+	for {
+		select {
+		case <-s.stopPoll:
+			return
+		case <-ticker.C:
+		}
+
+		for _, h := range s.hostRegistry.Remotes() {
+			if h.Client == nil {
+				continue
+			}
+			entries, err := h.Client.NotificationHistoryWithHostID()
+			if err != nil {
+				continue
+			}
+			cutoff := lastSeen[h.ID]
+			for _, entry := range entries {
+				if !entry.Timestamp.After(cutoff) {
+					continue
+				}
+				// New entry — send local desktop notification
+				switch entry.Type {
+				case "permission":
+					s.manager.NotifyDesktop("Permission Required", entry.Message)
+				case "task_complete":
+					s.manager.NotifyDesktop("Task Complete", entry.Message)
+				}
+				if entry.Timestamp.After(lastSeen[h.ID]) {
+					lastSeen[h.ID] = entry.Timestamp
+				}
+			}
+		}
 	}
 }
 

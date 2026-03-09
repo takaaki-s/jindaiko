@@ -1,10 +1,7 @@
 package notify
 
 import (
-	"encoding/json"
 	"fmt"
-	"net"
-	"os"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -19,28 +16,16 @@ type Notifier struct {
 	mu         sync.Mutex
 	// Minimum interval between notifications for the same session
 	debounceInterval time.Duration
-	// Remote notification settings
-	remoteHost string
-	remotePort string
 	// Notification history
 	history *History
 }
 
 // NewNotifier creates a new notifier
 func NewNotifier() *Notifier {
-	// Check for remote notification settings
-	remoteHost := os.Getenv("LLM_MGR_NOTIFY_HOST")
-	remotePort := os.Getenv("LLM_MGR_NOTIFY_PORT")
-	if remotePort == "" {
-		remotePort = "60000" // Default port
-	}
-
 	return &Notifier{
 		enabled:          true,
 		lastNotify:       make(map[string]time.Time),
 		debounceInterval: 3 * time.Second,
-		remoteHost:       remoteHost,
-		remotePort:       remotePort,
 		history:          NewHistory(100),
 	}
 }
@@ -99,18 +84,16 @@ func (n *Notifier) notify(sessionID, title, message string) {
 		}
 	}
 	n.lastNotify[key] = time.Now()
-	remoteHost := n.remoteHost
-	remotePort := n.remotePort
 	n.mu.Unlock()
 
-	// Send notification asynchronously
-	if remoteHost != "" {
-		// Remote notification via TCP (for headless servers)
-		go func() { _ = sendRemoteNotification(remoteHost, remotePort, title, message) }()
-	} else {
-		// Local desktop notification
-		go func() { _ = sendDesktopNotification(title, message) }()
-	}
+	// Send local desktop notification asynchronously
+	go func() { _ = sendDesktopNotification(title, message) }()
+}
+
+// SendDesktop sends a desktop notification with the given title and message.
+// Used by the local daemon to relay notifications from remote slaves.
+func (n *Notifier) SendDesktop(title, message string) {
+	go func() { _ = sendDesktopNotification(title, message) }()
 }
 
 // sendDesktopNotification sends a desktop notification using OS-specific methods
@@ -139,32 +122,3 @@ func sendLinuxNotification(title, message string) error {
 	return cmd.Run()
 }
 
-// sendRemoteNotification sends a notification to a remote host via TCP
-// Compatible with notification-subscriber.sh format: {"title":"...", "message":"..."}
-func sendRemoteNotification(host, port, title, message string) error {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 5*time.Second)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	// Set write deadline
-	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return err
-	}
-
-	// Send JSON payload
-	payload := map[string]string{
-		"title":   title,
-		"message": message,
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	// Append newline for line-based reading
-	data = append(data, '\n')
-	_, err = conn.Write(data)
-	return err
-}

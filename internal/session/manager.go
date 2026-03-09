@@ -723,6 +723,11 @@ func (m *Manager) NotificationHistory() []notify.Entry {
 	return m.notifier.NotificationHistory()
 }
 
+// NotifyDesktop sends a local desktop notification (used for relaying remote events)
+func (m *Manager) NotifyDesktop(title, message string) {
+	m.notifier.SendDesktop(title, message)
+}
+
 // Kill terminates a session
 func (m *Manager) Kill(id string) error {
 	m.mu.Lock()
