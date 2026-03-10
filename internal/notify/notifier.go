@@ -111,7 +111,7 @@ func sendDesktopNotification(title, message string) error {
 
 // sendMacOSNotification sends a notification using osascript
 func sendMacOSNotification(title, message string) error {
-	script := fmt.Sprintf(`display notification %q with title %q`, message, title)
+	script := fmt.Sprintf(`display notification %q with title %q sound name "default"`, message, title)
 	cmd := exec.Command("osascript", "-e", script)
 	return cmd.Run()
 }
