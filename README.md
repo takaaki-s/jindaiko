@@ -4,6 +4,8 @@
 
 A CLI tool for running and managing multiple Claude Code sessions simultaneously.
 
+https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
+
 ## Features
 
 - **Multi-session management**: Run multiple Claude Code sessions in the background simultaneously

@@ -4,10 +4,7 @@
 
 複数の Claude Code セッションを同時に稼働させ、一元管理するための CLI ツール。
 
-<video controls width="600">
-  <source src="https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4" type="video/mp4">
-    Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 
 ## 特長
 
