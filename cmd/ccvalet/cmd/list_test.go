@@ -1,6 +1,13 @@
 package cmd
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/takaaki-s/claude-code-valet/internal/session"
+)
 
 func TestTruncatePath(t *testing.T) {
 	tests := []struct {
@@ -116,4 +123,63 @@ func TestTruncateStr(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderSessionListJSON(t *testing.T) {
+	t.Run("with sessions", func(t *testing.T) {
+		sessions := []session.Info{
+			{
+				ID:        "abc-123",
+				Name:      "my-session",
+				WorkDir:   "/home/user/project",
+				Status:    session.StatusIdle,
+				CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			},
+		}
+		var buf bytes.Buffer
+		if err := renderSessionListJSON(&buf, sessions); err != nil {
+			t.Fatalf("renderSessionListJSON() error = %v", err)
+		}
+		var parsed []session.Info
+		if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+			t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+		}
+		if len(parsed) != 1 {
+			t.Errorf("expected 1 session, got %d", len(parsed))
+		}
+		if parsed[0].Name != "my-session" {
+			t.Errorf("expected name %q, got %q", "my-session", parsed[0].Name)
+		}
+		if parsed[0].Status != session.StatusIdle {
+			t.Errorf("expected status %q, got %q", session.StatusIdle, parsed[0].Status)
+		}
+	})
+
+	t.Run("nil sessions outputs empty array", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := renderSessionListJSON(&buf, nil); err != nil {
+			t.Fatalf("renderSessionListJSON() error = %v", err)
+		}
+		var parsed []session.Info
+		if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+			t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+		}
+		if len(parsed) != 0 {
+			t.Errorf("expected 0 sessions, got %d", len(parsed))
+		}
+	})
+
+	t.Run("empty slice outputs empty array", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := renderSessionListJSON(&buf, []session.Info{}); err != nil {
+			t.Fatalf("renderSessionListJSON() error = %v", err)
+		}
+		var parsed []session.Info
+		if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+			t.Fatalf("output is not valid JSON: %v\noutput: %s", err, buf.String())
+		}
+		if len(parsed) != 0 {
+			t.Errorf("expected 0 sessions, got %d", len(parsed))
+		}
+	})
 }

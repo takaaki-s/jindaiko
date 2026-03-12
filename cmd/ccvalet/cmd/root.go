@@ -7,6 +7,8 @@ import (
 	"github.com/takaaki-s/claude-code-valet/internal/version"
 )
 
+var jsonOutput bool
+
 var rootCmd = &cobra.Command{
 	Use:     "ccvalet",
 	Short:   "LLM session manager for Claude Code",
@@ -22,5 +24,6 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 	rootCmd.SetVersionTemplate("ccvalet " + version.Full() + "\n")
 }

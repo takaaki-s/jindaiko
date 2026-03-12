@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/takaaki-s/claude-code-valet/internal/daemon"
+	"github.com/takaaki-s/claude-code-valet/internal/session"
 )
 
 var listCmd = &cobra.Command{
@@ -20,6 +22,13 @@ var listCmd = &cobra.Command{
 		sessions, err := client.List()
 		if err != nil {
 			return err
+		}
+
+		if jsonOutput {
+			if sessions == nil {
+				sessions = []session.Info{}
+			}
+			return printJSON(sessions)
 		}
 
 		if len(sessions) == 0 {
@@ -72,6 +81,13 @@ var listCmd = &cobra.Command{
 
 func init() {
 	sessionCmd.AddCommand(listCmd)
+}
+
+func renderSessionListJSON(w io.Writer, sessions []session.Info) error {
+	if sessions == nil {
+		sessions = []session.Info{}
+	}
+	return writeJSON(w, sessions)
 }
 
 func truncatePath(path string, maxLen int) string {
