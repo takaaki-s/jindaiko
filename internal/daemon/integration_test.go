@@ -15,18 +15,30 @@ import (
 	"github.com/takaaki-s/claude-code-valet/internal/session"
 )
 
-// setupTestServer creates a Server and Client connected via a Unix socket in t.TempDir().
+// shortTempDir creates a short temporary directory under /tmp to avoid macOS
+// Unix socket path length limit (104 bytes). t.TempDir() paths are too long.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ccv-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+// setupTestServer creates a Server and Client connected via a Unix socket.
 // The server runs in a background goroutine and is stopped on test cleanup.
 // We manage the listener directly to avoid data races in Server.Start()/Stop().
 func setupTestServer(t *testing.T) (*Server, *Client) {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	tmpDir := shortTempDir(t)
+	socketPath := filepath.Join(tmpDir, "t.sock")
 	dataDir := filepath.Join(tmpDir, "sessions")
 	configDir := filepath.Join(tmpDir, "config")
 
-	server, err := NewServer(socketPath, dataDir, configDir)
+	server, err := NewServer(socketPath, dataDir, configDir, "local")
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -746,6 +758,10 @@ func (m *mockSlaveClient) ListWithHostID() ([]session.Info, error) {
 
 func (m *mockSlaveClient) NotificationHistoryWithHostID() ([]notify.Entry, error) {
 	return m.entries, m.err
+}
+
+func (m *mockSlaveClient) SendRaw(action string, data, visited []byte) ([]byte, error) {
+	return []byte(`{"success":true}`), nil
 }
 
 func TestPollRemoteOnce_NewEntries(t *testing.T) {

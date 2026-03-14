@@ -13,6 +13,9 @@ type SlaveClient interface {
 	IsRunning() bool
 	ListWithHostID() ([]session.Info, error)
 	NotificationHistoryWithHostID() ([]notify.Entry, error)
+	// SendRaw sends a raw JSON request and returns a raw JSON response.
+	// This avoids importing daemon types in the host package (no circular dependency).
+	SendRaw(action string, data, visited []byte) ([]byte, error)
 }
 
 // Host represents a host and its slave client pair
@@ -21,6 +24,7 @@ type Host struct {
 	Type   string            // "local", "ssh", "docker"
 	Config config.HostConfig // Host configuration
 	Client SlaveClient       // Connection to slave daemon (interface)
+	IsPeer bool              // true if this host was registered via reverse tunnel (peer)
 }
 
 // Registry manages the list of hosts
@@ -90,14 +94,14 @@ func (r *Registry) All() []*Host {
 	return result
 }
 
-// Remotes returns only remote hosts
+// Remotes returns only configured remote hosts (excludes local and peers)
 func (r *Registry) Remotes() []*Host {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []*Host
 	for _, h := range r.hosts {
-		if h.ID != "local" {
+		if h.ID != "local" && !h.IsPeer {
 			result = append(result, h)
 		}
 	}
@@ -126,6 +130,47 @@ func (r *Registry) SetClient(hostID string, client SlaveClient) {
 	if h, ok := r.hosts[hostID]; ok {
 		h.Client = client
 	}
+}
+
+// RegisterPeer registers a peer host (connected via reverse tunnel).
+// Overwrites any existing entry with the same ID (e.g., on reconnect).
+func (r *Registry) RegisterPeer(id, hostType string, client SlaveClient) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hosts[id] = &Host{
+		ID:     id,
+		Type:   hostType,
+		Client: client,
+		IsPeer: true,
+	}
+}
+
+// Peers returns only peer hosts (registered via reverse tunnel)
+func (r *Registry) Peers() []*Host {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*Host
+	for _, h := range r.hosts {
+		if h.IsPeer {
+			result = append(result, h)
+		}
+	}
+	return result
+}
+
+// AllReachable returns all non-local hosts (remotes + peers)
+func (r *Registry) AllReachable() []*Host {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*Host
+	for _, h := range r.hosts {
+		if h.ID != "local" {
+			result = append(result, h)
+		}
+	}
+	return result
 }
 
 // IsConnected returns whether the host is connected

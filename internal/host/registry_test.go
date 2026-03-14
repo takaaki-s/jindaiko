@@ -19,6 +19,9 @@ type mockSlaveClient struct {
 func (m *mockSlaveClient) IsRunning() bool                                    { return m.running }
 func (m *mockSlaveClient) ListWithHostID() ([]session.Info, error)            { return m.sessions, nil }
 func (m *mockSlaveClient) NotificationHistoryWithHostID() ([]notify.Entry, error) { return m.entries, nil }
+func (m *mockSlaveClient) SendRaw(action string, data, visited []byte) ([]byte, error) {
+	return []byte(`{"success":true}`), nil
+}
 
 // twoSSHHostConfigs returns a pair of SSH host configs for use in tests.
 func twoSSHHostConfigs() []config.HostConfig {

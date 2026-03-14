@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/takaaki-s/claude-code-valet/internal/config"
 )
@@ -18,14 +19,51 @@ const (
 	defaultRemoteSocketPath = "~/.ccvalet/run/daemon.sock"
 )
 
+// BootstrapOptions configures optional peer information for the slave daemon
+type BootstrapOptions struct {
+	PeerSocketPath string // Reverse tunnel socket path on remote (e.g., /tmp/ccvalet-peers/mac/daemon.sock)
+	PeerHostID     string // Master daemon's host ID
+}
+
+// ValidateIdentifier checks that a string contains only safe characters for use
+// in shell commands (letters, digits, hyphens, underscores).
+func ValidateIdentifier(s string) error {
+	if s == "" {
+		return fmt.Errorf("identifier must not be empty")
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' {
+			return fmt.Errorf("invalid character %q in identifier %q", r, s)
+		}
+	}
+	return nil
+}
+
+// validatePath checks that a string contains only safe characters for a file path.
+func validatePath(s string) error {
+	if s == "" {
+		return fmt.Errorf("path must not be empty")
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) &&
+			r != '-' && r != '_' && r != '/' && r != '.' && r != '~' {
+			return fmt.Errorf("invalid character %q in path %q", r, s)
+		}
+	}
+	return nil
+}
+
 // StartSlaveCommand generates a command to start the slave daemon on a remote host
-func StartSlaveCommand(hostConfig config.HostConfig) *exec.Cmd {
+func StartSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *exec.Cmd {
 	socketPath := hostConfig.SocketPath
 	if socketPath == "" {
 		socketPath = defaultRemoteSocketPath
 	}
 
 	remoteCmd := fmt.Sprintf("ccvalet daemon start --socket %s", socketPath)
+	if len(opts) > 0 && opts[0].PeerSocketPath != "" && opts[0].PeerHostID != "" {
+		remoteCmd += fmt.Sprintf(" --peer-socket %s --peer-id %s", opts[0].PeerSocketPath, opts[0].PeerHostID)
+	}
 
 	switch hostConfig.Type {
 	case "ssh":
@@ -47,8 +85,18 @@ func StartSlaveCommand(hostConfig config.HostConfig) *exec.Cmd {
 
 // StartSlave starts the slave daemon on a remote host and returns the result.
 // Returns an error if ccvalet is not installed on the remote host.
-func StartSlave(hostConfig config.HostConfig) error {
-	cmd := StartSlaveCommand(hostConfig)
+func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
+	// Validate peer options before building the shell command (prevent injection)
+	if len(opts) > 0 && opts[0].PeerSocketPath != "" && opts[0].PeerHostID != "" {
+		if err := validatePath(opts[0].PeerSocketPath); err != nil {
+			return fmt.Errorf("invalid peer socket path: %w", err)
+		}
+		if err := ValidateIdentifier(opts[0].PeerHostID); err != nil {
+			return fmt.Errorf("invalid peer host ID: %w", err)
+		}
+	}
+
+	cmd := StartSlaveCommand(hostConfig, opts...)
 	if cmd == nil {
 		return fmt.Errorf("unsupported host type: %s", hostConfig.Type)
 	}
