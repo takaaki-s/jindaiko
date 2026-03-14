@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ var debugLog = debug.NewLogger("daemon-debug.log")
 // Server is the daemon server
 type Server struct {
 	socketPath   string
+	hostID       string          // This daemon's host ID (e.g., "mac", "ec2"; default "local")
 	manager      *session.Manager
 	configMgr    *config.Manager
 	stateMgr     *config.StateManager
@@ -42,8 +44,12 @@ type Server struct {
 
 // Message types
 type Request struct {
-	Action string          `json:"action"`
-	Data   json.RawMessage `json:"data,omitempty"`
+	Action  string          `json:"action"`
+	Data    json.RawMessage `json:"data,omitempty"`
+	// Visited tracks host IDs that have already processed this request.
+	// Used by forwardToHost (targeted routing) and handleList/handleNotificationHistory
+	// (aggregation) to prevent routing loops in bidirectional daemon topologies.
+	Visited []string `json:"visited,omitempty"`
 }
 
 type Response struct {
@@ -53,7 +59,7 @@ type Response struct {
 }
 
 // NewServer creates a new daemon server
-func NewServer(socketPath, dataDir, configDir string) (*Server, error) {
+func NewServer(socketPath, dataDir, configDir, hostID string) (*Server, error) {
 	configMgr, err := config.NewManager(configDir)
 	if err != nil {
 		return nil, err
@@ -78,18 +84,23 @@ func NewServer(socketPath, dataDir, configDir string) (*Server, error) {
 		}
 	}
 
+	if hostID == "" {
+		hostID = "local"
+	}
+
 	s := &Server{
 		socketPath: socketPath,
+		hostID:     hostID,
 		manager:    mgr,
 		configMgr:  configMgr,
 		stateMgr:   stateMgr,
 	}
 
-	// Initialize multi-host support
+	// Initialize multi-host support (always create registry for peer registration)
 	hosts := configMgr.GetHosts()
+	s.tunnelMgr = tunnel.NewManager()
+	s.hostRegistry = host.NewRegistry(hosts)
 	if len(hosts) > 0 {
-		s.tunnelMgr = tunnel.NewManager()
-		s.hostRegistry = host.NewRegistry(hosts)
 		s.initRemoteSlaves()
 	}
 
@@ -178,7 +189,7 @@ func (s *Server) handleRequest(req *Request) Response {
 	case "new":
 		return s.handleNew(req.Data)
 	case "list":
-		return s.handleList()
+		return s.handleList(req.Visited)
 	case "get":
 		return s.handleGet(req.Data)
 	case "send":
@@ -196,7 +207,7 @@ func (s *Server) handleRequest(req *Request) Response {
 	case "hook":
 		return s.handleHook(req.Data)
 	case "notification-history":
-		return s.handleNotificationHistory()
+		return s.handleNotificationHistory(req.Visited)
 	case "dir-history":
 		return s.handleDirHistory(req.Data)
 	case "remove-dir-history":
@@ -224,45 +235,51 @@ func (s *Server) handleHook(data json.RawMessage) Response {
 	return Response{Success: true}
 }
 
-func (s *Server) handleNotificationHistory() Response {
+func (s *Server) handleNotificationHistory(visited []string) Response {
+	// Copy and add self to visited (avoid mutating caller's backing array)
+	visited = append(append([]string(nil), visited...), s.hostID)
+
 	// Get local notification history
 	localEntries := s.manager.NotificationHistory()
 	for i := range localEntries {
 		if localEntries[i].HostID == "" {
-			localEntries[i].HostID = "local"
+			localEntries[i].HostID = s.hostID
 		}
 	}
 
-	// Return only local if no remote hosts
+	// Return only local if no host registry
 	if s.hostRegistry == nil {
 		data, _ := json.Marshal(localEntries)
 		return Response{Success: true, Data: data}
 	}
 
-	// Fetch remote notification history in parallel and merge
+	// Fetch from all reachable hosts in parallel, skipping visited
 	allEntries := localEntries
-	remotes := s.hostRegistry.Remotes()
+	reachable := s.hostRegistry.AllReachable()
 
-	if len(remotes) > 0 {
+	var targets []*host.Host
+	for _, h := range reachable {
+		if !slices.Contains(visited, h.ID) && h.Client != nil {
+			targets = append(targets, h)
+		}
+	}
+
+	if len(targets) > 0 {
 		type remoteResult struct {
 			entries []notify.Entry
 			err     error
 			hostID  string
 		}
 
-		results := make(chan remoteResult, len(remotes))
-		for _, h := range remotes {
+		results := make(chan remoteResult, len(targets))
+		for _, h := range targets {
 			go func(rh *host.Host) {
-				if rh.Client == nil {
-					results <- remoteResult{hostID: rh.ID, err: fmt.Errorf("not connected")}
-					return
-				}
 				entries, err := rh.Client.NotificationHistoryWithHostID()
 				results <- remoteResult{entries: entries, err: err, hostID: rh.ID}
 			}(h)
 		}
 
-		for range remotes {
+		for range targets {
 			result := <-results
 			if result.err != nil {
 				debugLog("[REMOTE] Failed to get notification history from %s: %v", result.hostID, result.err)
@@ -301,7 +318,7 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 		// The slave uses its own SSH_AUTH_SOCK from the SSH tunnel.
 		req.SSHAuthSock = ""
 		forwardData, _ := json.Marshal(req)
-		return s.forwardToSlave(req.HostID, Request{Action: "new", Data: forwardData})
+		return s.forwardToHost(req.HostID, Request{Action: "new", Data: forwardData})
 	}
 
 	// Synchronous mode - mutual exclusion
@@ -337,45 +354,51 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 	return Response{Success: true, Data: respData}
 }
 
-func (s *Server) handleList() Response {
+func (s *Server) handleList(visited []string) Response {
+	// Copy and add self to visited (avoid mutating caller's backing array)
+	visited = append(append([]string(nil), visited...), s.hostID)
+
 	// Get local session list
 	localSessions := s.manager.List()
 	for i := range localSessions {
 		if localSessions[i].HostID == "" {
-			localSessions[i].HostID = "local"
+			localSessions[i].HostID = s.hostID
 		}
 	}
 
-	// Return only local if no remote hosts
+	// Return only local if no host registry
 	if s.hostRegistry == nil {
 		data, _ := json.Marshal(localSessions)
 		return Response{Success: true, Data: data}
 	}
 
-	// Fetch remote session list in parallel and merge
+	// Fetch from all reachable hosts (remotes + peers) in parallel, skipping visited
 	allSessions := localSessions
-	remotes := s.hostRegistry.Remotes()
+	reachable := s.hostRegistry.AllReachable()
 
-	if len(remotes) > 0 {
+	var targets []*host.Host
+	for _, h := range reachable {
+		if !slices.Contains(visited, h.ID) && h.Client != nil {
+			targets = append(targets, h)
+		}
+	}
+
+	if len(targets) > 0 {
 		type remoteResult struct {
 			sessions []session.Info
 			err      error
 			hostID   string
 		}
 
-		results := make(chan remoteResult, len(remotes))
-		for _, h := range remotes {
+		results := make(chan remoteResult, len(targets))
+		for _, h := range targets {
 			go func(rh *host.Host) {
-				if rh.Client == nil {
-					results <- remoteResult{hostID: rh.ID, err: fmt.Errorf("not connected")}
-					return
-				}
 				sessions, err := rh.Client.ListWithHostID()
 				results <- remoteResult{sessions: sessions, err: err, hostID: rh.ID}
 			}(h)
 		}
 
-		for range remotes {
+		for range targets {
 			result := <-results
 			if result.err != nil {
 				debugLog("[REMOTE] Failed to list from %s: %v", result.hostID, result.err)
@@ -397,7 +420,7 @@ func (s *Server) handleGet(data json.RawMessage) Response {
 
 	// Forward to the corresponding slave if destined for a remote host
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToSlave(req.HostID, Request{Action: "get", Data: data})
+		return s.forwardToHost(req.HostID, Request{Action: "get", Data: data})
 	}
 
 	sess, ok := s.manager.Get(req.ID)
@@ -442,7 +465,7 @@ func (s *Server) handleSend(data json.RawMessage) Response {
 
 	// Forward to the corresponding slave if destined for a remote host
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToSlave(req.HostID, Request{Action: "send", Data: data})
+		return s.forwardToHost(req.HostID, Request{Action: "send", Data: data})
 	}
 
 	if req.Prompt == "" {
@@ -467,7 +490,7 @@ func (s *Server) handleStart(data json.RawMessage) Response {
 
 	// Forward to the corresponding slave if destined for a remote host
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToSlave(req.HostID, Request{Action: "start", Data: data})
+		return s.forwardToHost(req.HostID, Request{Action: "start", Data: data})
 	}
 
 	if err := s.manager.StartBackground(req.ID); err != nil {
@@ -485,7 +508,7 @@ func (s *Server) handleKill(data json.RawMessage) Response {
 
 	// Forward to the corresponding slave if destined for a remote host
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToSlave(req.HostID, Request{Action: "kill", Data: data})
+		return s.forwardToHost(req.HostID, Request{Action: "kill", Data: data})
 	}
 
 	if err := s.manager.Kill(req.ID); err != nil {
@@ -503,7 +526,7 @@ func (s *Server) handleDelete(data json.RawMessage) Response {
 
 	// Forward to the corresponding slave if destined for a remote host
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToSlave(req.HostID, Request{Action: "delete", Data: data})
+		return s.forwardToHost(req.HostID, Request{Action: "delete", Data: data})
 	}
 
 	if err := s.manager.Delete(req.ID); err != nil {
@@ -522,6 +545,15 @@ func (s *Server) handleStop() Response {
 	return Response{Success: true}
 }
 
+// RegisterPeer registers a peer daemon (connected via reverse tunnel)
+func (s *Server) RegisterPeer(id, hostType string, client host.SlaveClient) {
+	if s.hostRegistry == nil {
+		return
+	}
+	s.hostRegistry.RegisterPeer(id, hostType, client)
+	debugLog("[PEER] Registered peer %s (type: %s)", id, hostType)
+}
+
 // --- Multi-host support ---
 
 // initRemoteSlaves starts slave daemons on remote hosts, establishes tunnels, and sets up daemon clients
@@ -530,16 +562,34 @@ func (s *Server) initRemoteSlaves() {
 		return
 	}
 
+	// Validate hostID before using it in shell commands (reverse tunnel, bootstrap)
+	if err := host.ValidateIdentifier(s.hostID); err != nil {
+		debugLog("[REMOTE] Invalid host ID %q: %v", s.hostID, err)
+		return
+	}
+
 	for _, h := range s.hostRegistry.Remotes() {
+		// Build peer options for bidirectional routing
+		peerSocketPath := filepath.Join(tunnel.PeerSocketDir, s.hostID, "daemon.sock")
+		bootstrapOpts := host.BootstrapOptions{
+			PeerSocketPath: peerSocketPath,
+			PeerHostID:     s.hostID,
+		}
+		tunnelOpts := tunnel.TunnelOptions{
+			ReverseEnabled:    true,
+			LocalHostID:       s.hostID,
+			LocalDaemonSocket: s.socketPath,
+		}
+
 		// Step 1: Auto-start slave daemon (idempotent: no-op if already running)
-		if err := host.StartSlave(h.Config); err != nil {
+		if err := host.StartSlave(h.Config, bootstrapOpts); err != nil {
 			debugLog("[REMOTE] Failed to start slave on %s: %v", h.ID, err)
 			continue
 		}
 		debugLog("[REMOTE] Slave started on %s", h.ID)
 
-		// Step 2: Establish SSH tunnel / Docker connection
-		localSocket, err := s.tunnelMgr.Open(h.Config)
+		// Step 2: Establish SSH tunnel / Docker connection (with reverse tunnel)
+		localSocket, err := s.tunnelMgr.Open(h.Config, tunnelOpts)
 		if err != nil {
 			debugLog("[REMOTE] Failed to open tunnel to %s: %v", h.ID, err)
 			continue
@@ -580,7 +630,7 @@ func (s *Server) pollRemoteNotifications() {
 // It fetches notification histories from all remote slaves, compares against
 // lastSeen timestamps, and sends local desktop notifications for new entries.
 func (s *Server) pollRemoteOnce(lastSeen map[string]time.Time) {
-	for _, h := range s.hostRegistry.Remotes() {
+	for _, h := range s.hostRegistry.AllReachable() {
 		if h.Client == nil {
 			continue
 		}
@@ -607,10 +657,15 @@ func (s *Server) pollRemoteOnce(lastSeen map[string]time.Time) {
 	}
 }
 
-// forwardToSlave forwards a request to a remote slave
-func (s *Server) forwardToSlave(hostID string, req Request) Response {
+// forwardToHost forwards a request to a remote or peer host using visited-based routing
+func (s *Server) forwardToHost(hostID string, req Request) Response {
 	if s.hostRegistry == nil {
 		return Response{Success: false, Error: "host registry not initialized"}
+	}
+
+	// Check for routing loop
+	if slices.Contains(req.Visited, hostID) {
+		return Response{Success: false, Error: "routing loop detected"}
 	}
 
 	h, ok := s.hostRegistry.Get(hostID)
@@ -622,28 +677,24 @@ func (s *Server) forwardToSlave(hostID string, req Request) Response {
 		return Response{Success: false, Error: fmt.Sprintf("host %s not connected", hostID)}
 	}
 
-	// Cast from SlaveClient interface to *Client
-	client, ok := h.Client.(*Client)
-	if !ok {
-		return Response{Success: false, Error: fmt.Sprintf("host %s has incompatible client type", hostID)}
-	}
+	// Add self to visited list before forwarding (copy to avoid mutating caller's slice)
+	visited := make([]string, len(req.Visited)+1)
+	copy(visited, req.Visited)
+	visited[len(req.Visited)] = s.hostID
+	req.Visited = visited
 
-	// Strip host_id from request data before forwarding to slave
-	// Prevents the slave from trying to forward again based on host_id
-	if req.Data != nil {
-		var m map[string]json.RawMessage
-		if err := json.Unmarshal(req.Data, &m); err == nil {
-			delete(m, "host_id")
-			req.Data, _ = json.Marshal(m)
-		}
-	}
-
-	resp, err := client.send(req)
+	// Use SlaveClient interface — no type assertion needed
+	visitedJSON, _ := json.Marshal(req.Visited)
+	rawResp, err := h.Client.SendRaw(req.Action, req.Data, visitedJSON)
 	if err != nil {
 		return Response{Success: false, Error: fmt.Sprintf("failed to forward to %s: %v", hostID, err)}
 	}
 
-	return *resp
+	var resp Response
+	if err := json.Unmarshal(rawResp, &resp); err != nil {
+		return Response{Success: false, Error: fmt.Sprintf("failed to decode response from %s: %v", hostID, err)}
+	}
+	return resp
 }
 
 // --- Host info queries ---
@@ -653,20 +704,22 @@ type HostInfo struct {
 	ID        string `json:"id"`
 	Type      string `json:"type"`
 	Connected bool   `json:"connected"`
+	IsPeer    bool   `json:"is_peer,omitempty"`
 }
 
 func (s *Server) handleListHosts() Response {
 	hosts := []HostInfo{
-		{ID: "local", Type: "local", Connected: true},
+		{ID: s.hostID, Type: "local", Connected: true},
 	}
 
 	if s.hostRegistry != nil {
-		for _, h := range s.hostRegistry.Remotes() {
+		for _, h := range s.hostRegistry.AllReachable() {
 			connected := h.Client != nil && h.Client.IsRunning()
 			hosts = append(hosts, HostInfo{
 				ID:        h.ID,
 				Type:      h.Type,
 				Connected: connected,
+				IsPeer:    h.IsPeer,
 			})
 		}
 	}

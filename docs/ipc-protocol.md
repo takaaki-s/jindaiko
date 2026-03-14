@@ -11,8 +11,9 @@
 ```go
 // Request (client → server)
 type Request struct {
-    Action string          `json:"action"`
-    Data   json.RawMessage `json:"data,omitempty"`
+    Action  string          `json:"action"`
+    Data    json.RawMessage `json:"data,omitempty"`
+    Visited []string        `json:"visited,omitempty"` // Host IDs already visited (loop prevention)
 }
 
 // Response (server → client)
@@ -62,10 +63,21 @@ type HookRequest struct {
 }
 ```
 
-## Remote Forwarding
+## Bidirectional Routing
 
-When `host_id` is not "local", the Master daemon forwards the request to the corresponding Slave.
-The `host_id` field is stripped before forwarding to prevent recursive forwarding by the Slave.
+Daemons use visited-based routing to support bidirectional communication between hosts.
+
+When `host_id` is not "local" and not the current daemon's own host ID, the request is forwarded to the target host. Before forwarding, the current daemon's `hostID` is appended to `req.Visited`. If the target `hostID` is already in `Visited`, a "routing loop detected" error is returned.
+
+For aggregation actions (`list`, `notification-history`), the daemon queries all reachable hosts (configured remotes + peers registered via reverse tunnel), skipping any host already in `Visited`.
+
+### Peer Registration
+
+A peer is a daemon connected via SSH reverse tunnel (`-R`). When the master starts a slave, it passes `--peer-socket` and `--peer-id` flags. The slave uses these to register the master as a peer, enabling bidirectional communication.
+
+### Host ID
+
+Each daemon has a `hostID` (flag `--host-id` > config `host_id` > default `"local"`). This ID is used in `Visited` arrays and for tagging sessions/notifications.
 
 ## Adding a New Action
 

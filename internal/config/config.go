@@ -63,6 +63,7 @@ type HostConfig struct {
 
 // Config represents the application-wide configuration
 type Config struct {
+	HostID      string            `mapstructure:"host_id,omitempty"`     // This daemon's host ID (default: "local")
 	Keybindings KeybindingsConfig `mapstructure:"keybindings,omitempty"` // Keybinding settings
 	Hosts       []HostConfig      `mapstructure:"hosts,omitempty"`       // Remote host settings
 }
@@ -300,6 +301,13 @@ func (m *Manager) GetKeybindings() KeybindingsConfig {
 	}
 
 	return cfg
+}
+
+// GetHostID returns the configured host ID (empty string if not set)
+func (m *Manager) GetHostID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.HostID
 }
 
 // GetDetachKey returns the byte value of the detach key used while attached

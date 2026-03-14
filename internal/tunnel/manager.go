@@ -30,6 +30,17 @@ type Tunnel struct {
 	cmd         *exec.Cmd
 }
 
+// TunnelOptions configures optional tunnel behavior
+type TunnelOptions struct {
+	ReverseEnabled    bool   // Enable reverse tunnel (-R) for bidirectional routing
+	LocalHostID       string // Master daemon's host ID (used for remote peer socket path)
+	LocalDaemonSocket string // Master daemon's local socket path
+}
+
+// PeerSocketDir is the directory for reverse tunnel peer sockets on the remote side.
+// Located in /tmp which is assumed to be single-user (e.g., EC2 instances).
+const PeerSocketDir = "/tmp/ccvalet-peers"
+
 // Manager manages tunnel connections
 type Manager struct {
 	mu      sync.RWMutex
@@ -44,10 +55,10 @@ func NewManager() *Manager {
 }
 
 // Open opens a tunnel based on host configuration
-func (m *Manager) Open(hostConfig config.HostConfig) (string, error) {
+func (m *Manager) Open(hostConfig config.HostConfig, opts ...TunnelOptions) (string, error) {
 	switch hostConfig.Type {
 	case "ssh":
-		return m.OpenSSH(hostConfig)
+		return m.OpenSSH(hostConfig, opts...)
 	case "docker":
 		return m.OpenDocker(hostConfig)
 	default:
@@ -57,7 +68,7 @@ func (m *Manager) Open(hostConfig config.HostConfig) (string, error) {
 
 // OpenSSH opens an SSH tunnel to forward the remote daemon socket
 // ssh -L {localSocket}:{remoteSocket} -N -f {host}
-func (m *Manager) OpenSSH(hostConfig config.HostConfig) (string, error) {
+func (m *Manager) OpenSSH(hostConfig config.HostConfig, opts ...TunnelOptions) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -102,11 +113,24 @@ func (m *Manager) OpenSSH(hostConfig config.HostConfig) (string, error) {
 	// Create a stable symlink for the SSH agent socket on the remote,
 	// so the slave daemon can use it for git fetch etc.
 	// Instead of -N (no command), create the symlink then sleep to keep the connection.
+	// Add reverse tunnel (-R) for bidirectional routing if requested
+	var reversePreamble string
+	if len(opts) > 0 && opts[0].ReverseEnabled && opts[0].LocalHostID != "" {
+		reverseSockRemote := fmt.Sprintf("%s/%s/daemon.sock", PeerSocketDir, opts[0].LocalHostID)
+		reverseSockLocal := opts[0].LocalDaemonSocket
+		args = append(args, "-R", reverseSockRemote+":"+reverseSockLocal)
+		// Ensure peer directory exists and clean up stale socket on remote
+		reversePreamble = fmt.Sprintf(
+			"mkdir -p %s/%s && rm -f %s; ",
+			PeerSocketDir, opts[0].LocalHostID, reverseSockRemote,
+		)
+	}
+
 	agentSymlink := "~/.ccvalet/ssh-agent.sock"
 	remoteCmd := fmt.Sprintf(
-		"mkdir -p ~/.ccvalet && test -n \"$SSH_AUTH_SOCK\" && ln -sf \"$SSH_AUTH_SOCK\" %s; "+
+		"%smkdir -p ~/.ccvalet && test -n \"$SSH_AUTH_SOCK\" && ln -sf \"$SSH_AUTH_SOCK\" %s; "+
 			"while sleep 3600; do :; done",
-		agentSymlink,
+		reversePreamble, agentSymlink,
 	)
 	args = append(args,
 		"-L", localSocket+":"+remoteSocket,

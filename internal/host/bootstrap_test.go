@@ -203,4 +203,70 @@ func TestStartSlaveCommand(t *testing.T) {
 			t.Errorf("expected nil for unknown type, got %v", cmd)
 		}
 	})
+
+	t.Run("ssh with BootstrapOptions", func(t *testing.T) {
+		hc := config.HostConfig{Type: "ssh", Host: "myhost"}
+		opts := BootstrapOptions{
+			PeerSocketPath: "/tmp/ccvalet-peers/mac/daemon.sock",
+			PeerHostID:     "mac",
+		}
+		cmd := StartSlaveCommand(hc, opts)
+		if cmd == nil {
+			t.Fatal("expected non-nil command")
+		}
+		lastArg := cmd.Args[len(cmd.Args)-1]
+		want := "ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock --peer-socket /tmp/ccvalet-peers/mac/daemon.sock --peer-id mac"
+		if lastArg != want {
+			t.Errorf("remote command = %q, want %q", lastArg, want)
+		}
+	})
+}
+
+func TestValidateIdentifier(t *testing.T) {
+	tests := []struct {
+		input string
+		valid bool
+	}{
+		{"ec2", true},
+		{"my-host", true},
+		{"host_1", true},
+		{"Mac", true},
+		{"", false},
+		{"host;cmd", false},
+		{"host name", false},
+		{"../etc", false},
+	}
+	for _, tt := range tests {
+		err := ValidateIdentifier(tt.input)
+		if tt.valid && err != nil {
+			t.Errorf("ValidateIdentifier(%q) = %v, want nil", tt.input, err)
+		}
+		if !tt.valid && err == nil {
+			t.Errorf("ValidateIdentifier(%q) = nil, want error", tt.input)
+		}
+	}
+}
+
+func TestValidatePath(t *testing.T) {
+	tests := []struct {
+		input string
+		valid bool
+	}{
+		{"/tmp/ccvalet-peers/mac/daemon.sock", true},
+		{"~/.ccvalet/run/daemon.sock", true},
+		{"/a/b/c", true},
+		{"", false},
+		{"/tmp/foo;rm -rf /", false},
+		{"/tmp/foo bar", false},
+		{"/tmp/$HOME", false},
+	}
+	for _, tt := range tests {
+		err := validatePath(tt.input)
+		if tt.valid && err != nil {
+			t.Errorf("validatePath(%q) = %v, want nil", tt.input, err)
+		}
+		if !tt.valid && err == nil {
+			t.Errorf("validatePath(%q) = nil, want error", tt.input)
+		}
+	}
 }

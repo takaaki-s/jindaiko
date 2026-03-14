@@ -26,7 +26,7 @@ func setupE2EWithDataDir(t *testing.T, dataDir, configDir string) (*daemon.Clien
 
 	socketPath := filepath.Join(t.TempDir(), "e2e-tmux.sock")
 
-	server, err := daemon.NewServer(socketPath, dataDir, configDir)
+	server, err := daemon.NewServer(socketPath, dataDir, configDir, "local")
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

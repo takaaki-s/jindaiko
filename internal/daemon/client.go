@@ -299,6 +299,31 @@ func (c *Client) RemoveDirHistory(hostID, path string) error {
 	return nil
 }
 
+// SendRaw sends a raw JSON request and returns the raw JSON response.
+// Implements host.SlaveClient interface for use in forwardToHost.
+func (c *Client) SendRaw(action string, data, visited []byte) ([]byte, error) {
+	req := Request{Action: action}
+	if data != nil {
+		req.Data = json.RawMessage(data)
+	}
+	if visited != nil {
+		if err := json.Unmarshal(visited, &req.Visited); err != nil {
+			return nil, fmt.Errorf("invalid visited JSON: %w", err)
+		}
+	}
+
+	resp, err := c.send(req)
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // ListHosts retrieves the list of hosts
 func (c *Client) ListHosts() ([]HostInfo, error) {
 	resp, err := c.send(Request{Action: "list-hosts"})

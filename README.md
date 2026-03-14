@@ -374,6 +374,19 @@ In addition to local sessions, you can manage Claude Code sessions running on EC
 
 The Master daemon on your local machine communicates with Slave daemons on remote hosts via SSH tunnels (or Docker volume mounts). The Slave runs the same `ccvalet daemon` binary.
 
+Communication is **bidirectional**: the Master establishes a forward tunnel (`-L`) to reach the Slave, and a reverse tunnel (`-R`) so the Slave can reach the Master back. This allows either side to act as an orchestrator. A `visited` array in each request prevents routing loops.
+
+Each daemon has a **host ID** (default: `"local"`). You can set it in `config.yaml` or via the `--host-id` flag:
+
+```yaml
+# ~/.ccvalet/config.yaml
+host_id: mac   # Identifies this daemon in bidirectional routing
+hosts:
+  - id: ec2
+    type: ssh
+    host: my-ec2-instance
+```
+
 ### EC2 Setup
 
 **1. Install ccvalet and tmux on EC2 (first time only)**

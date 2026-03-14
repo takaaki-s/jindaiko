@@ -33,7 +33,7 @@ func setupE2E(t *testing.T) *daemon.Client {
 	dataDir := filepath.Join(tmpDir, "sessions")
 	configDir := filepath.Join(tmpDir, "config")
 
-	server, err := daemon.NewServer(socketPath, dataDir, configDir)
+	server, err := daemon.NewServer(socketPath, dataDir, configDir, "local")
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
