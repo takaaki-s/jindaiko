@@ -175,20 +175,20 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSession_JSONBackwardCompatibility_NoFleet(t *testing.T) {
-	// Existing JSON without fleet field should unmarshal with empty Fleet
-	jsonStr := `{"id":"old-session","name":"old","work_dir":"/tmp","created_at":"2025-01-01T00:00:00Z","status":"idle"}`
-
-	var s Session
-	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
+func TestSession_FleetAlwaysPresentInJSON(t *testing.T) {
+	s := &Session{
+		ID:      "fleet-json-test",
+		Name:    "fj",
+		WorkDir: "/tmp/fj",
+		Fleet:   DefaultFleet,
+		Status:  StatusIdle,
 	}
-
-	if s.Fleet != "" {
-		t.Errorf("Fleet: got %q, want empty string for backward compatibility", s.Fleet)
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
 	}
-	if s.ID != "old-session" {
-		t.Errorf("ID: got %q, want %q", s.ID, "old-session")
+	if !strings.Contains(string(data), `"fleet":"default"`) {
+		t.Errorf("JSON missing fleet field: %s", data)
 	}
 }
 

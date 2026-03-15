@@ -1063,7 +1063,7 @@ func TestGroupSessionsByFleet(t *testing.T) {
 
 	t.Run("default fleet is last", func(t *testing.T) {
 		sessions := []session.Info{
-			{ID: "1", Name: "s1", Fleet: "", CreatedAt: now},
+			{ID: "1", Name: "s1", Fleet: session.DefaultFleet, CreatedAt: now},
 			{ID: "2", Name: "s2", Fleet: "alpha", CreatedAt: now},
 			{ID: "3", Name: "s3", Fleet: "beta", CreatedAt: now},
 		}
@@ -1078,23 +1078,23 @@ func TestGroupSessionsByFleet(t *testing.T) {
 		if groups[1].Name != "beta" {
 			t.Errorf("second group: got %q, want %q", groups[1].Name, "beta")
 		}
-		if groups[2].Name != "default" {
-			t.Errorf("last group: got %q, want %q", groups[2].Name, "default")
+		if groups[2].Name != session.DefaultFleet {
+			t.Errorf("last group: got %q, want %q", groups[2].Name, session.DefaultFleet)
 		}
 	})
 
-	t.Run("empty fleet treated as default", func(t *testing.T) {
+	t.Run("sessions with default fleet group correctly", func(t *testing.T) {
 		sessions := []session.Info{
-			{ID: "1", Name: "s1", Fleet: "", CreatedAt: now},
-			{ID: "2", Name: "s2", Fleet: "", CreatedAt: now},
+			{ID: "1", Name: "s1", Fleet: session.DefaultFleet, CreatedAt: now},
+			{ID: "2", Name: "s2", Fleet: session.DefaultFleet, CreatedAt: now},
 		}
 
 		groups := groupSessionsByFleet(sessions)
 		if len(groups) != 1 {
 			t.Fatalf("expected 1 group, got %d", len(groups))
 		}
-		if groups[0].Name != "default" {
-			t.Errorf("group name: got %q, want %q", groups[0].Name, "default")
+		if groups[0].Name != session.DefaultFleet {
+			t.Errorf("group name: got %q, want %q", groups[0].Name, session.DefaultFleet)
 		}
 		if len(groups[0].Sessions) != 2 {
 			t.Errorf("group sessions: got %d, want 2", len(groups[0].Sessions))
@@ -1120,18 +1120,3 @@ func TestGroupSessionsByFleet(t *testing.T) {
 	})
 }
 
-func TestGetFleetName(t *testing.T) {
-	t.Run("returns fleet name when set", func(t *testing.T) {
-		sess := session.Info{Fleet: "myfleet"}
-		if got := getFleetName(sess); got != "myfleet" {
-			t.Errorf("got %q, want %q", got, "myfleet")
-		}
-	})
-
-	t.Run("returns default when empty", func(t *testing.T) {
-		sess := session.Info{Fleet: ""}
-		if got := getFleetName(sess); got != "default" {
-			t.Errorf("got %q, want %q", got, "default")
-		}
-	})
-}

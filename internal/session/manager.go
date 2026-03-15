@@ -155,6 +155,9 @@ func NewManager(dataDir, configDir string, configMgr *config.Manager) (*Manager,
 	}
 	for _, s := range sessions {
 		s.Status = StatusStopped // All loaded sessions start as stopped
+		if s.Fleet == "" {
+			s.Fleet = DefaultFleet
+		}
 		m.sessions[s.ID] = s
 	}
 
@@ -165,13 +168,17 @@ func NewManager(dataDir, configDir string, configMgr *config.Manager) (*Manager,
 type CreateOptions struct {
 	WorkDir string // Working directory path
 	Name    string // Session name (defaults to directory basename)
-	Fleet   string // Fleet name for session grouping (empty = "default")
+	Fleet   string // Fleet name for session grouping; defaults to DefaultFleet if empty
 }
 
 // CreateWithOptions creates a new session with full options
 func (m *Manager) CreateWithOptions(opts CreateOptions) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if opts.Fleet == "" {
+		opts.Fleet = DefaultFleet
+	}
 
 	// WorkDir is required
 	if opts.WorkDir == "" {
@@ -249,22 +256,15 @@ func (m *Manager) List() []Info {
 		}
 	}
 
-	// Sort by Fleet (alphabetically, empty/"default" last), then by CreatedAt (oldest first)
+	// Sort by Fleet (alphabetically, "default" last), then by CreatedAt (oldest first)
 	sort.SliceStable(infos, func(i, j int) bool {
 		fi, fj := infos[i].Fleet, infos[j].Fleet
-		// Normalize empty fleet to "default" for sorting
-		if fi == "" {
-			fi = "default"
-		}
-		if fj == "" {
-			fj = "default"
-		}
 		if fi != fj {
-			// "default" always sorts last
-			if fi == "default" {
+			// DefaultFleet always sorts last
+			if fi == DefaultFleet {
 				return false
 			}
-			if fj == "default" {
+			if fj == DefaultFleet {
 				return true
 			}
 			return fi < fj

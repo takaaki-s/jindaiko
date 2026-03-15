@@ -60,6 +60,30 @@ func TestManager_CreateWithOptions_Success(t *testing.T) {
 	}
 }
 
+func TestManager_CreateWithOptions_DefaultFleet(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-default", Name: "fd"})
+	if err != nil {
+		t.Fatalf("CreateWithOptions failed: %v", err)
+	}
+	if sess.Fleet != DefaultFleet {
+		t.Errorf("Fleet = %q, want %q", sess.Fleet, DefaultFleet)
+	}
+}
+
+func TestManager_CreateWithOptions_ExplicitFleet(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-named", Name: "fn", Fleet: "backend"})
+	if err != nil {
+		t.Fatalf("CreateWithOptions failed: %v", err)
+	}
+	if sess.Fleet != "backend" {
+		t.Errorf("Fleet = %q, want %q", sess.Fleet, "backend")
+	}
+}
+
 func TestManager_CreateWithOptions_DuplicateWorkDir(t *testing.T) {
 	mgr, _ := newTestManager(t)
 
@@ -168,6 +192,38 @@ func TestManager_List(t *testing.T) {
 	}
 	if infos[1].Name != "second" {
 		t.Errorf("second item Name = %q, want %q", infos[1].Name, "second")
+	}
+}
+
+func TestManager_List_SortedByFleet(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	_, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-1", Name: "s1", Fleet: "backend"})
+	if err != nil {
+		t.Fatalf("create s1 failed: %v", err)
+	}
+	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-2", Name: "s2"}) // default
+	if err != nil {
+		t.Fatalf("create s2 failed: %v", err)
+	}
+	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-3", Name: "s3", Fleet: "alpha"})
+	if err != nil {
+		t.Fatalf("create s3 failed: %v", err)
+	}
+
+	infos := mgr.List()
+	if len(infos) != 3 {
+		t.Fatalf("List returned %d items, want 3", len(infos))
+	}
+	// Expected order: alpha, backend, default (default always last)
+	if infos[0].Fleet != "alpha" {
+		t.Errorf("infos[0].Fleet = %q, want %q", infos[0].Fleet, "alpha")
+	}
+	if infos[1].Fleet != "backend" {
+		t.Errorf("infos[1].Fleet = %q, want %q", infos[1].Fleet, "backend")
+	}
+	if infos[2].Fleet != DefaultFleet {
+		t.Errorf("infos[2].Fleet = %q, want %q", infos[2].Fleet, DefaultFleet)
 	}
 }
 
@@ -984,6 +1040,34 @@ func TestManager_List_WithHostFilter(t *testing.T) {
 	}
 	if hostIDs["host3"] != "local" {
 		t.Errorf("host3 HostID = %q, want %q", hostIDs["host3"], "local")
+	}
+}
+
+func TestNewManager_LoadAll_MigratesEmptyFleet(t *testing.T) {
+	dataDir := t.TempDir()
+	configDir := t.TempDir()
+
+	// Write a session JSON without the fleet field (simulates old data)
+	oldJSON := `{"id":"old-id","name":"old","work_dir":"/tmp/old","created_at":"2025-01-01T00:00:00Z","status":"idle","claude_session_id":"cid"}`
+	if err := os.WriteFile(filepath.Join(dataDir, "old-id.json"), []byte(oldJSON), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	configMgr, err := config.NewManager(configDir)
+	if err != nil {
+		t.Fatalf("config.NewManager failed: %v", err)
+	}
+	mgr, err := NewManager(dataDir, configDir, configMgr)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	infos := mgr.List()
+	if len(infos) != 1 {
+		t.Fatalf("List returned %d items, want 1", len(infos))
+	}
+	if infos[0].Fleet != DefaultFleet {
+		t.Errorf("Fleet = %q, want %q", infos[0].Fleet, DefaultFleet)
 	}
 }
 
