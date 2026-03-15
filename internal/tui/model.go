@@ -237,9 +237,8 @@ func (m *Model) getItemsPerPage() int {
 	if m.searching {
 		availableLines-- // search bar takes 1 line
 	}
-	// Reserve space for fleet group headers when multiple fleets are present.
-	// Each fleet group gets a 1-line header; single-fleet lists show no headers.
-	if n := m.fleetGroupCount(); n > 1 {
+	// Reserve space for fleet group headers (always shown when sessions exist).
+	if n := m.fleetGroupCount(); n >= 1 {
 		availableLines -= n
 	}
 	availableLines = max(availableLines, 4)
@@ -1107,7 +1106,7 @@ func (m Model) renderListContent(contentWidth int) string {
 	} else {
 		pageSessions := m.getPageSessions()
 		groups := groupSessionsByFleet(pageSessions)
-		showHeaders := len(groups) > 1
+		showHeaders := len(groups) >= 1
 
 		// Build ID-to-cursor-index mapping for correct selection highlighting
 		idToIdx := make(map[string]int, len(pageSessions))
