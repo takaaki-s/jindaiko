@@ -165,6 +165,7 @@ func NewManager(dataDir, configDir string, configMgr *config.Manager) (*Manager,
 type CreateOptions struct {
 	WorkDir string // Working directory path
 	Name    string // Session name (defaults to directory basename)
+	Fleet   string // Fleet name for session grouping (empty = "default")
 }
 
 // CreateWithOptions creates a new session with full options
@@ -209,6 +210,7 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (*Session, error) {
 		CreatedAt:       time.Now(),
 		Status:          StatusStopped,
 		ClaudeSessionID: claudeSessionID,
+		Fleet:           opts.Fleet,
 	}
 
 	m.sessions[id] = session
@@ -247,8 +249,26 @@ func (m *Manager) List() []Info {
 		}
 	}
 
-	// Sort by CreatedAt (oldest first)
-	sort.Slice(infos, func(i, j int) bool {
+	// Sort by Fleet (alphabetically, empty/"default" last), then by CreatedAt (oldest first)
+	sort.SliceStable(infos, func(i, j int) bool {
+		fi, fj := infos[i].Fleet, infos[j].Fleet
+		// Normalize empty fleet to "default" for sorting
+		if fi == "" {
+			fi = "default"
+		}
+		if fj == "" {
+			fj = "default"
+		}
+		if fi != fj {
+			// "default" always sorts last
+			if fi == "default" {
+				return false
+			}
+			if fj == "default" {
+				return true
+			}
+			return fi < fj
+		}
 		return infos[i].CreatedAt.Before(infos[j].CreatedAt)
 	})
 

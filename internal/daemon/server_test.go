@@ -84,4 +84,3 @@ func TestReplaceEnv_PrefixCollision(t *testing.T) {
 		t.Errorf("FOO=new should be present, got %v", got)
 	}
 }
-

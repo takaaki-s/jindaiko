@@ -31,7 +31,7 @@ var debugLog = debug.NewLogger("daemon-debug.log")
 // Server is the daemon server
 type Server struct {
 	socketPath   string
-	hostID       string          // This daemon's host ID (e.g., "mac", "ec2"; default "local")
+	hostID       string // This daemon's host ID (e.g., "mac", "ec2"; default "local")
 	manager      *session.Manager
 	configMgr    *config.Manager
 	stateMgr     *config.StateManager
@@ -39,13 +39,13 @@ type Server struct {
 	createMu     sync.Mutex      // Mutual exclusion for session creation
 	hostRegistry *host.Registry  // Multi-host management
 	tunnelMgr    *tunnel.Manager // SSH tunnel management
-	stopPoll     chan struct{}    // Signal to stop remote notification polling
+	stopPoll     chan struct{}   // Signal to stop remote notification polling
 }
 
 // Message types
 type Request struct {
-	Action  string          `json:"action"`
-	Data    json.RawMessage `json:"data,omitempty"`
+	Action string          `json:"action"`
+	Data   json.RawMessage `json:"data,omitempty"`
 	// Visited tracks host IDs that have already processed this request.
 	// Used by forwardToHost (targeted routing) and handleList/handleNotificationHistory
 	// (aggregation) to prevent routing loops in bidirectional daemon topologies.
@@ -304,6 +304,7 @@ type NewRequest struct {
 	Start       bool   `json:"start"`
 	HostID      string `json:"host_id,omitempty"`       // Target host (empty = "local")
 	SSHAuthSock string `json:"ssh_auth_sock,omitempty"` // SSH_AUTH_SOCK (for git operations)
+	Fleet       string `json:"fleet,omitempty"`         // Fleet name for session grouping
 }
 
 func (s *Server) handleNew(data json.RawMessage) Response {
@@ -327,6 +328,7 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 	sess, err := s.manager.CreateWithOptions(session.CreateOptions{
 		Name:    req.Name,
 		WorkDir: req.WorkDir,
+		Fleet:   req.Fleet,
 	})
 	if err != nil {
 		s.createMu.Unlock()

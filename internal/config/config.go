@@ -42,10 +42,10 @@ type KeybindingsConfig struct {
 	Notifications []string `mapstructure:"notifications,omitempty"`
 
 	// Session creation form
-	NextField      []string `mapstructure:"next_field,omitempty"`
-	PrevField      []string `mapstructure:"prev_field,omitempty"`
-	Submit []string `mapstructure:"submit,omitempty"`
-	CancelForm     []string `mapstructure:"cancel_form,omitempty"`
+	NextField  []string `mapstructure:"next_field,omitempty"`
+	PrevField  []string `mapstructure:"prev_field,omitempty"`
+	Submit     []string `mapstructure:"submit,omitempty"`
+	CancelForm []string `mapstructure:"cancel_form,omitempty"`
 
 	// Keys while attached
 	Detach []string `mapstructure:"detach,omitempty"`
@@ -214,10 +214,10 @@ func DefaultKeybindings() KeybindingsConfig {
 		Notifications: []string{"!"},
 
 		// Session creation form
-		NextField:      []string{"tab"},
-		PrevField:      []string{"shift+tab"},
-		Submit: []string{"enter"},
-		CancelForm:     []string{"esc"},
+		NextField:  []string{"tab"},
+		PrevField:  []string{"shift+tab"},
+		Submit:     []string{"enter"},
+		CancelForm: []string{"esc"},
 
 		// Keys while attached
 		Detach: []string{"ctrl+]"},

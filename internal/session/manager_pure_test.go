@@ -8,9 +8,9 @@ import (
 
 func TestIsProcessRunning(t *testing.T) {
 	tests := []struct {
-		name   string
-		s      *Session
-		want   bool
+		name string
+		s    *Session
+		want bool
 	}{
 		{
 			name: "Stopped session is not running",

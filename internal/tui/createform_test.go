@@ -126,8 +126,8 @@ func TestCreateFormModel_SelectHost(t *testing.T) {
 	t.Run("valid index sets selectedHostID and input value", func(t *testing.T) {
 		hi := textinput.New()
 		m := CreateFormModel{
-			hostInput:         hi,
-			filteredHosts:     []daemon.HostInfo{
+			hostInput: hi,
+			filteredHosts: []daemon.HostInfo{
 				{ID: "local", Type: "local", Connected: true},
 				{ID: "remote-dev", Type: "ssh", Connected: true},
 			},
@@ -151,9 +151,9 @@ func TestCreateFormModel_SelectHost(t *testing.T) {
 	t.Run("out of bounds index makes no change", func(t *testing.T) {
 		hi := textinput.New()
 		m := CreateFormModel{
-			hostInput:         hi,
-			selectedHostID:    "",
-			filteredHosts:     []daemon.HostInfo{
+			hostInput:      hi,
+			selectedHostID: "",
+			filteredHosts: []daemon.HostInfo{
 				{ID: "local", Type: "local", Connected: true},
 			},
 			hostSelectedIndex: 5, // out of bounds

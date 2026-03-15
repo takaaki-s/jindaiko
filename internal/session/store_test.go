@@ -34,19 +34,19 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 
 	now := time.Now().Truncate(time.Millisecond)
 	session := &Session{
-		ID:               "test-123",
-		Name:             "my-session",
-		WorkDir:          "/home/user/project",
-		CreatedAt:        now,
-		Status:           StatusIdle,
-		LastActiveAt:     now,
-		ErrorMessage:     "some error",
-		ClaudeSessionID:  "claude-456",
-		HostID:           "local",
-		TmuxWindowName:   "sess-test-123",
-		TmuxPaneID:       "%42",
-		CurrentWorkDir:   "/runtime/dir", // json:"-"
-		CurrentBranch:    "main",         // json:"-"
+		ID:              "test-123",
+		Name:            "my-session",
+		WorkDir:         "/home/user/project",
+		CreatedAt:       now,
+		Status:          StatusIdle,
+		LastActiveAt:    now,
+		ErrorMessage:    "some error",
+		ClaudeSessionID: "claude-456",
+		HostID:          "local",
+		TmuxWindowName:  "sess-test-123",
+		TmuxPaneID:      "%42",
+		CurrentWorkDir:  "/runtime/dir", // json:"-"
+		CurrentBranch:   "main",         // json:"-"
 	}
 
 	if err := store.Save(session); err != nil {

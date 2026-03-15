@@ -16,9 +16,11 @@ type mockSlaveClient struct {
 	entries  []notify.Entry
 }
 
-func (m *mockSlaveClient) IsRunning() bool                                    { return m.running }
-func (m *mockSlaveClient) ListWithHostID() ([]session.Info, error)            { return m.sessions, nil }
-func (m *mockSlaveClient) NotificationHistoryWithHostID() ([]notify.Entry, error) { return m.entries, nil }
+func (m *mockSlaveClient) IsRunning() bool                         { return m.running }
+func (m *mockSlaveClient) ListWithHostID() ([]session.Info, error) { return m.sessions, nil }
+func (m *mockSlaveClient) NotificationHistoryWithHostID() ([]notify.Entry, error) {
+	return m.entries, nil
+}
 func (m *mockSlaveClient) SendRaw(action string, data, visited []byte) ([]byte, error) {
 	return []byte(`{"success":true}`), nil
 }
