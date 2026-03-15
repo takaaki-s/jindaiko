@@ -134,13 +134,6 @@ ccvalet cleanup stopped --dry-run   # Preview what will be deleted
 
 > **Aliases**: `session` can be shortened to `sess` (e.g., `ccvalet sess list`). `list` to `ls`, `delete` to `rm`.
 
-### Utilities
-
-```bash
-ccvalet session workdir <session-name>    # Print session's working directory path
-ccvalet session edit <session-name>       # Open session's working directory in EDITOR
-```
-
 ### LLM API (scripting / automation)
 
 The following commands support `--json` for structured output, enabling integration with scripts and other LLM agents.

@@ -134,13 +134,6 @@ ccvalet cleanup stopped --dry-run   # 削除対象の確認
 
 > **エイリアス**: `session` は `sess` でも可（例: `ccvalet sess list`）。`list` は `ls`、`delete` は `rm` でも可。
 
-### ユーティリティ
-
-```bash
-ccvalet session workdir <session-name>    # セッションの作業ディレクトリパスを出力
-ccvalet session edit <session-name>       # EDITOR でセッションの作業ディレクトリを開く
-```
-
 ### LLM API（スクリプト / 自動化）
 
 以下のコマンドは `--json` フラグに対応しており、スクリプトや他の LLM エージェントとの連携が可能です。
