@@ -34,6 +34,9 @@ type Session struct {
 	ClaudeSessionID      string `json:"claude_session_id,omitempty"`
 	ClaudeSessionStarted bool   `json:"claude_session_started,omitempty"` // Whether the CC session has been started at least once
 
+	// Fleet grouping
+	Fleet string `json:"fleet,omitempty"` // Fleet name for session grouping (empty = "default")
+
 	// Host info (multi-host support)
 	HostID string `json:"host_id,omitempty"` // Host identifier ("local", "ec2", "docker-dev", etc.)
 
@@ -63,6 +66,7 @@ type Info struct {
 	ErrorMessage    string    `json:"error_message,omitempty"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
 	TmuxWindowName  string    `json:"tmux_window_name,omitempty"`  // tmux window name
+	Fleet           string    `json:"fleet,omitempty"`             // Fleet name for session grouping
 	HostID          string    `json:"host_id,omitempty"`           // Host identifier
 
 	// Tracked fields (dynamic, from daemon polling)
@@ -86,6 +90,7 @@ func (s *Session) ToInfo() Info {
 		ErrorMessage:    s.ErrorMessage,
 		ClaudeSessionID: s.ClaudeSessionID,
 		TmuxWindowName:  s.TmuxWindowName,
+		Fleet:           s.Fleet,
 		HostID:          s.HostID,
 		CurrentWorkDir:  s.CurrentWorkDir,
 		CurrentBranch:   s.CurrentBranch,

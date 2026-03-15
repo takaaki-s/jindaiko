@@ -19,6 +19,7 @@ Examples:
   ccvalet session new --workdir ~/projects/myapp
   ccvalet session new --workdir . --name myapp
   ccvalet session new --workdir ~/projects/myapp --host ec2
+  ccvalet session new --workdir . --fleet backend
 
 For interactive session creation, use 'ccvalet ui' (TUI).`,
 	Args: cobra.NoArgs,
@@ -26,6 +27,7 @@ For interactive session creation, use 'ccvalet ui' (TUI).`,
 		workDir, _ := cmd.Flags().GetString("workdir")
 		name, _ := cmd.Flags().GetString("name")
 		hostID, _ := cmd.Flags().GetString("host")
+		fleet, _ := cmd.Flags().GetString("fleet")
 		noStart, _ := cmd.Flags().GetBool("no-start")
 
 		// Default WorkDir: current directory
@@ -64,6 +66,7 @@ For interactive session creation, use 'ccvalet ui' (TUI).`,
 			WorkDir: workDir,
 			Start:   !noStart,
 			HostID:  hostID,
+			Fleet:   fleet,
 		})
 		if err != nil {
 			return err
@@ -87,6 +90,7 @@ func init() {
 	newCmd.Flags().StringP("workdir", "d", "", "Working directory (default: current directory)")
 	newCmd.Flags().StringP("name", "n", "", "Session name (default: directory basename)")
 	newCmd.Flags().StringP("host", "H", "", "Target host (default: local)")
+	newCmd.Flags().StringP("fleet", "f", "", "Fleet name for session grouping (default: \"default\")")
 	newCmd.Flags().Bool("no-start", false, "Don't start the session immediately")
 }
 

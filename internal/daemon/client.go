@@ -70,6 +70,7 @@ type NewOptions struct {
 	WorkDir string
 	Start   bool
 	HostID  string // Target host (empty = "local")
+	Fleet   string // Fleet name for session grouping
 }
 
 // New creates a new session
@@ -89,6 +90,7 @@ func (c *Client) NewWithOptions(opts NewOptions) (*session.Info, error) {
 		Start:       opts.Start,
 		HostID:      opts.HostID,
 		SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
+		Fleet:       opts.Fleet,
 	})
 
 	resp, err := c.send(Request{Action: "new", Data: data})

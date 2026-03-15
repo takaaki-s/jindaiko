@@ -19,6 +19,7 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 		ErrorMessage:         "something went wrong",
 		ClaudeSessionID:      "claude-sess-456",
 		ClaudeSessionStarted: true,
+		Fleet:                "backend",
 		HostID:               "ec2-instance",
 		TmuxWindowName:       "ccvalet_test-id-123",
 		TmuxPaneID:           "%42",
@@ -61,6 +62,9 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 	}
 	if info.TmuxWindowName != s.TmuxWindowName {
 		t.Errorf("TmuxWindowName: got %q, want %q", info.TmuxWindowName, s.TmuxWindowName)
+	}
+	if info.Fleet != s.Fleet {
+		t.Errorf("Fleet: got %q, want %q", info.Fleet, s.Fleet)
 	}
 	if info.HostID != s.HostID {
 		t.Errorf("HostID: got %q, want %q", info.HostID, s.HostID)
@@ -113,6 +117,7 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 		ErrorMessage:         "test error",
 		ClaudeSessionID:      "claude-rt-789",
 		ClaudeSessionStarted: true,
+		Fleet:                "frontend",
 		HostID:               "docker-dev",
 		TmuxWindowName:       "ccvalet_round-trip-id",
 		TmuxPaneID:           "%99",
@@ -156,6 +161,9 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	if restored.ClaudeSessionStarted != original.ClaudeSessionStarted {
 		t.Errorf("ClaudeSessionStarted: got %v, want %v", restored.ClaudeSessionStarted, original.ClaudeSessionStarted)
 	}
+	if restored.Fleet != original.Fleet {
+		t.Errorf("Fleet: got %q, want %q", restored.Fleet, original.Fleet)
+	}
 	if restored.HostID != original.HostID {
 		t.Errorf("HostID: got %q, want %q", restored.HostID, original.HostID)
 	}
@@ -164,6 +172,23 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	}
 	if restored.TmuxPaneID != original.TmuxPaneID {
 		t.Errorf("TmuxPaneID: got %q, want %q", restored.TmuxPaneID, original.TmuxPaneID)
+	}
+}
+
+func TestSession_JSONBackwardCompatibility_NoFleet(t *testing.T) {
+	// Existing JSON without fleet field should unmarshal with empty Fleet
+	jsonStr := `{"id":"old-session","name":"old","work_dir":"/tmp","created_at":"2025-01-01T00:00:00Z","status":"idle"}`
+
+	var s Session
+	if err := json.Unmarshal([]byte(jsonStr), &s); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if s.Fleet != "" {
+		t.Errorf("Fleet: got %q, want empty string for backward compatibility", s.Fleet)
+	}
+	if s.ID != "old-session" {
+		t.Errorf("ID: got %q, want %q", s.ID, "old-session")
 	}
 }
 

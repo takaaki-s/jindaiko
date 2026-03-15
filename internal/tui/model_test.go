@@ -127,9 +127,9 @@ func TestTruncateStringFromEnd(t *testing.T) {
 
 func TestTimeAgo(t *testing.T) {
 	tests := []struct {
-		name     string
-		offset   time.Duration
-		want     string
+		name   string
+		offset time.Duration
+		want   string
 	}{
 		{"just now", 10 * time.Second, "just now"},
 		{"1 minute ago", 1 * time.Minute, "1m ago"},
@@ -198,6 +198,19 @@ func TestMatchesSearch(t *testing.T) {
 		got := matchesSearch(emptySess, "anything")
 		if got {
 			t.Error("matchesSearch with empty session should return false")
+		}
+	})
+
+	t.Run("match by Fleet", func(t *testing.T) {
+		fleetSess := session.Info{
+			Name:  "session1",
+			Fleet: "backend",
+		}
+		if !matchesSearch(fleetSess, "backend") {
+			t.Error("matchesSearch should match by Fleet name")
+		}
+		if matchesSearch(fleetSess, "frontend") {
+			t.Error("matchesSearch should not match unrelated Fleet name")
 		}
 	})
 }
@@ -479,28 +492,28 @@ func TestTruncateToWidth(t *testing.T) {
 			input:    "\u3042\u3044\u3046",
 			maxWidth: 5,
 			// Each CJK char is 2 cells wide; 2 chars = 4 cells fits, 3 chars = 6 cells > 5
-			want:     "\u3042\u3044",
+			want: "\u3042\u3044",
 		},
 		{
 			name:     "mixed ASCII and CJK",
 			input:    "Aあ",
 			maxWidth: 3,
 			// 'A'=1 + 'あ'=2 = 3, fits exactly
-			want:     "Aあ",
+			want: "Aあ",
 		},
 		{
 			name:     "mixed ASCII and CJK truncated",
 			input:    "Aあい",
 			maxWidth: 3,
 			// 'A'=1 + 'あ'=2 = 3, 'い' would be 5 > 3
-			want:     "Aあ",
+			want: "Aあ",
 		},
 		{
 			name:     "CJK does not fit partial",
 			input:    "あ",
 			maxWidth: 1,
 			// 'あ' is 2 cells wide, does not fit in 1
-			want:     "",
+			want: "",
 		},
 		{
 			name:     "zero width",
@@ -563,21 +576,21 @@ func TestTruncateFromEndToWidth(t *testing.T) {
 			input:    "あいう",
 			maxWidth: 4,
 			// Each CJK char is 2 cells; from end: 'う'=2, 'い'=2+2=4 fits, 'あ'=4+2=6 > 4
-			want:     "いう",
+			want: "いう",
 		},
 		{
 			name:     "CJK does not fit partial",
 			input:    "あ",
 			maxWidth: 1,
 			// 'あ' is 2 cells wide, does not fit in 1
-			want:     "",
+			want: "",
 		},
 		{
 			name:     "mixed ASCII and CJK keeps end",
 			input:    "あtest",
 			maxWidth: 4,
 			// from end: 't'=1, 's'=2, 'e'=3, 't'=4 => "test"
-			want:     "test",
+			want: "test",
 		},
 		{
 			name:     "zero width",
@@ -689,23 +702,23 @@ func TestGetItemsPerPage(t *testing.T) {
 		{
 			name:   "tall terminal",
 			height: 40,
-			// availableLines = 40 - 8 = 32, items = 32/4 = 8
+			// availableLines = 40 - 8 - 2 = 30, items = 30/4 = 7
 		},
 		{
 			name:   "short terminal",
 			height: 10,
-			// availableLines = 10 - 8 = 2, clamped to 4, items = 4/4 = 1
+			// availableLines = 10 - 8 - 2 = 0, clamped to 4, items = 4/4 = 1
 		},
 		{
 			name:      "with search bar",
 			height:    40,
 			searching: true,
-			// availableLines = 40 - 8 - 1 = 31, items = 31/4 = 7
+			// availableLines = 40 - 8 - 1 - 2 = 29, items = 29/4 = 7
 		},
 		{
 			name:   "very short terminal",
 			height: 5,
-			// availableLines = 5 - 8 = -3, clamped to 4, items = 4/4 = 1
+			// availableLines = 5 - 8 - 2 = -5, clamped to 4, items = 4/4 = 1
 		},
 	}
 	for _, tt := range tests {
@@ -718,11 +731,12 @@ func TestGetItemsPerPage(t *testing.T) {
 			if got < 1 {
 				t.Errorf("getItemsPerPage() = %d, should be at least 1", got)
 			}
-			// Verify calculation
+			// Verify calculation (includes -2 for fleet group headers)
 			availableLines := tt.height - 8
 			if tt.searching {
 				availableLines--
 			}
+			availableLines -= 2 // fleet group headers reserve
 			availableLines = max(availableLines, 4)
 			expected := availableLines / 4
 			expected = max(expected, 1)
@@ -738,10 +752,10 @@ func TestGetItemsPerPage(t *testing.T) {
 
 func TestGetTotalPages(t *testing.T) {
 	tests := []struct {
-		name         string
-		numSessions  int
-		height       int
-		wantPages    int
+		name        string
+		numSessions int
+		height      int
+		wantPages   int
 	}{
 		{
 			name:        "no sessions",
@@ -753,28 +767,28 @@ func TestGetTotalPages(t *testing.T) {
 			name:        "fewer sessions than page size",
 			numSessions: 3,
 			height:      40,
-			// itemsPerPage = (40-8)/4 = 8, totalPages = ceil(3/8) = 1
+			// itemsPerPage = (40-8-2)/4 = 30/4 = 7, totalPages = ceil(3/7) = 1
 			wantPages: 1,
 		},
 		{
 			name:        "exactly one page",
-			numSessions: 8,
+			numSessions: 7,
 			height:      40,
-			// itemsPerPage = 8, totalPages = ceil(8/8) = 1
+			// itemsPerPage = 7, totalPages = ceil(7/7) = 1
 			wantPages: 1,
 		},
 		{
 			name:        "two pages",
-			numSessions: 9,
+			numSessions: 8,
 			height:      40,
-			// itemsPerPage = 8, totalPages = ceil(9/8) = 2
+			// itemsPerPage = 7, totalPages = ceil(8/7) = 2
 			wantPages: 2,
 		},
 		{
 			name:        "many sessions short terminal",
 			numSessions: 10,
 			height:      12,
-			// itemsPerPage = max((12-8),4)/4 = 4/4 = 1, totalPages = ceil(10/1) = 10
+			// itemsPerPage = max((12-8-2),4)/4 = max(2,4)/4 = 4/4 = 1, totalPages = ceil(10/1) = 10
 			wantPages: 10,
 		},
 	}
@@ -808,18 +822,18 @@ func TestGetPageSessions(t *testing.T) {
 	t.Run("first page", func(t *testing.T) {
 		m := Model{
 			sessions:    sessions,
-			height:      40, // itemsPerPage = (40-8)/4 = 8
+			height:      40, // itemsPerPage = (40-8-2)/4 = 7
 			currentPage: 0,
 		}
 		got := m.getPageSessions()
-		if len(got) != 8 {
-			t.Fatalf("getPageSessions() page 0 len = %d, want 8", len(got))
+		if len(got) != 7 {
+			t.Fatalf("getPageSessions() page 0 len = %d, want 7", len(got))
 		}
 		if got[0].Name != "s0" {
 			t.Errorf("first item Name = %q, want %q", got[0].Name, "s0")
 		}
-		if got[7].Name != "s7" {
-			t.Errorf("last item Name = %q, want %q", got[7].Name, "s7")
+		if got[6].Name != "s6" {
+			t.Errorf("last item Name = %q, want %q", got[6].Name, "s6")
 		}
 	})
 
@@ -830,14 +844,14 @@ func TestGetPageSessions(t *testing.T) {
 			currentPage: 1,
 		}
 		got := m.getPageSessions()
-		if len(got) != 2 {
-			t.Fatalf("getPageSessions() page 1 len = %d, want 2", len(got))
+		if len(got) != 3 {
+			t.Fatalf("getPageSessions() page 1 len = %d, want 3", len(got))
 		}
-		if got[0].Name != "s8" {
-			t.Errorf("first item Name = %q, want %q", got[0].Name, "s8")
+		if got[0].Name != "s7" {
+			t.Errorf("first item Name = %q, want %q", got[0].Name, "s7")
 		}
-		if got[1].Name != "s9" {
-			t.Errorf("second item Name = %q, want %q", got[1].Name, "s9")
+		if got[2].Name != "s9" {
+			t.Errorf("last item Name = %q, want %q", got[2].Name, "s9")
 		}
 	})
 
@@ -848,8 +862,8 @@ func TestGetPageSessions(t *testing.T) {
 			currentPage: 99,
 		}
 		got := m.getPageSessions()
-		if len(got) != 8 {
-			t.Fatalf("getPageSessions() beyond range len = %d, want 8", len(got))
+		if len(got) != 7 {
+			t.Fatalf("getPageSessions() beyond range len = %d, want 7", len(got))
 		}
 		if got[0].Name != "s0" {
 			t.Errorf("first item Name = %q, want %q", got[0].Name, "s0")
@@ -1017,6 +1031,108 @@ func TestConvertDirHistoryEntries(t *testing.T) {
 		got := convertDirHistoryEntries(entries, "local")
 		if !got[0].LastUsedAt.Equal(now) {
 			t.Errorf("LastUsedAt not preserved")
+		}
+	})
+}
+
+// --- groupSessionsByFleet ---
+
+func TestGroupSessionsByFleet(t *testing.T) {
+	now := time.Now()
+
+	t.Run("groups by fleet name", func(t *testing.T) {
+		sessions := []session.Info{
+			{ID: "1", Name: "s1", Fleet: "backend", CreatedAt: now},
+			{ID: "2", Name: "s2", Fleet: "frontend", CreatedAt: now},
+			{ID: "3", Name: "s3", Fleet: "backend", CreatedAt: now.Add(time.Minute)},
+		}
+
+		groups := groupSessionsByFleet(sessions)
+		if len(groups) != 2 {
+			t.Fatalf("expected 2 groups, got %d", len(groups))
+		}
+		if groups[0].Name != "backend" {
+			t.Errorf("first group: got %q, want %q", groups[0].Name, "backend")
+		}
+		if len(groups[0].Sessions) != 2 {
+			t.Errorf("backend group: got %d sessions, want 2", len(groups[0].Sessions))
+		}
+		if groups[1].Name != "frontend" {
+			t.Errorf("second group: got %q, want %q", groups[1].Name, "frontend")
+		}
+	})
+
+	t.Run("default fleet is last", func(t *testing.T) {
+		sessions := []session.Info{
+			{ID: "1", Name: "s1", Fleet: "", CreatedAt: now},
+			{ID: "2", Name: "s2", Fleet: "alpha", CreatedAt: now},
+			{ID: "3", Name: "s3", Fleet: "beta", CreatedAt: now},
+		}
+
+		groups := groupSessionsByFleet(sessions)
+		if len(groups) != 3 {
+			t.Fatalf("expected 3 groups, got %d", len(groups))
+		}
+		if groups[0].Name != "alpha" {
+			t.Errorf("first group: got %q, want %q", groups[0].Name, "alpha")
+		}
+		if groups[1].Name != "beta" {
+			t.Errorf("second group: got %q, want %q", groups[1].Name, "beta")
+		}
+		if groups[2].Name != "default" {
+			t.Errorf("last group: got %q, want %q", groups[2].Name, "default")
+		}
+	})
+
+	t.Run("empty fleet treated as default", func(t *testing.T) {
+		sessions := []session.Info{
+			{ID: "1", Name: "s1", Fleet: "", CreatedAt: now},
+			{ID: "2", Name: "s2", Fleet: "", CreatedAt: now},
+		}
+
+		groups := groupSessionsByFleet(sessions)
+		if len(groups) != 1 {
+			t.Fatalf("expected 1 group, got %d", len(groups))
+		}
+		if groups[0].Name != "default" {
+			t.Errorf("group name: got %q, want %q", groups[0].Name, "default")
+		}
+		if len(groups[0].Sessions) != 2 {
+			t.Errorf("group sessions: got %d, want 2", len(groups[0].Sessions))
+		}
+	})
+
+	t.Run("single fleet no headers needed", func(t *testing.T) {
+		sessions := []session.Info{
+			{ID: "1", Name: "s1", Fleet: "only", CreatedAt: now},
+		}
+
+		groups := groupSessionsByFleet(sessions)
+		if len(groups) != 1 {
+			t.Fatalf("expected 1 group, got %d", len(groups))
+		}
+	})
+
+	t.Run("empty sessions", func(t *testing.T) {
+		groups := groupSessionsByFleet(nil)
+		if len(groups) != 0 {
+			t.Errorf("expected 0 groups, got %d", len(groups))
+		}
+	})
+}
+
+func TestGetFleetName(t *testing.T) {
+	t.Run("returns fleet name when set", func(t *testing.T) {
+		sess := session.Info{Fleet: "myfleet"}
+		if got := getFleetName(sess); got != "myfleet" {
+			t.Errorf("got %q, want %q", got, "myfleet")
+		}
+	})
+
+	t.Run("returns default when empty", func(t *testing.T) {
+		sess := session.Info{Fleet: ""}
+		if got := getFleetName(sess); got != "default" {
+			t.Errorf("got %q, want %q", got, "default")
 		}
 	})
 }

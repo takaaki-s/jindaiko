@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -236,6 +237,8 @@ func (m *Model) getItemsPerPage() int {
 	if m.searching {
 		availableLines-- // search bar takes 1 line
 	}
+	// Reserve space for fleet group headers (1 line each, estimate max 2 groups per page)
+	availableLines -= 2
 	availableLines = max(availableLines, 4)
 	// Each session takes ~4 lines (name + status + meta + time)
 	items := availableLines / 4
@@ -292,6 +295,7 @@ func matchesSearch(sess session.Info, query string) bool {
 		sess.WorkDir,
 		sess.CurrentWorkDir,
 		sess.CurrentBranch,
+		sess.Fleet,
 	}
 	for _, field := range fields {
 		if field != "" && strings.Contains(strings.ToLower(field), query) {
@@ -917,8 +921,8 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reconnect to session at cursor after delete/kill
 		if m.needsReswitch {
 			m.needsReswitch = false
-			m.currentSessionID = ""          // Force reset
-			m.displayLocalAttach = false     // Pane process is dead after delete/kill
+			m.currentSessionID = ""      // Force reset
+			m.displayLocalAttach = false // Pane process is dead after delete/kill
 			pageSessions := m.getPageSessions()
 			if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
 				m.switchToSession(pageSessions[m.cursor].ID)
@@ -1090,10 +1094,24 @@ func (m Model) renderListContent(contentWidth int) string {
 		content.WriteString("\n")
 	} else {
 		pageSessions := m.getPageSessions()
+		groups := groupSessionsByFleet(pageSessions)
+		showHeaders := len(groups) > 1
+
+		// Build ID-to-cursor-index mapping for correct selection highlighting
+		idToIdx := make(map[string]int, len(pageSessions))
 		for i, sess := range pageSessions {
-			content.WriteString(m.renderSession(sess, i == m.cursor, contentWidth))
+			idToIdx[sess.ID] = i
 		}
 
+		for _, group := range groups {
+			if showHeaders {
+				content.WriteString(renderFleetHeader(group.Name, contentWidth))
+			}
+			for _, sess := range group.Sessions {
+				idx := idToIdx[sess.ID]
+				content.WriteString(m.renderSession(sess, idx == m.cursor, contentWidth))
+			}
+		}
 	}
 
 	// Page info
@@ -1422,6 +1440,79 @@ func getStatusDisplay(status session.Status) (icon, label string, style lipgloss
 	default:
 		return "?", "UNKNOWN", stoppedStyle
 	}
+}
+
+// defaultFleetName is used when a session has no fleet assigned.
+const defaultFleetName = "default"
+
+// fleetGroup represents a group of sessions belonging to the same fleet.
+type fleetGroup struct {
+	Name     string
+	Sessions []session.Info
+}
+
+// getFleetName returns the fleet name for a session, defaulting to "default".
+func getFleetName(sess session.Info) string {
+	if sess.Fleet == "" {
+		return defaultFleetName
+	}
+	return sess.Fleet
+}
+
+// groupSessionsByFleet groups sessions by fleet name.
+// Groups are sorted alphabetically, with "default" always last.
+// Sessions within each group maintain their original order.
+func groupSessionsByFleet(sessions []session.Info) []fleetGroup {
+	// Collect sessions by fleet
+	groupMap := make(map[string][]session.Info)
+	var fleetNames []string
+	seen := make(map[string]bool)
+
+	for _, sess := range sessions {
+		name := getFleetName(sess)
+		if !seen[name] {
+			seen[name] = true
+			fleetNames = append(fleetNames, name)
+		}
+		groupMap[name] = append(groupMap[name], sess)
+	}
+
+	// Sort fleet names alphabetically, "default" always last
+	sort.SliceStable(fleetNames, func(i, j int) bool {
+		if fleetNames[i] == defaultFleetName {
+			return false
+		}
+		if fleetNames[j] == defaultFleetName {
+			return true
+		}
+		return fleetNames[i] < fleetNames[j]
+	})
+
+	groups := make([]fleetGroup, 0, len(fleetNames))
+	for _, name := range fleetNames {
+		groups = append(groups, fleetGroup{
+			Name:     name,
+			Sessions: groupMap[name],
+		})
+	}
+	return groups
+}
+
+// renderFleetHeader renders a fleet group header line.
+func renderFleetHeader(name string, width int) string {
+	label := " " + name + " "
+	labelWidth := lipgloss.Width(label)
+
+	// ── fleet-name ──────
+	leftDash := "── "
+	rightDashCount := width - len(leftDash) - labelWidth
+	if rightDashCount < 1 {
+		rightDashCount = 1
+	}
+	rightDash := strings.Repeat("─", rightDashCount)
+
+	headerStyle := lipgloss.NewStyle().Foreground(secondaryColor)
+	return headerStyle.Render(leftDash+label+rightDash) + "\n"
 }
 
 // wrapText wraps text to fit within the specified width

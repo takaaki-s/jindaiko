@@ -22,6 +22,7 @@ const (
 	stepHost    formStep = iota // Host selection (only with multiple hosts)
 	stepWorkDir                 // Work directory selection
 	stepName                    // Session name
+	stepFleet                   // Fleet selection
 )
 
 // CreateFormModel is a standalone Bubble Tea model for the session creation form.
@@ -56,6 +57,9 @@ type CreateFormModel struct {
 
 	// Step 3: Session name
 	nameInput textinput.Model
+
+	// Step 4: Fleet selection
+	fleetInput textinput.Model
 }
 
 // createFormCompleteMsg is sent when session creation finishes.
@@ -84,15 +88,22 @@ func NewCreateFormModel(socketPath string) CreateFormModel {
 	nameInput.CharLimit = 100
 	nameInput.Width = 40
 
+	// Fleet input
+	fleetInput := textinput.New()
+	fleetInput.Placeholder = "default"
+	fleetInput.CharLimit = 50
+	fleetInput.Width = 40
+
 	// Dir picker - start at home directory
 	dirPicker := NewDirPickerModel(home)
 
 	m := CreateFormModel{
-		client:    client,
-		configMgr: configMgr,
-		hostInput: hostInput,
-		nameInput: nameInput,
-		dirPicker: dirPicker,
+		client:     client,
+		configMgr:  configMgr,
+		hostInput:  hostInput,
+		nameInput:  nameInput,
+		fleetInput: fleetInput,
+		dirPicker:  dirPicker,
 	}
 
 	// Fetch hosts
@@ -167,6 +178,11 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dirPicker.selected = false
 				m.nameInput.Blur()
 				return m, nil
+			case stepFleet:
+				m.step = stepName
+				m.fleetInput.Blur()
+				m.nameInput.Focus()
+				return m, nil
 			default:
 				return m, tea.Quit
 			}
@@ -176,9 +192,9 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.processingMsg = ""
 			m.err = msg.err
-			// Return to name step on error
-			m.step = stepName
-			m.nameInput.Focus()
+			// Return to fleet step on error
+			m.step = stepFleet
+			m.fleetInput.Focus()
 			return m, nil
 		}
 		// Success - set env var for parent TUI to detect
@@ -201,6 +217,8 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateWorkDirStep(msg)
 	case stepName:
 		return m.updateNameStep(msg)
+	case stepFleet:
+		return m.updateFleetStep(msg)
 	}
 
 	return m, nil
@@ -255,6 +273,26 @@ func (m CreateFormModel) View() string {
 		b.WriteString(stepStyle.Render("  Step 3: Session Name"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewNameStep())
+	case stepFleet:
+		if m.selectedHostID != "" && m.selectedHostID != "local" {
+			b.WriteString(stepStyle.Render(fmt.Sprintf("  Host: %s", m.selectedHostID)))
+			b.WriteString("\n")
+		}
+		displayDir := m.dirPicker.Result()
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
+			displayDir = "~" + displayDir[len(home):]
+		}
+		b.WriteString(stepStyle.Render(fmt.Sprintf("  Dir: %s", displayDir)))
+		b.WriteString("\n")
+		name := m.nameInput.Value()
+		if name == "" {
+			name = filepath.Base(m.dirPicker.Result())
+		}
+		b.WriteString(stepStyle.Render(fmt.Sprintf("  Name: %s", name)))
+		b.WriteString("\n")
+		b.WriteString(stepStyle.Render("  Step 4: Fleet"))
+		b.WriteString("\n\n")
+		b.WriteString(m.viewFleetStep())
 	}
 
 	return b.String()
@@ -382,7 +420,10 @@ func (m CreateFormModel) updateNameStep(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "enter":
-			return m.handleSubmit()
+			m.step = stepFleet
+			m.nameInput.Blur()
+			m.fleetInput.Focus()
+			return m, textinput.Blink
 		}
 	}
 
@@ -398,6 +439,36 @@ func (m CreateFormModel) viewNameStep() string {
 	b.WriteString("  " + labelStyle.Render("▸ Name:"))
 	b.WriteString("\n")
 	b.WriteString("    " + m.nameInput.View())
+	b.WriteString("\n\n")
+
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	b.WriteString("  " + helpStyle.Render("Enter:next  Esc:back"))
+
+	return b.String()
+}
+
+// --- Step: Fleet ---
+
+func (m CreateFormModel) updateFleetStep(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "enter":
+			return m.handleSubmit()
+		}
+	}
+
+	var cmd tea.Cmd
+	m.fleetInput, cmd = m.fleetInput.Update(msg)
+	return m, cmd
+}
+
+func (m CreateFormModel) viewFleetStep() string {
+	var b strings.Builder
+
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))
+	b.WriteString("  " + labelStyle.Render("▸ Fleet:"))
+	b.WriteString("\n")
+	b.WriteString("    " + m.fleetInput.View())
 	b.WriteString("\n\n")
 
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -427,6 +498,7 @@ func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
 	}
 
 	name := strings.TrimSpace(m.nameInput.Value())
+	fleet := strings.TrimSpace(m.fleetInput.Value())
 	hostID := m.selectedHostID
 
 	m.processingMsg = "Creating session..."
@@ -439,6 +511,7 @@ func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
 			WorkDir: workDir,
 			Start:   true,
 			HostID:  hostID,
+			Fleet:   fleet,
 		})
 		if err != nil {
 			return createFormCompleteMsg{err: err}
