@@ -299,65 +299,11 @@ Supported detach keys:
 | `ctrl+\` | Ctrl+Backslash |
 | `ctrl+g` | Ctrl+G |
 
-## Claude Code Hooks Setup
+## Claude Code Hooks
 
-ccvalet uses Claude Code hooks to detect session state changes. Add the following to `~/.claude/settings.json`.
+ccvalet uses Claude Code hooks to detect session state changes. **Hooks are configured automatically** — no manual setup required.
 
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt|elicitation_dialog|idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Replace `/absolute/path/to/ccvalet` with the full path to the `ccvalet` binary (use `which ccvalet` to find it).
-
-Hook roles:
+When a session starts, ccvalet generates `~/.ccvalet/hooks-settings.json` and passes it to Claude Code via `claude --settings`. This file wires up the following hooks:
 
 | Hook Event | Role |
 |-----------|------|

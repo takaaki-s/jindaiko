@@ -29,6 +29,7 @@ type Manager struct {
 	configMgr  *config.Manager
 	tmuxClient tmux.Runner // tmux client for session management
 	mu         sync.RWMutex
+	configDir  string
 }
 
 // SetTmuxClient sets the tmux client for tmux-based session management.
@@ -144,6 +145,7 @@ func NewManager(dataDir, configDir string, configMgr *config.Manager) (*Manager,
 		store:     store,
 		notifier:  notify.NewNotifier(),
 		configMgr: configMgr,
+		configDir: configDir,
 	}
 
 	// Load existing sessions
@@ -437,13 +439,26 @@ func (m *Manager) startSessionTmux(session *Session) error {
 
 	// Build Claude command
 	shell := m.configMgr.GetShell()
+
+	// Generate hooks settings file so Claude Code hooks are auto-configured
 	claudeCmd := "claude"
+	execPath, err := os.Executable()
+	if err == nil {
+		if hooksPath, err := ensureHooksSettingsFile(m.configDir, execPath); err == nil {
+			claudeCmd = fmt.Sprintf("claude --settings %s", hooksPath)
+		} else {
+			debugLog("[HOOKS] Warning: failed to generate hooks settings: %v", err)
+		}
+	} else {
+		debugLog("[HOOKS] Warning: failed to get executable path: %v", err)
+	}
+
 	if session.ClaudeSessionID != "" {
 		if session.ClaudeSessionStarted {
-			claudeCmd = fmt.Sprintf("claude --resume %s", session.ClaudeSessionID)
+			claudeCmd += fmt.Sprintf(" --resume %s", session.ClaudeSessionID)
 			debugLog("[SESSION] Resuming Claude session: %s", session.ClaudeSessionID)
 		} else {
-			claudeCmd = fmt.Sprintf("claude --session-id %s", session.ClaudeSessionID)
+			claudeCmd += fmt.Sprintf(" --session-id %s", session.ClaudeSessionID)
 			debugLog("[SESSION] Starting new Claude session with ID: %s", session.ClaudeSessionID)
 			session.ClaudeSessionStarted = true
 		}
@@ -873,4 +888,58 @@ func ensureClaudeTrustState(workDir string) error {
 
 	debugLog("[TRUST] Set hasTrustDialogAccepted=true for %s", absWorkDir)
 	return nil
+}
+
+// hooksEntry is a single hook command entry in the hooks settings file.
+type hooksEntry struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout"`
+}
+
+// hooksMatcher is a hook event matcher with its hooks list.
+type hooksMatcher struct {
+	Matcher string       `json:"matcher,omitempty"`
+	Hooks   []hooksEntry `json:"hooks"`
+}
+
+// hooksSettings is the structure written to hooks-settings.json.
+type hooksSettings struct {
+	Hooks map[string][]hooksMatcher `json:"hooks"`
+}
+
+// ensureHooksSettingsFile generates ~/.ccvalet/hooks-settings.json with the
+// ccvalet hook command for all required hook events. The file is written on
+// every call so that it stays up-to-date if the binary path changes.
+// Returns the absolute path to the generated file.
+func ensureHooksSettingsFile(dataDir, execPath string) (string, error) {
+	entry := hooksEntry{
+		Type:    "command",
+		Command: execPath + " hook",
+		Timeout: 5,
+	}
+	settings := hooksSettings{
+		Hooks: map[string][]hooksMatcher{
+			"UserPromptSubmit": {{Hooks: []hooksEntry{entry}}},
+			"Stop":             {{Hooks: []hooksEntry{entry}}},
+			"PostToolUse":      {{Hooks: []hooksEntry{entry}}},
+			"Notification": {{
+				Matcher: "permission_prompt|elicitation_dialog|idle_prompt",
+				Hooks:   []hooksEntry{entry},
+			}},
+		},
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal hooks settings: %w", err)
+	}
+
+	path := filepath.Join(dataDir, "hooks-settings.json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write hooks settings file: %w", err)
+	}
+
+	debugLog("[HOOKS] Wrote hooks settings to %s", path)
+	return path, nil
 }

@@ -299,63 +299,11 @@ keybindings:
 | `ctrl+\` | Ctrl+バックスラッシュ |
 | `ctrl+g` | Ctrl+G |
 
-## Claude Code Hooks 設定
+## Claude Code Hooks
 
-ccvalet はセッションの状態検知に Claude Code の hooks を使用します。以下の設定を `~/.claude/settings.json` に追加してください。
+ccvalet はセッションの状態検知に Claude Code の hooks を使用します。**Hooks は自動で設定されます** — 手動設定は不要です。
 
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt|elicitation_dialog|idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/ccvalet hook",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-`/absolute/path/to/ccvalet` は `ccvalet` バイナリのフルパスに置き換えてください（`which ccvalet` で確認可能）。
+セッション起動時に ccvalet が `~/.ccvalet/hooks-settings.json` を生成し、`claude --settings` 経由で Claude Code に渡します。
 
 各 hook の役割:
 
