@@ -274,7 +274,7 @@ func (s *Server) handleNotificationHistory(visited []string) Response {
 		results := make(chan remoteResult, len(targets))
 		for _, h := range targets {
 			go func(rh *host.Host) {
-				entries, err := rh.Client.NotificationHistoryWithHostID()
+				entries, err := rh.Client.NotificationHistoryWithHostID(visited)
 				results <- remoteResult{entries: entries, err: err, hostID: rh.ID}
 			}(h)
 		}
@@ -315,11 +315,15 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 
 	// Forward to the corresponding slave if destined for a remote host
 	if req.HostID != "" && req.HostID != "local" {
+		targetHostID := req.HostID
 		// Clear SSH_AUTH_SOCK: local socket path doesn't exist on remote host.
 		// The slave uses its own SSH_AUTH_SOCK from the SSH tunnel.
 		req.SSHAuthSock = ""
+		// Clear HostID so the slave handles the request locally instead of
+		// trying to forward it again (which would fail or loop).
+		req.HostID = ""
 		forwardData, _ := json.Marshal(req)
-		return s.forwardToHost(req.HostID, Request{Action: "new", Data: forwardData})
+		return s.forwardToHost(targetHostID, Request{Action: "new", Data: forwardData})
 	}
 
 	// Synchronous mode - mutual exclusion
@@ -395,7 +399,7 @@ func (s *Server) handleList(visited []string) Response {
 		results := make(chan remoteResult, len(targets))
 		for _, h := range targets {
 			go func(rh *host.Host) {
-				sessions, err := rh.Client.ListWithHostID()
+				sessions, err := rh.Client.ListWithHostID(visited)
 				results <- remoteResult{sessions: sessions, err: err, hostID: rh.ID}
 			}(h)
 		}
@@ -420,9 +424,12 @@ func (s *Server) handleGet(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
-	// Forward to the corresponding slave if destined for a remote host
+	// Forward to the corresponding slave if destined for a remote host.
+	// Clear HostID in the forwarded payload so the slave handles it locally.
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToHost(req.HostID, Request{Action: "get", Data: data})
+		fwdReq := IDRequest{ID: req.ID, HostID: ""}
+		fwdData, _ := json.Marshal(fwdReq)
+		return s.forwardToHost(req.HostID, Request{Action: "get", Data: fwdData})
 	}
 
 	sess, ok := s.manager.Get(req.ID)
@@ -465,9 +472,12 @@ func (s *Server) handleSend(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
-	// Forward to the corresponding slave if destined for a remote host
+	// Forward to the corresponding slave if destined for a remote host.
+	// Clear HostID in the forwarded payload so the slave handles it locally.
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToHost(req.HostID, Request{Action: "send", Data: data})
+		fwdReq := SendRequest{ID: req.ID, Prompt: req.Prompt, HostID: ""}
+		fwdData, _ := json.Marshal(fwdReq)
+		return s.forwardToHost(req.HostID, Request{Action: "send", Data: fwdData})
 	}
 
 	if req.Prompt == "" {
@@ -490,9 +500,12 @@ func (s *Server) handleStart(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
-	// Forward to the corresponding slave if destined for a remote host
+	// Forward to the corresponding slave if destined for a remote host.
+	// Clear HostID in the forwarded payload so the slave handles it locally.
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToHost(req.HostID, Request{Action: "start", Data: data})
+		fwdReq := IDRequest{ID: req.ID, HostID: ""}
+		fwdData, _ := json.Marshal(fwdReq)
+		return s.forwardToHost(req.HostID, Request{Action: "start", Data: fwdData})
 	}
 
 	if err := s.manager.StartBackground(req.ID); err != nil {
@@ -508,9 +521,12 @@ func (s *Server) handleKill(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
-	// Forward to the corresponding slave if destined for a remote host
+	// Forward to the corresponding slave if destined for a remote host.
+	// Clear HostID in the forwarded payload so the slave handles it locally.
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToHost(req.HostID, Request{Action: "kill", Data: data})
+		fwdReq := IDRequest{ID: req.ID, HostID: ""}
+		fwdData, _ := json.Marshal(fwdReq)
+		return s.forwardToHost(req.HostID, Request{Action: "kill", Data: fwdData})
 	}
 
 	if err := s.manager.Kill(req.ID); err != nil {
@@ -526,9 +542,12 @@ func (s *Server) handleDelete(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
-	// Forward to the corresponding slave if destined for a remote host
+	// Forward to the corresponding slave if destined for a remote host.
+	// Clear HostID in the forwarded payload so the slave handles it locally.
 	if req.HostID != "" && req.HostID != "local" {
-		return s.forwardToHost(req.HostID, Request{Action: "delete", Data: data})
+		fwdReq := IDRequest{ID: req.ID, HostID: ""}
+		fwdData, _ := json.Marshal(fwdReq)
+		return s.forwardToHost(req.HostID, Request{Action: "delete", Data: fwdData})
 	}
 
 	if err := s.manager.Delete(req.ID); err != nil {
@@ -632,11 +651,14 @@ func (s *Server) pollRemoteNotifications() {
 // It fetches notification histories from all remote slaves, compares against
 // lastSeen timestamps, and sends local desktop notifications for new entries.
 func (s *Server) pollRemoteOnce(lastSeen map[string]time.Time) {
+	// Pass the master's own hostID so slaves don't query the master back,
+	// preventing infinite loops in bidirectional topologies.
+	pollVisited := []string{s.hostID}
 	for _, h := range s.hostRegistry.AllReachable() {
 		if h.Client == nil {
 			continue
 		}
-		entries, err := h.Client.NotificationHistoryWithHostID()
+		entries, err := h.Client.NotificationHistoryWithHostID(pollVisited)
 		if err != nil {
 			continue
 		}

@@ -11,8 +11,14 @@ import (
 // SlaveClient is the interface for communicating with remote slave daemons
 type SlaveClient interface {
 	IsRunning() bool
-	ListWithHostID() ([]session.Info, error)
-	NotificationHistoryWithHostID() ([]notify.Entry, error)
+	// ListWithHostID returns the slave's sessions tagged with the client's HostID.
+	// visited is the list of host IDs already processed in this request chain,
+	// and is forwarded to the slave so it can skip querying those hosts back
+	// (prevents infinite loops in bidirectional master-slave topologies).
+	ListWithHostID(visited []string) ([]session.Info, error)
+	// NotificationHistoryWithHostID returns the slave's notification history tagged
+	// with the client's HostID, using the same visited-based loop prevention.
+	NotificationHistoryWithHostID(visited []string) ([]notify.Entry, error)
 	// SendRaw sends a raw JSON request and returns a raw JSON response.
 	// This avoids importing daemon types in the host package (no circular dependency).
 	SendRaw(action string, data, visited []byte) ([]byte, error)

@@ -168,7 +168,7 @@ func TestClient_ListWithHostID_Integration(t *testing.T) {
 	}
 
 	// The default client has hostID "local" (set by NewClient)
-	sessions, err := client.ListWithHostID()
+	sessions, err := client.ListWithHostID(nil)
 	if err != nil {
 		t.Fatalf("ListWithHostID: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestClient_ListWithHostID_Integration(t *testing.T) {
 
 	// Now create a remote client pointing at the same socket but with a different hostID
 	remoteClient := NewRemoteClient(client.socketPath, "remote-ec2")
-	sessions2, err := remoteClient.ListWithHostID()
+	sessions2, err := remoteClient.ListWithHostID(nil)
 	if err != nil {
 		t.Fatalf("ListWithHostID (remote): %v", err)
 	}
@@ -233,7 +233,7 @@ func TestClient_NotificationHistoryWithHostID_Integration(t *testing.T) {
 
 	// Use a remote client to call NotificationHistoryWithHostID
 	remoteClient := NewRemoteClient(client.socketPath, "staging-box")
-	entries, err := remoteClient.NotificationHistoryWithHostID()
+	entries, err := remoteClient.NotificationHistoryWithHostID(nil)
 	if err != nil {
 		t.Fatalf("NotificationHistoryWithHostID: %v", err)
 	}

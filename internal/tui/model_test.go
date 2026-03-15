@@ -771,16 +771,16 @@ func TestGetTotalPages(t *testing.T) {
 		},
 		{
 			name:        "exactly one page",
-			numSessions: 8,
+			numSessions: 7,
 			height:      40,
-			// itemsPerPage = 8, totalPages = ceil(8/8) = 1
+			// fleetGroupCount=1 → availableLines=40-8-1=31, itemsPerPage=31/4=7, totalPages=ceil(7/7)=1
 			wantPages: 1,
 		},
 		{
 			name:        "two pages",
 			numSessions: 9,
 			height:      40,
-			// itemsPerPage = 8, totalPages = ceil(9/8) = 2
+			// fleetGroupCount=1 → itemsPerPage=7, totalPages=ceil(9/7)=2
 			wantPages: 2,
 		},
 		{
@@ -821,18 +821,18 @@ func TestGetPageSessions(t *testing.T) {
 	t.Run("first page", func(t *testing.T) {
 		m := Model{
 			sessions:    sessions,
-			height:      40, // itemsPerPage = (40-8)/4 = 8
+			height:      40, // fleetGroupCount=1 → itemsPerPage=(40-8-1)/4=7
 			currentPage: 0,
 		}
 		got := m.getPageSessions()
-		if len(got) != 8 {
-			t.Fatalf("getPageSessions() page 0 len = %d, want 8", len(got))
+		if len(got) != 7 {
+			t.Fatalf("getPageSessions() page 0 len = %d, want 7", len(got))
 		}
 		if got[0].Name != "s0" {
 			t.Errorf("first item Name = %q, want %q", got[0].Name, "s0")
 		}
-		if got[7].Name != "s7" {
-			t.Errorf("last item Name = %q, want %q", got[7].Name, "s7")
+		if got[6].Name != "s6" {
+			t.Errorf("last item Name = %q, want %q", got[6].Name, "s6")
 		}
 	})
 
@@ -843,14 +843,14 @@ func TestGetPageSessions(t *testing.T) {
 			currentPage: 1,
 		}
 		got := m.getPageSessions()
-		if len(got) != 2 {
-			t.Fatalf("getPageSessions() page 1 len = %d, want 2", len(got))
+		if len(got) != 3 {
+			t.Fatalf("getPageSessions() page 1 len = %d, want 3", len(got))
 		}
-		if got[0].Name != "s8" {
-			t.Errorf("first item Name = %q, want %q", got[0].Name, "s8")
+		if got[0].Name != "s7" {
+			t.Errorf("first item Name = %q, want %q", got[0].Name, "s7")
 		}
-		if got[1].Name != "s9" {
-			t.Errorf("last item Name = %q, want %q", got[1].Name, "s9")
+		if got[2].Name != "s9" {
+			t.Errorf("last item Name = %q, want %q", got[2].Name, "s9")
 		}
 	})
 
@@ -861,8 +861,8 @@ func TestGetPageSessions(t *testing.T) {
 			currentPage: 99,
 		}
 		got := m.getPageSessions()
-		if len(got) != 8 {
-			t.Fatalf("getPageSessions() beyond range len = %d, want 8", len(got))
+		if len(got) != 7 {
+			t.Fatalf("getPageSessions() beyond range len = %d, want 7", len(got))
 		}
 		if got[0].Name != "s0" {
 			t.Errorf("first item Name = %q, want %q", got[0].Name, "s0")
@@ -1101,7 +1101,7 @@ func TestGroupSessionsByFleet(t *testing.T) {
 		}
 	})
 
-	t.Run("single fleet no headers needed", func(t *testing.T) {
+	t.Run("single fleet still returns one group", func(t *testing.T) {
 		sessions := []session.Info{
 			{ID: "1", Name: "s1", Fleet: "only", CreatedAt: now},
 		}

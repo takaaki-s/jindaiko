@@ -752,11 +752,11 @@ func (m *mockSlaveClient) IsRunning() bool {
 	return m.running
 }
 
-func (m *mockSlaveClient) ListWithHostID() ([]session.Info, error) {
+func (m *mockSlaveClient) ListWithHostID(_ []string) ([]session.Info, error) {
 	return nil, nil
 }
 
-func (m *mockSlaveClient) NotificationHistoryWithHostID() ([]notify.Entry, error) {
+func (m *mockSlaveClient) NotificationHistoryWithHostID(_ []string) ([]notify.Entry, error) {
 	return m.entries, m.err
 }
 
@@ -1027,4 +1027,122 @@ func TestIntegration_SendWithHostID(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for Send with non-existent remote hostID, got nil")
 	}
+}
+
+// TestIntegration_ListWithHostID_VisitedPropagated verifies that ListWithHostID passes
+// the visited slice to the server so the server can skip already-visited hosts.
+// This prevents infinite routing loops in bidirectional master-slave topologies.
+func TestIntegration_ListWithHostID_VisitedPropagated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	server, client := setupTestServer(t)
+
+	// Register a mock slave so handleList sees a reachable host
+	var capturedVisited []string
+	spy := &visitedCaptureMock{captureList: func(v []string) { capturedVisited = v }}
+	registry := host.NewRegistry([]config.HostConfig{{ID: "ec2", Type: "ssh"}})
+	registry.SetClient("ec2", spy)
+	server.hostRegistry = registry
+
+	// ListWithHostID passes visited=["master"] — the server must forward this to ec2
+	visited := []string{"master"}
+	_, err := client.ListWithHostID(visited)
+	if err != nil {
+		t.Fatalf("ListWithHostID: %v", err)
+	}
+
+	// The mock should have been called with visited containing "master" and "local" (server's own ID)
+	found := false
+	for _, v := range capturedVisited {
+		if v == "master" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ListWithHostID did not propagate visited to slave: got %v, want to contain 'master'", capturedVisited)
+	}
+}
+
+// visitedCaptureMock captures the visited argument for inspection in tests.
+type visitedCaptureMock struct {
+	captureList func([]string)
+	captureNotif func([]string)
+}
+
+func (m *visitedCaptureMock) IsRunning() bool { return true }
+func (m *visitedCaptureMock) ListWithHostID(visited []string) ([]session.Info, error) {
+	if m.captureList != nil {
+		m.captureList(visited)
+	}
+	return nil, nil
+}
+func (m *visitedCaptureMock) NotificationHistoryWithHostID(visited []string) ([]notify.Entry, error) {
+	if m.captureNotif != nil {
+		m.captureNotif(visited)
+	}
+	return nil, nil
+}
+func (m *visitedCaptureMock) SendRaw(action string, data, visited []byte) ([]byte, error) {
+	return []byte(`{"success":true}`), nil
+}
+
+// TestIntegration_ForwardedRequestHostIDCleared verifies that when a targeted operation
+// (e.g., delete) is forwarded to a remote slave, the HostID is cleared in the payload
+// so the slave does not try to forward the request again.
+func TestIntegration_ForwardedRequestHostIDCleared(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	server, client := setupTestServer(t)
+
+	var receivedAction string
+	var receivedData []byte
+	spy := &rawCaptureMock{
+		capture: func(action string, data []byte) {
+			receivedAction = action
+			receivedData = data
+		},
+	}
+	registry := host.NewRegistry([]config.HostConfig{{ID: "ec2", Type: "ssh"}})
+	registry.SetClient("ec2", spy)
+	server.hostRegistry = registry
+
+	// Issue a delete targeted at "ec2"
+	_ = client.Delete("some-id", "ec2")
+
+	if receivedAction != "delete" {
+		t.Errorf("forwarded action = %q, want delete", receivedAction)
+	}
+
+	// The forwarded payload must not contain host_id "ec2"
+	var fwd IDRequest
+	if err := json.Unmarshal(receivedData, &fwd); err != nil {
+		t.Fatalf("unmarshal forwarded data: %v", err)
+	}
+	if fwd.HostID != "" {
+		t.Errorf("forwarded HostID = %q, want empty (slave must handle locally)", fwd.HostID)
+	}
+}
+
+// rawCaptureMock captures SendRaw calls for inspection.
+type rawCaptureMock struct {
+	capture func(action string, data []byte)
+}
+
+func (m *rawCaptureMock) IsRunning() bool { return true }
+func (m *rawCaptureMock) ListWithHostID(_ []string) ([]session.Info, error) {
+	return nil, nil
+}
+func (m *rawCaptureMock) NotificationHistoryWithHostID(_ []string) ([]notify.Entry, error) {
+	return nil, nil
+}
+func (m *rawCaptureMock) SendRaw(action string, data, visited []byte) ([]byte, error) {
+	if m.capture != nil {
+		m.capture(action, data)
+	}
+	return []byte(`{"success":false,"error":"session not found"}`), nil
 }

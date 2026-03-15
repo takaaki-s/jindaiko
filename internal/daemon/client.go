@@ -157,10 +157,18 @@ func (c *Client) List() ([]session.Info, error) {
 	return sessions, nil
 }
 
-// ListWithHostID lists all sessions and tags each with this client's HostID
-func (c *Client) ListWithHostID() ([]session.Info, error) {
-	sessions, err := c.List()
+// ListWithHostID lists sessions on the slave, passing visited to prevent routing loops,
+// and tags each result with this client's HostID.
+func (c *Client) ListWithHostID(visited []string) ([]session.Info, error) {
+	resp, err := c.send(Request{Action: "list", Visited: visited})
 	if err != nil {
+		return nil, err
+	}
+	if !resp.Success {
+		return nil, errors.New(resp.Error)
+	}
+	var sessions []session.Info
+	if err := json.Unmarshal(resp.Data, &sessions); err != nil {
 		return nil, err
 	}
 	for i := range sessions {
@@ -250,10 +258,18 @@ func (c *Client) NotificationHistory() ([]notify.Entry, error) {
 	return entries, nil
 }
 
-// NotificationHistoryWithHostID retrieves notification history and tags each entry with HostID
-func (c *Client) NotificationHistoryWithHostID() ([]notify.Entry, error) {
-	entries, err := c.NotificationHistory()
+// NotificationHistoryWithHostID retrieves notification history from the slave, passing visited
+// to prevent routing loops, and tags each entry with this client's HostID.
+func (c *Client) NotificationHistoryWithHostID(visited []string) ([]notify.Entry, error) {
+	resp, err := c.send(Request{Action: "notification-history", Visited: visited})
 	if err != nil {
+		return nil, err
+	}
+	if !resp.Success {
+		return nil, errors.New(resp.Error)
+	}
+	var entries []notify.Entry
+	if err := json.Unmarshal(resp.Data, &entries); err != nil {
 		return nil, err
 	}
 	for i := range entries {
