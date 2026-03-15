@@ -645,6 +645,33 @@ func (m *Manager) captureOutputTmux(session *Session) {
 				lastTrackedPath = currentPath
 			}
 		}
+
+		// Fallback: if the session has been in "running" since a fresh start and no
+		// hook has arrived within hookIdleTimeout, assume Claude is idle and waiting
+		// for input. This handles the case where Claude Code does not fire Stop or
+		// idle_prompt during initial startup.
+		//
+		// StartedAt is json:"-" (runtime-only) so it is always zero after a daemon
+		// restart. The !startedAt.IsZero() guard ensures this fallback never fires
+		// for daemon-recovered sessions (preventing false idle transitions while a
+		// task is still running).
+		m.mu.RLock()
+		fbStatus := session.Status
+		fbLastOutput := session.LastOutputTime
+		fbStartedAt := session.StartedAt
+		m.mu.RUnlock()
+
+		const hookIdleTimeout = 30 * time.Second
+		if fbStatus == StatusRunning && !fbStartedAt.IsZero() && time.Since(fbLastOutput) > hookIdleTimeout {
+			m.mu.Lock()
+			if _, exists := m.sessions[session.ID]; exists && session.Status == StatusRunning {
+				session.Status = StatusIdle
+				session.LastOutputTime = time.Now()
+				debugLog("[POLL] Session %s: running -> idle (no hook received for %s, fallback)", session.Name, hookIdleTimeout)
+			}
+			m.mu.Unlock()
+			_ = m.store.Save(session)
+		}
 	}
 }
 

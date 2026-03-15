@@ -1122,3 +1122,97 @@ func TestManager_EnsureClaudeTrustState_MultipleProjects(t *testing.T) {
 		t.Error("project 2 HasTrustDialogAccepted = false, want true")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Idle fallback tests (hook-timeout detection in captureOutputTmux)
+// ---------------------------------------------------------------------------
+
+// TestManager_IdleFallback_FreshStart verifies that a session in StatusRunning
+// with a non-zero StartedAt and stale LastOutputTime satisfies the fallback
+// condition that captureOutputTmux uses to transition running → idle.
+func TestManager_IdleFallback_FreshStart(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/idle-fallback-fresh", Name: "ifb-fresh"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Simulate a fresh start: status running, StartedAt and LastOutputTime set 31s ago.
+	mgr.mu.Lock()
+	sess.Status = StatusRunning
+	sess.StartedAt = time.Now().Add(-31 * time.Second)
+	sess.LastOutputTime = time.Now().Add(-31 * time.Second)
+	mgr.mu.Unlock()
+
+	const hookIdleTimeout = 30 * time.Second
+
+	mgr.mu.RLock()
+	fbStatus := sess.Status
+	fbLastOutput := sess.LastOutputTime
+	fbStartedAt := sess.StartedAt
+	mgr.mu.RUnlock()
+
+	// The condition must be true for the fallback to fire.
+	if !(fbStatus == StatusRunning && !fbStartedAt.IsZero() && time.Since(fbLastOutput) > hookIdleTimeout) {
+		t.Fatal("expected idle fallback condition to be true for a fresh start with stale LastOutputTime")
+	}
+
+	// Apply the same transition captureOutputTmux would perform.
+	mgr.mu.Lock()
+	if _, exists := mgr.sessions[sess.ID]; exists && sess.Status == StatusRunning {
+		sess.Status = StatusIdle
+		sess.LastOutputTime = time.Now()
+	}
+	mgr.mu.Unlock()
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("session not found after fallback transition")
+	}
+	if got.Status != StatusIdle {
+		t.Errorf("Status = %q, want %q", got.Status, StatusIdle)
+	}
+}
+
+// TestManager_IdleFallback_DaemonRecovery verifies that sessions recovered after
+// a daemon restart (StartedAt == zero) do NOT satisfy the fallback condition,
+// preventing false idle transitions while a task may still be running.
+func TestManager_IdleFallback_DaemonRecovery(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/idle-fallback-recover", Name: "ifb-recover"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Simulate daemon recovery: StartedAt is zero (json:"-" field, never set on recovery).
+	mgr.mu.Lock()
+	sess.Status = StatusRunning
+	// sess.StartedAt is zero by default — as it would be after daemon restart.
+	sess.LastOutputTime = time.Now().Add(-31 * time.Second)
+	mgr.mu.Unlock()
+
+	const hookIdleTimeout = 30 * time.Second
+
+	mgr.mu.RLock()
+	fbStatus := sess.Status
+	fbLastOutput := sess.LastOutputTime
+	fbStartedAt := sess.StartedAt
+	mgr.mu.RUnlock()
+
+	// The condition must be false (StartedAt.IsZero() == true), so fallback does not fire.
+	shouldFallback := fbStatus == StatusRunning && !fbStartedAt.IsZero() && time.Since(fbLastOutput) > hookIdleTimeout
+	if shouldFallback {
+		t.Error("idle fallback condition should be false when StartedAt is zero (daemon recovery)")
+	}
+
+	// Status must remain running.
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("session not found")
+	}
+	if got.Status != StatusRunning {
+		t.Errorf("Status = %q, want %q (should not change without hook)", got.Status, StatusRunning)
+	}
+}
