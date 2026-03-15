@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// DefaultFleet is the fleet name used when no fleet is specified.
+const DefaultFleet = "default"
+
 // Status represents the session status
 type Status string
 
@@ -35,7 +38,7 @@ type Session struct {
 	ClaudeSessionStarted bool   `json:"claude_session_started,omitempty"` // Whether the CC session has been started at least once
 
 	// Fleet grouping
-	Fleet string `json:"fleet,omitempty"` // Fleet name for session grouping (empty = "default")
+	Fleet string `json:"fleet"` // Fleet name for session grouping
 
 	// Host info (multi-host support)
 	HostID string `json:"host_id,omitempty"` // Host identifier ("local", "ec2", "docker-dev", etc.)
@@ -66,7 +69,7 @@ type Info struct {
 	ErrorMessage    string    `json:"error_message,omitempty"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
 	TmuxWindowName  string    `json:"tmux_window_name,omitempty"`  // tmux window name
-	Fleet           string    `json:"fleet,omitempty"`             // Fleet name for session grouping
+	Fleet           string    `json:"fleet"`                       // Fleet name for session grouping
 	HostID          string    `json:"host_id,omitempty"`           // Host identifier
 
 	// Tracked fields (dynamic, from daemon polling)

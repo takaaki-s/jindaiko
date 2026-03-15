@@ -252,7 +252,7 @@ func (m *Model) getItemsPerPage() int {
 func (m *Model) fleetGroupCount() int {
 	seen := make(map[string]bool)
 	for _, s := range m.sessions {
-		seen[getFleetName(s)] = true
+		seen[s.Fleet] = true
 	}
 	return len(seen)
 }
@@ -1453,25 +1453,14 @@ func getStatusDisplay(status session.Status) (icon, label string, style lipgloss
 	}
 }
 
-// defaultFleetName is used when a session has no fleet assigned.
-const defaultFleetName = "default"
-
 // fleetGroup represents a group of sessions belonging to the same fleet.
 type fleetGroup struct {
 	Name     string
 	Sessions []session.Info
 }
 
-// getFleetName returns the fleet name for a session, defaulting to "default".
-func getFleetName(sess session.Info) string {
-	if sess.Fleet == "" {
-		return defaultFleetName
-	}
-	return sess.Fleet
-}
-
 // groupSessionsByFleet groups sessions by fleet name.
-// Groups are sorted alphabetically, with "default" always last.
+// Groups are sorted alphabetically, with session.DefaultFleet always last.
 // Sessions within each group maintain their original order.
 func groupSessionsByFleet(sessions []session.Info) []fleetGroup {
 	// Collect sessions by fleet
@@ -1480,7 +1469,7 @@ func groupSessionsByFleet(sessions []session.Info) []fleetGroup {
 	seen := make(map[string]bool)
 
 	for _, sess := range sessions {
-		name := getFleetName(sess)
+		name := sess.Fleet
 		if !seen[name] {
 			seen[name] = true
 			fleetNames = append(fleetNames, name)
@@ -1488,12 +1477,12 @@ func groupSessionsByFleet(sessions []session.Info) []fleetGroup {
 		groupMap[name] = append(groupMap[name], sess)
 	}
 
-	// Sort fleet names alphabetically, "default" always last
+	// Sort fleet names alphabetically, DefaultFleet always last
 	sort.SliceStable(fleetNames, func(i, j int) bool {
-		if fleetNames[i] == defaultFleetName {
+		if fleetNames[i] == session.DefaultFleet {
 			return false
 		}
-		if fleetNames[j] == defaultFleetName {
+		if fleetNames[j] == session.DefaultFleet {
 			return true
 		}
 		return fleetNames[i] < fleetNames[j]

@@ -304,7 +304,7 @@ type NewRequest struct {
 	Start       bool   `json:"start"`
 	HostID      string `json:"host_id,omitempty"`       // Target host (empty = "local")
 	SSHAuthSock string `json:"ssh_auth_sock,omitempty"` // SSH_AUTH_SOCK (for git operations)
-	Fleet       string `json:"fleet,omitempty"`         // Fleet name for session grouping
+	Fleet       string `json:"fleet"`                   // Fleet name for session grouping
 }
 
 func (s *Server) handleNew(data json.RawMessage) Response {
