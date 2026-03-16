@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/takaaki-s/claude-code-valet/internal/config"
 )
 
@@ -703,6 +704,102 @@ func TestDirPickerModel_SetRemoteHost(t *testing.T) {
 		}
 		if m.filtered != nil {
 			t.Errorf("filtered should be nil, got %v", m.filtered)
+		}
+	})
+}
+
+// --- Left/Right section navigation ---
+
+func sendKey(m DirPickerModel, key string) DirPickerModel {
+	var msg tea.KeyMsg
+	switch key {
+	case "left":
+		msg = tea.KeyMsg{Type: tea.KeyLeft}
+	case "right":
+		msg = tea.KeyMsg{Type: tea.KeyRight}
+	default:
+		msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+	}
+	updated, _ := m.Update(msg)
+	return updated
+}
+
+func TestDirPickerModel_LeftRightNavigation(t *testing.T) {
+	history := []HistoryEntry{
+		{Path: "/home/user/a", DisplayPath: "~/a"},
+		{Path: "/home/user/b", DisplayPath: "~/b"},
+	}
+	dirs := []string{"dir1", "dir2", "dir3"}
+
+	t.Run("left jumps to top of history from directory section", func(t *testing.T) {
+		m := DirPickerModel{
+			filteredHistory: history,
+			filtered:        dirs,
+			cursor:          len(history) + 1, // inside directory section
+		}
+		m = sendKey(m, "left")
+		if m.cursor != 0 {
+			t.Errorf("cursor should be 0 after left key, got %d", m.cursor)
+		}
+	})
+
+	t.Run("left jumps to top of history when already in history", func(t *testing.T) {
+		m := DirPickerModel{
+			filteredHistory: history,
+			filtered:        dirs,
+			cursor:          1, // second history entry
+		}
+		m = sendKey(m, "left")
+		if m.cursor != 0 {
+			t.Errorf("cursor should be 0 after left key, got %d", m.cursor)
+		}
+	})
+
+	t.Run("right jumps to top of directory section from history", func(t *testing.T) {
+		m := DirPickerModel{
+			filteredHistory: history,
+			filtered:        dirs,
+			cursor:          0, // first history entry
+		}
+		m = sendKey(m, "right")
+		if m.cursor != len(history) {
+			t.Errorf("cursor should be %d after right key, got %d", len(history), m.cursor)
+		}
+	})
+
+	t.Run("right jumps to top of directory section when already in directories", func(t *testing.T) {
+		m := DirPickerModel{
+			filteredHistory: history,
+			filtered:        dirs,
+			cursor:          len(history) + 2, // third directory entry
+		}
+		m = sendKey(m, "right")
+		if m.cursor != len(history) {
+			t.Errorf("cursor should be %d after right key, got %d", len(history), m.cursor)
+		}
+	})
+
+	t.Run("left is no-op when history is empty", func(t *testing.T) {
+		m := DirPickerModel{
+			filteredHistory: nil,
+			filtered:        dirs,
+			cursor:          1,
+		}
+		m = sendKey(m, "left")
+		if m.cursor != 1 {
+			t.Errorf("cursor should remain 1 when no history, got %d", m.cursor)
+		}
+	})
+
+	t.Run("right is no-op when directories are empty", func(t *testing.T) {
+		m := DirPickerModel{
+			filteredHistory: history,
+			filtered:        nil,
+			cursor:          0,
+		}
+		m = sendKey(m, "right")
+		if m.cursor != 0 {
+			t.Errorf("cursor should remain 0 when no directories, got %d", m.cursor)
 		}
 	})
 }

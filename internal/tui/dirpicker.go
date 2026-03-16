@@ -367,6 +367,23 @@ func (m DirPickerModel) Update(msg tea.Msg) (DirPickerModel, tea.Cmd) {
 			}
 			return m, nil
 
+		case "left":
+			// Jump to top of history section
+			if len(m.filteredHistory) > 0 {
+				m.cursor = 0
+				m.adjustScroll()
+			}
+			return m, nil
+
+		case "right":
+			// Jump to top of directory section
+			historyLen := len(m.filteredHistory)
+			if len(m.filtered) > 0 {
+				m.cursor = historyLen
+				m.adjustScroll()
+			}
+			return m, nil
+
 		case "ctrl+h":
 			// Toggle hidden directories
 			m.showHidden = !m.showHidden
@@ -561,7 +578,7 @@ func (m DirPickerModel) View() string {
 	if m.showHidden {
 		hiddenHint = "Ctrl+H:hide hidden"
 	}
-	b.WriteString("  " + hintStyle.Render("Enter:open  Tab:select  Backspace:parent  "+hiddenHint))
+	b.WriteString("  " + hintStyle.Render("Enter:open  Tab:select  Backspace:parent  ←/→:section  "+hiddenHint))
 
 	return b.String()
 }
