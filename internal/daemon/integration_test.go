@@ -1128,6 +1128,117 @@ func TestIntegration_ForwardedRequestHostIDCleared(t *testing.T) {
 	}
 }
 
+// TestIntegration_HandleList_SortedByFleet verifies that handleList() returns sessions
+// sorted by fleet (alphabetically, "default" last) then by CreatedAt, even when remote
+// sessions are mixed in from multiple hosts.
+func TestIntegration_HandleList_SortedByFleet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	now := time.Now()
+
+	tests := []struct {
+		name          string
+		remoteSessions []session.Info
+		wantFleets    []string // expected Fleet order in result
+	}{
+		{
+			name: "mixed fleet local and remote sessions",
+			remoteSessions: []session.Info{
+				// Remote sessions use past timestamps so local sessions (created after now)
+				// are always later within the same fleet.
+				{ID: "remote-work-1", Fleet: "work", CreatedAt: now.Add(-10 * time.Second)},
+				{ID: "remote-default-1", Fleet: session.DefaultFleet, CreatedAt: now.Add(-5 * time.Second)},
+			},
+			wantFleets: []string{"work", "work", session.DefaultFleet, session.DefaultFleet},
+		},
+		{
+			name:           "remote returns empty",
+			remoteSessions: []session.Info{},
+			wantFleets:     []string{"work", session.DefaultFleet},
+		},
+		{
+			name: "all same fleet remote earlier than local",
+			remoteSessions: []session.Info{
+				{ID: "remote-work-1", Fleet: "work", CreatedAt: now.Add(-20 * time.Second)},
+			},
+			wantFleets: []string{"work", "work", session.DefaultFleet},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server, client := setupTestServer(t)
+
+			// Create local sessions: one "work", one "default" (different dirs to avoid conflict)
+			tmpDir := shortTempDir(t)
+			_, err := client.NewWithOptions(NewOptions{WorkDir: tmpDir + "/work", Fleet: "work", Start: false})
+			if err != nil {
+				t.Fatalf("NewWithOptions(work): %v", err)
+			}
+
+			_, err = client.NewWithOptions(NewOptions{WorkDir: tmpDir + "/def", Fleet: session.DefaultFleet, Start: false})
+			if err != nil {
+				t.Fatalf("NewWithOptions(default): %v", err)
+			}
+
+			// Register a mock remote host returning tc.remoteSessions
+			mock := &listOnlyMock{sessions: tc.remoteSessions}
+			registry := host.NewRegistry([]config.HostConfig{{ID: "remote1", Type: "ssh"}})
+			registry.SetClient("remote1", mock)
+			server.hostRegistry = registry
+
+			infos, err := client.List()
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+
+			// Verify fleet ordering: non-default fleets before default,
+			// and within the same fleet sessions are in CreatedAt ascending order.
+			for i := 0; i < len(infos)-1; i++ {
+				fi, fj := infos[i].Fleet, infos[i+1].Fleet
+				if fi == session.DefaultFleet && fj != session.DefaultFleet {
+					t.Errorf("sort violation at [%d,%d]: default fleet before non-default (%q, %q)", i, i+1, fi, fj)
+				}
+				if fi == fj {
+					if infos[i].CreatedAt.After(infos[i+1].CreatedAt) {
+						t.Errorf("sort violation at [%d,%d]: same fleet but CreatedAt not ascending (%v > %v)", i, i+1, infos[i].CreatedAt, infos[i+1].CreatedAt)
+					}
+				}
+			}
+
+			// Verify fleets match expected sequence if specified
+			if len(tc.wantFleets) > 0 {
+				if len(infos) != len(tc.wantFleets) {
+					t.Fatalf("want %d sessions (wantFleets=%v), got %d: %v", len(tc.wantFleets), tc.wantFleets, len(infos), infos)
+				}
+				for i, info := range infos {
+					if info.Fleet != tc.wantFleets[i] {
+						t.Errorf("infos[%d].Fleet = %q, want %q", i, info.Fleet, tc.wantFleets[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+// listOnlyMock is a HostClient that returns a fixed session list.
+type listOnlyMock struct {
+	sessions []session.Info
+}
+
+func (m *listOnlyMock) IsRunning() bool { return true }
+func (m *listOnlyMock) ListWithHostID(_ []string) ([]session.Info, error) {
+	return m.sessions, nil
+}
+func (m *listOnlyMock) NotificationHistoryWithHostID(_ []string) ([]notify.Entry, error) {
+	return nil, nil
+}
+func (m *listOnlyMock) SendRaw(_ string, _, _ []byte) ([]byte, error) {
+	return []byte(`{"success":true}`), nil
+}
+
 // rawCaptureMock captures SendRaw calls for inspection.
 type rawCaptureMock struct {
 	capture func(action string, data []byte)

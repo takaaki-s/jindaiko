@@ -247,3 +247,92 @@ func TestSession_JSONOmitsRuntimeFields(t *testing.T) {
 		}
 	}
 }
+
+func TestSortInfos(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Second)
+	t2 := t0.Add(2 * time.Second)
+
+	tests := []struct {
+		name  string
+		input []Info
+		want  []string // expected ID order
+	}{
+		{
+			name:  "empty slice",
+			input: []Info{},
+			want:  []string{},
+		},
+		{
+			name:  "single element",
+			input: []Info{{ID: "a", Fleet: "work", CreatedAt: t0}},
+			want:  []string{"a"},
+		},
+		{
+			name: "default fleet sorts last",
+			input: []Info{
+				{ID: "d", Fleet: DefaultFleet, CreatedAt: t0},
+				{ID: "w", Fleet: "work", CreatedAt: t0},
+			},
+			want: []string{"w", "d"},
+		},
+		{
+			name: "non-default fleets sorted alphabetically",
+			input: []Info{
+				{ID: "z", Fleet: "zz", CreatedAt: t0},
+				{ID: "a", Fleet: "aa", CreatedAt: t0},
+				{ID: "d", Fleet: DefaultFleet, CreatedAt: t0},
+			},
+			want: []string{"a", "z", "d"},
+		},
+		{
+			name: "three non-default fleets sorted lexicographically",
+			input: []Info{
+				{ID: "c", Fleet: "cc", CreatedAt: t0},
+				{ID: "a", Fleet: "aa", CreatedAt: t0},
+				{ID: "b", Fleet: "bb", CreatedAt: t0},
+				{ID: "d", Fleet: DefaultFleet, CreatedAt: t0},
+			},
+			want: []string{"a", "b", "c", "d"},
+		},
+		{
+			name: "same fleet sorted by CreatedAt ascending",
+			input: []Info{
+				{ID: "new", Fleet: "work", CreatedAt: t2},
+				{ID: "old", Fleet: "work", CreatedAt: t0},
+				{ID: "mid", Fleet: "work", CreatedAt: t1},
+			},
+			want: []string{"old", "mid", "new"},
+		},
+		{
+			name: "SliceStable preserves original order for equal CreatedAt",
+			input: []Info{
+				{ID: "first", Fleet: "work", CreatedAt: t0},
+				{ID: "second", Fleet: "work", CreatedAt: t0},
+			},
+			want: []string{"first", "second"},
+		},
+		{
+			name: "only default fleet",
+			input: []Info{
+				{ID: "b", Fleet: DefaultFleet, CreatedAt: t1},
+				{ID: "a", Fleet: DefaultFleet, CreatedAt: t0},
+			},
+			want: []string{"a", "b"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			SortInfos(tc.input)
+			if len(tc.input) != len(tc.want) {
+				t.Fatalf("len = %d, want %d", len(tc.input), len(tc.want))
+			}
+			for i, info := range tc.input {
+				if info.ID != tc.want[i] {
+					t.Errorf("[%d] ID = %q, want %q", i, info.ID, tc.want[i])
+				}
+			}
+		})
+	}
+}

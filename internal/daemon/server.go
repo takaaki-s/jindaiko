@@ -372,7 +372,7 @@ func (s *Server) handleList(visited []string) Response {
 		}
 	}
 
-	// Return only local if no host registry
+	// Return only local if no host registry; manager.List() is already sorted.
 	if s.hostRegistry == nil {
 		data, _ := json.Marshal(localSessions)
 		return Response{Success: true, Data: data}
@@ -413,6 +413,10 @@ func (s *Server) handleList(visited []string) Response {
 			allSessions = append(allSessions, result.sessions...)
 		}
 	}
+
+	// Re-sort after merging remote sessions; manager.List() is already sorted
+	// but remote results arrive in arbitrary order.
+	session.SortInfos(allSessions)
 
 	data, _ := json.Marshal(allSessions)
 	return Response{Success: true, Data: data}

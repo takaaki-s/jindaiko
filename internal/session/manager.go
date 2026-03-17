@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -256,21 +255,7 @@ func (m *Manager) List() []Info {
 		}
 	}
 
-	// Sort by Fleet (alphabetically, "default" last), then by CreatedAt (oldest first)
-	sort.SliceStable(infos, func(i, j int) bool {
-		fi, fj := infos[i].Fleet, infos[j].Fleet
-		if fi != fj {
-			// DefaultFleet always sorts last
-			if fi == DefaultFleet {
-				return false
-			}
-			if fj == DefaultFleet {
-				return true
-			}
-			return fi < fj
-		}
-		return infos[i].CreatedAt.Before(infos[j].CreatedAt)
-	})
+	SortInfos(infos)
 
 	return infos
 }

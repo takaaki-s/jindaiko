@@ -1,6 +1,7 @@
 package session
 
 import (
+	"sort"
 	"time"
 )
 
@@ -79,6 +80,26 @@ type Info struct {
 	// Last messages from transcript
 	LastUserMessage      string `json:"last_user_message,omitempty"`      // Last user message content (truncated)
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"` // Last assistant message content (truncated)
+}
+
+// SortInfos sorts a slice of Info by Fleet (lexicographically, DefaultFleet last),
+// then by CreatedAt (oldest first). This is the canonical sort order used
+// throughout the application. This function sorts the slice in-place.
+func SortInfos(infos []Info) {
+	sort.SliceStable(infos, func(i, j int) bool {
+		fi, fj := infos[i].Fleet, infos[j].Fleet
+		if fi != fj {
+			// DefaultFleet always sorts last
+			if fi == DefaultFleet {
+				return false
+			}
+			if fj == DefaultFleet {
+				return true
+			}
+			return fi < fj
+		}
+		return infos[i].CreatedAt.Before(infos[j].CreatedAt)
+	})
 }
 
 // ToInfo converts Session to Info
