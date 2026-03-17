@@ -1068,7 +1068,7 @@ func TestIntegration_ListWithHostID_VisitedPropagated(t *testing.T) {
 
 // visitedCaptureMock captures the visited argument for inspection in tests.
 type visitedCaptureMock struct {
-	captureList func([]string)
+	captureList  func([]string)
 	captureNotif func([]string)
 }
 
@@ -1145,4 +1145,70 @@ func (m *rawCaptureMock) SendRaw(action string, data, visited []byte) ([]byte, e
 		m.capture(action, data)
 	}
 	return []byte(`{"success":false,"error":"session not found"}`), nil
+}
+
+// --- reconnectDeadTunnels / watchRemoteConnections tests ---
+
+func TestReconnectDeadTunnels_SkipsDockerHost(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	// Docker host with no tunnel registered (IsAlive=false) must be skipped.
+	registry := host.NewRegistry([]config.HostConfig{{ID: "docker-dev", Type: "docker"}})
+	server.hostRegistry = registry
+
+	// Should return without attempting any connection (no panic, no error).
+	server.reconnectDeadTunnels()
+}
+
+func TestReconnectDeadTunnels_DeadSSHHost(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	mock := &mockSlaveClient{running: true}
+	registry := host.NewRegistry([]config.HostConfig{{ID: "ec2", Type: "ssh"}})
+	registry.SetClient("ec2", mock)
+	server.hostRegistry = registry
+
+	// tunnelMgr has no tunnel for "ec2" so IsAlive returns false.
+	// reconnectDeadTunnels should set the reconnecting flag and spawn a goroutine.
+	// The goroutine will fail (no SSH available in CI) and clear the flag.
+	server.reconnectDeadTunnels()
+
+	// Verify the in-progress guard is set immediately after spawning.
+	server.reconnectingMu.Lock()
+	inProgress := server.reconnecting["ec2"]
+	server.reconnectingMu.Unlock()
+	if !inProgress {
+		t.Error("reconnecting[ec2] should be true while goroutine is running")
+	}
+
+	// Second call must be a no-op while reconnect is in progress:
+	// reconnecting map should still have exactly one entry.
+	server.reconnectDeadTunnels()
+	server.reconnectingMu.Lock()
+	count := len(server.reconnecting)
+	server.reconnectingMu.Unlock()
+	if count != 1 {
+		t.Errorf("reconnecting map should have 1 entry after no-op call, got %d", count)
+	}
+}
+
+func TestWatchRemoteConnections_StopsOnClose(t *testing.T) {
+	server, _ := setupTestServer(t)
+	server.stopPoll = make(chan struct{})
+	server.hostRegistry = host.NewRegistry(nil) // no remotes → reconnectDeadTunnels is a no-op
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.watchRemoteConnections()
+	}()
+
+	close(server.stopPoll)
+
+	select {
+	case <-done:
+		// goroutine exited cleanly
+	case <-time.After(1 * time.Second):
+		t.Error("watchRemoteConnections did not stop after stopPoll closed")
+	}
 }

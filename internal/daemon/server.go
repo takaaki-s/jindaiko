@@ -28,18 +28,22 @@ import (
 
 var debugLog = debug.NewLogger("daemon-debug.log")
 
+const remoteReconnectInterval = 30 * time.Second
+
 // Server is the daemon server
 type Server struct {
-	socketPath   string
-	hostID       string // This daemon's host ID (e.g., "mac", "ec2"; default "local")
-	manager      *session.Manager
-	configMgr    *config.Manager
-	stateMgr     *config.StateManager
-	listener     net.Listener
-	createMu     sync.Mutex      // Mutual exclusion for session creation
-	hostRegistry *host.Registry  // Multi-host management
-	tunnelMgr    *tunnel.Manager // SSH tunnel management
-	stopPoll     chan struct{}   // Signal to stop remote notification polling
+	socketPath     string
+	hostID         string // This daemon's host ID (e.g., "mac", "ec2"; default "local")
+	manager        *session.Manager
+	configMgr      *config.Manager
+	stateMgr       *config.StateManager
+	listener       net.Listener
+	createMu       sync.Mutex      // Mutual exclusion for session creation
+	hostRegistry   *host.Registry  // Multi-host management
+	tunnelMgr      *tunnel.Manager // SSH tunnel management
+	stopPoll       chan struct{}   // Signal to stop background goroutines; initialized once in initRemoteSlaves, never reassigned
+	reconnectingMu sync.Mutex      // Protects reconnecting map
+	reconnecting   map[string]bool // Tracks hosts with a reconnect goroutine in progress
 }
 
 // Message types
@@ -89,11 +93,12 @@ func NewServer(socketPath, dataDir, configDir, hostID string) (*Server, error) {
 	}
 
 	s := &Server{
-		socketPath: socketPath,
-		hostID:     hostID,
-		manager:    mgr,
-		configMgr:  configMgr,
-		stateMgr:   stateMgr,
+		socketPath:   socketPath,
+		hostID:       hostID,
+		manager:      mgr,
+		configMgr:    configMgr,
+		stateMgr:     stateMgr,
+		reconnecting: make(map[string]bool),
 	}
 
 	// Initialize multi-host support (always create registry for peer registration)
@@ -149,7 +154,7 @@ func (s *Server) Start() error {
 
 // Stop stops the daemon server
 func (s *Server) Stop() {
-	// Stop remote notification polling
+	// Stop background goroutines (remote notifications and connection watcher)
 	if s.stopPoll != nil {
 		close(s.stopPoll)
 	}
@@ -590,41 +595,93 @@ func (s *Server) initRemoteSlaves() {
 	}
 
 	for _, h := range s.hostRegistry.Remotes() {
-		// Build peer options for bidirectional routing
-		peerSocketPath := filepath.Join(tunnel.PeerSocketDir, s.hostID, "daemon.sock")
-		bootstrapOpts := host.BootstrapOptions{
-			PeerSocketPath: peerSocketPath,
-			PeerHostID:     s.hostID,
-		}
-		tunnelOpts := tunnel.TunnelOptions{
-			ReverseEnabled:    true,
-			LocalHostID:       s.hostID,
-			LocalDaemonSocket: s.socketPath,
-		}
-
-		// Step 1: Auto-start slave daemon (idempotent: no-op if already running)
-		if err := host.StartSlave(h.Config, bootstrapOpts); err != nil {
-			debugLog("[REMOTE] Failed to start slave on %s: %v", h.ID, err)
+		if err := s.connectRemoteSlave(h); err != nil {
+			debugLog("[REMOTE] Failed to connect to %s: %v", h.ID, err)
 			continue
 		}
-		debugLog("[REMOTE] Slave started on %s", h.ID)
-
-		// Step 2: Establish SSH tunnel / Docker connection (with reverse tunnel)
-		localSocket, err := s.tunnelMgr.Open(h.Config, tunnelOpts)
-		if err != nil {
-			debugLog("[REMOTE] Failed to open tunnel to %s: %v", h.ID, err)
-			continue
-		}
-
-		// Step 3: Create and register RemoteClient
-		client := NewRemoteClient(localSocket, h.ID)
-		s.hostRegistry.SetClient(h.ID, client)
-		debugLog("[REMOTE] Connected to slave %s via %s", h.ID, localSocket)
+		debugLog("[REMOTE] Connected to slave %s", h.ID)
 	}
 
 	// Start polling remote notification histories for desktop notifications
 	s.stopPoll = make(chan struct{})
 	go s.pollRemoteNotifications()
+	go s.watchRemoteConnections()
+}
+
+// connectRemoteSlave runs the full 3-step connection sequence for one remote host:
+// start slave daemon, open tunnel, register client.
+// Called during initial setup and reconnect. StartSlave is idempotent;
+// tunnelMgr.Open returns the existing socket if the tunnel is still alive.
+func (s *Server) connectRemoteSlave(h *host.Host) error {
+	peerSocketPath := filepath.Join(tunnel.PeerSocketDir, s.hostID, "daemon.sock")
+	bootstrapOpts := host.BootstrapOptions{
+		PeerSocketPath: peerSocketPath,
+		PeerHostID:     s.hostID,
+	}
+	tunnelOpts := tunnel.TunnelOptions{
+		ReverseEnabled:    true,
+		LocalHostID:       s.hostID,
+		LocalDaemonSocket: s.socketPath,
+	}
+	if err := host.StartSlave(h.Config, bootstrapOpts); err != nil {
+		return fmt.Errorf("start slave: %w", err)
+	}
+	localSocket, err := s.tunnelMgr.Open(h.Config, tunnelOpts)
+	if err != nil {
+		return fmt.Errorf("open tunnel: %w", err)
+	}
+	s.hostRegistry.SetClient(h.ID, NewRemoteClient(localSocket, h.ID))
+	return nil
+}
+
+// watchRemoteConnections periodically checks SSH tunnel liveness and reconnects
+// any dead tunnels. Runs until stopPoll is closed.
+func (s *Server) watchRemoteConnections() {
+	ticker := time.NewTicker(remoteReconnectInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopPoll:
+			return
+		case <-ticker.C:
+		}
+		s.reconnectDeadTunnels()
+	}
+}
+
+// reconnectDeadTunnels checks all configured SSH remote hosts and reconnects
+// any whose tunnel is no longer alive. Docker hosts are skipped (no process to restart).
+// At most one reconnect goroutine runs per host at a time.
+func (s *Server) reconnectDeadTunnels() {
+	for _, h := range s.hostRegistry.Remotes() {
+		if h.Type != "ssh" {
+			continue
+		}
+		if s.tunnelMgr.IsAlive(h.ID) {
+			continue
+		}
+		s.reconnectingMu.Lock()
+		if s.reconnecting[h.ID] {
+			s.reconnectingMu.Unlock()
+			continue
+		}
+		s.reconnecting[h.ID] = true
+		s.reconnectingMu.Unlock()
+
+		debugLog("[REMOTE] Tunnel to %s is dead, attempting reconnect", h.ID)
+		go func(rh *host.Host) {
+			defer func() {
+				s.reconnectingMu.Lock()
+				delete(s.reconnecting, rh.ID)
+				s.reconnectingMu.Unlock()
+			}()
+			if err := s.connectRemoteSlave(rh); err != nil {
+				debugLog("[REMOTE] Reconnect to %s failed: %v", rh.ID, err)
+				return
+			}
+			debugLog("[REMOTE] Reconnected to %s", rh.ID)
+		}(h)
+	}
 }
 
 // pollRemoteNotifications periodically fetches notification histories from remote
