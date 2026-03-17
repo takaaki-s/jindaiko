@@ -803,3 +803,143 @@ func TestDirPickerModel_LeftRightNavigation(t *testing.T) {
 		}
 	})
 }
+
+// --- View() history visibility during loading ---
+
+func TestDirPickerModel_View_HistoryDuringLoading(t *testing.T) {
+	t.Run("shows history section while loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading: true,
+			width:   80,
+			height:  24,
+		}
+		m.SetHistory([]HistoryEntry{
+			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
+		})
+
+		view := m.View()
+
+		if !strings.Contains(view, "Recently Used") {
+			t.Error("View() should show 'Recently Used' section even while loading")
+		}
+		if !strings.Contains(view, "/home/user/project") {
+			t.Error("View() should show history entry even while loading")
+		}
+		if !strings.Contains(view, "Loading...") {
+			t.Error("View() should still show spinner while loading")
+		}
+	})
+
+	t.Run("shows history section and directories when not loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading:  false,
+			width:    80,
+			height:   24,
+			filtered: []string{"subdir1", "subdir2"},
+		}
+		m.SetHistory([]HistoryEntry{
+			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
+		})
+
+		view := m.View()
+
+		if !strings.Contains(view, "Recently Used") {
+			t.Error("View() should show 'Recently Used' section when not loading")
+		}
+		if !strings.Contains(view, "/home/user/project") {
+			t.Error("View() should show history entry when not loading")
+		}
+		if !strings.Contains(view, "Directories") {
+			t.Error("View() should show 'Directories' section when not loading")
+		}
+	})
+
+	t.Run("no history section when history is empty during loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading: true,
+			width:   80,
+			height:  24,
+		}
+
+		view := m.View()
+
+		if strings.Contains(view, "Recently Used") {
+			t.Error("View() should not show 'Recently Used' section when history is empty")
+		}
+		if !strings.Contains(view, "Loading...") {
+			t.Error("View() should show spinner when loading with no history")
+		}
+	})
+}
+
+// --- Update() history selection during loading ---
+
+func TestDirPickerModel_Update_HistorySelectionDuringLoading(t *testing.T) {
+	t.Run("enter selects history entry while loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading: true,
+			cursor:  0,
+		}
+		m.SetHistory([]HistoryEntry{
+			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
+		})
+
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if !updated.selected {
+			t.Error("Enter should select history entry while loading")
+		}
+		if updated.result != "/home/user/project" {
+			t.Errorf("result = %q, want %q", updated.result, "/home/user/project")
+		}
+	})
+
+	t.Run("up/down moves cursor within history while loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading: true,
+			cursor:  0,
+		}
+		m.SetHistory([]HistoryEntry{
+			{Path: "/home/user/project1", DisplayPath: "/home/user/project1"},
+			{Path: "/home/user/project2", DisplayPath: "/home/user/project2"},
+		})
+
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		if updated.cursor != 1 {
+			t.Errorf("cursor after down = %d, want 1", updated.cursor)
+		}
+
+		updated2, _ := updated.Update(tea.KeyMsg{Type: tea.KeyUp})
+		if updated2.cursor != 0 {
+			t.Errorf("cursor after up = %d, want 0", updated2.cursor)
+		}
+	})
+
+	t.Run("down does not exceed history length while loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading: true,
+			cursor:  0,
+		}
+		m.SetHistory([]HistoryEntry{
+			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
+		})
+
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		if updated.cursor != 0 {
+			t.Errorf("cursor should stay at 0 when only 1 history entry, got %d", updated.cursor)
+		}
+	})
+
+	t.Run("enter does nothing when history is empty while loading", func(t *testing.T) {
+		m := DirPickerModel{
+			loading: true,
+			cursor:  0,
+		}
+
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if updated.selected {
+			t.Error("Enter should not select when history is empty while loading")
+		}
+	})
+}

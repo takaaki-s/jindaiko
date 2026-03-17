@@ -265,12 +265,27 @@ func (m DirPickerModel) Update(msg tea.Msg) (DirPickerModel, tea.Cmd) {
 	// --- Key input ---
 
 	case tea.KeyMsg:
-		// Only allow navigation keys while loading
+		historyLen := len(m.filteredHistory)
+
+		// While loading, only allow history entry navigation and selection
 		if m.loading {
+			switch msg.String() {
+			case "up":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "down":
+				if m.cursor < historyLen-1 {
+					m.cursor++
+				}
+			case "enter":
+				if historyLen > 0 && m.cursor < historyLen {
+					m.selected = true
+					m.result = m.filteredHistory[m.cursor].Path
+				}
+			}
 			return m, nil
 		}
-
-		historyLen := len(m.filteredHistory)
 
 		switch msg.String() {
 		case "enter":
@@ -490,7 +505,28 @@ func (m DirPickerModel) View() string {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#414868"))
 	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))
 
-	// Loading state
+	historyLen := len(m.filteredHistory)
+
+	// History section (always shown, even during loading)
+	if historyLen > 0 {
+		b.WriteString("  " + sectionStyle.Render("── Recently Used "+strings.Repeat("─", sepWidth-18)))
+		b.WriteString("\n")
+		for i, entry := range m.filteredHistory {
+			if i == m.cursor {
+				padded := "▸ " + entry.DisplayPath
+				availWidth := m.width - 4
+				if availWidth > 0 && len(padded) < availWidth {
+					padded += strings.Repeat(" ", availWidth-len(padded))
+				}
+				b.WriteString("  " + selectedStyle.Render(padded))
+			} else {
+				b.WriteString("    " + historyStyle.Render(entry.DisplayPath))
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	// Loading state or directories section
 	if m.loading {
 		b.WriteString("  " + strings.Repeat("─", sepWidth))
 		b.WriteString("\n")
@@ -498,27 +534,6 @@ func (m DirPickerModel) View() string {
 		b.WriteString("  " + spinner + " Loading...")
 		b.WriteString("\n")
 	} else {
-		historyLen := len(m.filteredHistory)
-
-		// History section
-		if historyLen > 0 {
-			b.WriteString("  " + sectionStyle.Render("── Recently Used "+strings.Repeat("─", sepWidth-18)))
-			b.WriteString("\n")
-			for i, entry := range m.filteredHistory {
-				if i == m.cursor {
-					padded := "▸ " + entry.DisplayPath
-					availWidth := m.width - 4
-					if availWidth > 0 && len(padded) < availWidth {
-						padded += strings.Repeat(" ", availWidth-len(padded))
-					}
-					b.WriteString("  " + selectedStyle.Render(padded))
-				} else {
-					b.WriteString("    " + historyStyle.Render(entry.DisplayPath))
-				}
-				b.WriteString("\n")
-			}
-		}
-
 		// Directories section
 		b.WriteString("  " + sectionStyle.Render("── Directories "+strings.Repeat("─", sepWidth-16)))
 		b.WriteString("\n")
