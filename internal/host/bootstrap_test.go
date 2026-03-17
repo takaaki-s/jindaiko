@@ -99,7 +99,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			Type: "ssh",
 			Host: "myhost",
 		}
-		cmd := StartSlaveCommand(hc)
+		cmd := startSlaveCommand(hc)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
@@ -110,7 +110,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			"-o", "ControlMaster=no",
 			"-o", "ClearAllForwardings=yes",
 			"myhost",
-			"ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock",
+			`${SHELL:-/bin/sh} -l -c 'ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock'`,
 		}
 		if len(cmd.Args) != len(wantArgs) {
 			t.Fatalf("args length = %d, want %d\ngot:  %v\nwant: %v", len(cmd.Args), len(wantArgs), cmd.Args, wantArgs)
@@ -128,12 +128,12 @@ func TestStartSlaveCommand(t *testing.T) {
 			Host:       "myhost",
 			SocketPath: "/tmp/custom.sock",
 		}
-		cmd := StartSlaveCommand(hc)
+		cmd := startSlaveCommand(hc)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
 
-		wantRemoteCmd := "ccvalet daemon start --socket /tmp/custom.sock"
+		wantRemoteCmd := `${SHELL:-/bin/sh} -l -c 'ccvalet daemon start --socket /tmp/custom.sock'`
 		// The remote command is the last element of Args
 		lastArg := cmd.Args[len(cmd.Args)-1]
 		if lastArg != wantRemoteCmd {
@@ -147,7 +147,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			Host:    "myhost",
 			SSHOpts: []string{"-p", "2222", "-i", "/path/to/key"},
 		}
-		cmd := StartSlaveCommand(hc)
+		cmd := startSlaveCommand(hc)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
@@ -158,7 +158,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			"-o", "ClearAllForwardings=yes",
 			"-p", "2222", "-i", "/path/to/key",
 			"myhost",
-			"ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock",
+			`${SHELL:-/bin/sh} -l -c 'ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock'`,
 		}
 		if len(cmd.Args) != len(wantArgs) {
 			t.Fatalf("args length = %d, want %d\ngot:  %v\nwant: %v", len(cmd.Args), len(wantArgs), cmd.Args, wantArgs)
@@ -175,7 +175,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			Type:      "docker",
 			Container: "my-container",
 		}
-		cmd := StartSlaveCommand(hc)
+		cmd := startSlaveCommand(hc)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
@@ -198,7 +198,7 @@ func TestStartSlaveCommand(t *testing.T) {
 		hc := config.HostConfig{
 			Type: "unknown",
 		}
-		cmd := StartSlaveCommand(hc)
+		cmd := startSlaveCommand(hc)
 		if cmd != nil {
 			t.Errorf("expected nil for unknown type, got %v", cmd)
 		}
@@ -210,14 +210,24 @@ func TestStartSlaveCommand(t *testing.T) {
 			PeerSocketPath: "/tmp/ccvalet-peers/mac/daemon.sock",
 			PeerHostID:     "mac",
 		}
-		cmd := StartSlaveCommand(hc, opts)
+		cmd := startSlaveCommand(hc, opts)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
-		lastArg := cmd.Args[len(cmd.Args)-1]
-		want := "ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock --peer-socket /tmp/ccvalet-peers/mac/daemon.sock --peer-id mac"
-		if lastArg != want {
-			t.Errorf("remote command = %q, want %q", lastArg, want)
+		wantArgs := []string{
+			"ssh",
+			"-o", "ControlMaster=no",
+			"-o", "ClearAllForwardings=yes",
+			"myhost",
+			`${SHELL:-/bin/sh} -l -c 'ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock --peer-socket /tmp/ccvalet-peers/mac/daemon.sock --peer-id mac'`,
+		}
+		if len(cmd.Args) != len(wantArgs) {
+			t.Fatalf("args length = %d, want %d\ngot:  %v\nwant: %v", len(cmd.Args), len(wantArgs), cmd.Args, wantArgs)
+		}
+		for i, arg := range wantArgs {
+			if cmd.Args[i] != arg {
+				t.Errorf("Args[%d] = %q, want %q", i, cmd.Args[i], arg)
+			}
 		}
 	})
 }
