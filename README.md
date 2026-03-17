@@ -305,9 +305,9 @@ When a session starts, ccvalet generates `~/.ccvalet/hooks-settings.json` and pa
 | `Stop` | Claude's turn ends → set session to `idle` (send task completion notification) |
 | `Notification` | Permission request, etc. → set session to `permission` (send permission request notification) |
 
-## Remote Hosts (EC2 / Docker)
+## Remote Hosts (SSH / Docker)
 
-In addition to local sessions, you can manage Claude Code sessions running on EC2 instances or Docker containers.
+In addition to local sessions, you can manage Claude Code sessions running on remote SSH hosts or Docker containers.
 
 ### Architecture
 
@@ -321,18 +321,41 @@ Each daemon has a **host ID** (default: `"local"`). You can set it in `config.ya
 # ~/.ccvalet/config.yaml
 host_id: mac   # Identifies this daemon in bidirectional routing
 hosts:
-  - id: ec2
+  - id: my-server
     type: ssh
-    host: my-ec2-instance
+    host: my-remote-host
 ```
 
-### EC2 Setup
+### SSH Remote Prerequisites
 
-**1. Install ccvalet and tmux on EC2 (first time only)**
+The SSH tunnel uses Unix socket forwarding (`-L`). Ensure the remote sshd allows it:
 
 ```bash
-# Log in to EC2
-ssh my-ec2-instance
+# Check on the remote host
+sudo sshd -T | grep allowtcpforwarding
+```
+
+If the output is `allowtcpforwarding no`, add to `/etc/ssh/sshd_config`:
+
+```
+AllowTcpForwarding local
+```
+
+Then restart sshd:
+
+```bash
+sudo systemctl restart sshd
+```
+
+> **Note:** `AllowStreamLocalForwarding yes` alone is not sufficient — `AllowTcpForwarding` controls Unix socket `-L` forwarding as well, regardless of the OpenSSH version.
+
+### SSH Remote Setup
+
+**1. Install ccvalet and tmux on the remote host (first time only)**
+
+```bash
+# Log in to remote host
+ssh my-remote-host
 
 # Install ccvalet
 go install github.com/takaaki-s/claude-code-valet/cmd/ccvalet@latest
@@ -345,9 +368,9 @@ sudo apt install -y tmux  # Ubuntu/Debian
 
 ```yaml
 hosts:
-  - id: ec2
+  - id: my-server
     type: ssh
-    host: my-ec2-instance
+    host: my-remote-host
     ssh_opts:          # SSH connection optimization (recommended)
       - "-o"
       - "ControlMaster=auto"
@@ -361,10 +384,10 @@ hosts:
 
 ```bash
 ccvalet daemon start  # Auto-start Slave + establish tunnel
-ccvalet ui            # Manage local + EC2 sessions in one TUI
+ccvalet ui            # Manage local + remote sessions in one TUI
 ```
 
-The Master automatically starts the Slave daemon on EC2 via SSH. An error message is displayed if ccvalet is not installed on the remote host.
+The Master automatically starts the Slave daemon on the remote host via SSH. An error message is displayed if ccvalet is not installed on the remote host.
 
 ### Docker Setup
 
