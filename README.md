@@ -389,6 +389,20 @@ ccvalet ui            # Manage local + remote sessions in one TUI
 
 The Master automatically starts the Slave daemon on the remote host via SSH. An error message is displayed if ccvalet is not installed on the remote host.
 
+#### Specifying the remote ccvalet binary path
+
+By default, `ccvalet` is resolved from the remote shell's `PATH`. If the binary is installed in a non-standard location (e.g., `~/.local/bin`) and is not available in non-interactive SSH sessions, specify the full path explicitly:
+
+```yaml
+hosts:
+  - id: my-server
+    type: ssh
+    host: my-remote-host
+    ccvalet_path: /home/user/.local/bin/ccvalet  # full path to ccvalet on remote
+```
+
+> **Note**: SSH sessions are non-interactive, so `.bashrc` / `.zshrc` are not sourced. If ccvalet is installed via `go install` or to `~/.local/bin` and PATH is only configured in those files, use `ccvalet_path` or add the path to `~/.bash_profile` / `~/.profile` instead.
+
 ### Docker Setup
 
 **1. Include ccvalet and tmux in the container**
@@ -428,9 +442,17 @@ hosts:
     type: docker
     container: ci-runner
     socket_path: /var/run/ccvalet/daemon.sock
+
+  # ccvalet_path override (if binary is not in default PATH)
+  - id: docker-custom
+    type: docker
+    container: my-container
+    ccvalet_path: /usr/local/bin/ccvalet
 ```
 
 `socket_path` specifies the socket path inside the container (remote side). Defaults to `~/.ccvalet/run/daemon.sock` when omitted.
+
+`ccvalet_path` specifies the full path to the ccvalet binary inside the container. Defaults to `ccvalet` (resolved from PATH) when omitted.
 
 **4. Start Master**
 

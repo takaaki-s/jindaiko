@@ -378,6 +378,20 @@ ccvalet ui            # TUI でローカル + リモートを統合管理
 
 Master 起動時に SSH 経由でリモートホストの Slave デーモンを自動起動します。ccvalet が未インストールの場合はエラーメッセージが表示されます。
 
+#### リモートの ccvalet バイナリパスを指定する
+
+デフォルトでは、リモートシェルの `PATH` から `ccvalet` を解決します。バイナリが非標準の場所（例: `~/.local/bin`）にインストールされており、非インタラクティブ SSH セッションでは `PATH` が通っていない場合、フルパスを明示的に指定できます。
+
+```yaml
+hosts:
+  - id: my-server
+    type: ssh
+    host: my-remote-host
+    ccvalet_path: /home/user/.local/bin/ccvalet  # リモートの ccvalet フルパス
+```
+
+> **注意**: SSH セッションは非インタラクティブのため `.bashrc` / `.zshrc` は読み込まれません。`go install` や `~/.local/bin` にインストールしており PATH をこれらのファイルにのみ設定している場合は、`ccvalet_path` を使用するか、`~/.bash_profile` / `~/.profile` にパスを追加してください。
+
 ### Docker セットアップ
 
 **1. コンテナに ccvalet と tmux を含める**
@@ -417,9 +431,17 @@ hosts:
     type: docker
     container: ci-runner
     socket_path: /var/run/ccvalet/daemon.sock
+
+  # ccvalet_path オーバーライド（バイナリが PATH にない場合）
+  - id: docker-custom
+    type: docker
+    container: my-container
+    ccvalet_path: /usr/local/bin/ccvalet
 ```
 
 `socket_path` はコンテナ内（リモート側）のソケットパスを指定します。省略時は `~/.ccvalet/run/daemon.sock` が使用されます。
+
+`ccvalet_path` はコンテナ内の ccvalet バイナリのフルパスを指定します。省略時は `ccvalet`（PATH から解決）が使用されます。
 
 **4. Master 起動**
 
