@@ -451,8 +451,13 @@ func (m *Model) switchToSession(sessionID string) {
 		// switch-client failed — fall through to respawn
 	}
 
-	// Local: respawn right pane with inner tmux attach
-	attachCmd := fmt.Sprintf("tmux -L %s attach -t %s", tmux.SocketName, sess.TmuxWindowName)
+	// Local: respawn right pane with inner tmux attach.
+	// Unset $TMUX so tmux does not refuse with "sessions should be nested with care":
+	// the display pane runs inside the outer tmux (ccvalet-mgr), so $TMUX points to
+	// the outer session. Without env -u TMUX, attaching to the inner tmux (ccvalet)
+	// on the same host is rejected as nesting. This mirrors the env -u TMUX pattern
+	// used in session/manager.go when launching CC processes.
+	attachCmd := fmt.Sprintf("env -u TMUX tmux -L %s attach -t %s", tmux.SocketName, sess.TmuxWindowName)
 	_ = m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
 	m.displayLocalAttach = true
 
@@ -932,14 +937,16 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reconnect to session at cursor after delete/kill
 		if m.needsReswitch {
 			m.needsReswitch = false
-			m.currentSessionID = ""      // Force reset
-			m.displayLocalAttach = false // Pane process is dead after delete/kill
+			m.currentSessionID = "" // Force reset
+			if m.displayLocalAttach {
+				m.detachInnerClient()
+				m.displayLocalAttach = false
+			}
 			pageSessions := m.getPageSessions()
 			if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
 				m.switchToSession(pageSessions[m.cursor].ID)
 			} else {
 				m.respawnPlaceholder()
-
 			}
 			m.processingMsg = ""
 			return m, nil
