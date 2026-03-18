@@ -53,10 +53,8 @@ func validatePath(s string) error {
 	return nil
 }
 
-// startSlaveCommand generates a command to start the slave daemon on a remote host.
-// Inputs must be validated before calling (use validatePath / ValidateIdentifier).
-// Use StartSlave which performs validation automatically.
-func startSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *exec.Cmd {
+// StartSlaveCommand generates a command to start the slave daemon on a remote host
+func StartSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *exec.Cmd {
 	socketPath := hostConfig.SocketPath
 	if socketPath == "" {
 		socketPath = defaultRemoteSocketPath
@@ -73,14 +71,10 @@ func startSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *
 		// - ControlMaster=no: avoid conflicts with existing ControlMaster
 		// - ClearAllForwardings=yes: suppress LocalForward/RemoteForward from ssh_config
 		//   (bootstrap is a one-shot command execution, no forwarding needed)
-		args := make([]string, 0, len(hostConfig.SSHOpts)+6) // 4 fixed opts + host + shellCmd
+		args := make([]string, 0, len(hostConfig.SSHOpts)+6)
 		args = append(args, "-o", "ControlMaster=no", "-o", "ClearAllForwardings=yes")
 		args = append(args, hostConfig.SSHOpts...)
-		// Use login shell so ~/.bash_profile / ~/.zprofile are sourced and PATH is resolved.
-		// ${SHELL:-/bin/sh} falls back to /bin/sh if $SHELL is unset on the remote.
-		// Note: remoteCmd must not contain single quotes; guaranteed by validatePath/ValidateIdentifier.
-		shellCmd := `${SHELL:-/bin/sh} -l -c '` + remoteCmd + `'`
-		args = append(args, hostConfig.Host, shellCmd)
+		args = append(args, hostConfig.Host, remoteCmd)
 		return exec.Command("ssh", args...)
 	case "docker":
 		return exec.Command("docker", "exec", hostConfig.Container, "sh", "-c", remoteCmd)
@@ -92,12 +86,7 @@ func startSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *
 // StartSlave starts the slave daemon on a remote host and returns the result.
 // Returns an error if ccvalet is not installed on the remote host.
 func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
-	// Validate all inputs before building the shell command (prevent injection)
-	if hostConfig.SocketPath != "" {
-		if err := validatePath(hostConfig.SocketPath); err != nil {
-			return fmt.Errorf("invalid socket path: %w", err)
-		}
-	}
+	// Validate peer options before building the shell command (prevent injection)
 	if len(opts) > 0 && opts[0].PeerSocketPath != "" && opts[0].PeerHostID != "" {
 		if err := validatePath(opts[0].PeerSocketPath); err != nil {
 			return fmt.Errorf("invalid peer socket path: %w", err)
@@ -107,7 +96,7 @@ func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
 		}
 	}
 
-	cmd := startSlaveCommand(hostConfig, opts...)
+	cmd := StartSlaveCommand(hostConfig, opts...)
 	if cmd == nil {
 		return fmt.Errorf("unsupported host type: %s", hostConfig.Type)
 	}
