@@ -60,7 +60,12 @@ func StartSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *
 		socketPath = defaultRemoteSocketPath
 	}
 
-	remoteCmd := fmt.Sprintf("ccvalet daemon start --socket %s", socketPath)
+	ccvaletBin := "ccvalet"
+	if hostConfig.CcvaletPath != "" {
+		ccvaletBin = hostConfig.CcvaletPath
+	}
+
+	remoteCmd := fmt.Sprintf("%s daemon start --socket %s", ccvaletBin, socketPath)
 	if len(opts) > 0 && opts[0].PeerSocketPath != "" && opts[0].PeerHostID != "" {
 		remoteCmd += fmt.Sprintf(" --peer-socket %s --peer-id %s", opts[0].PeerSocketPath, opts[0].PeerHostID)
 	}
@@ -86,7 +91,17 @@ func StartSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *
 // StartSlave starts the slave daemon on a remote host and returns the result.
 // Returns an error if ccvalet is not installed on the remote host.
 func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
-	// Validate peer options before building the shell command (prevent injection)
+	// Validate all inputs before building the shell command (prevent injection)
+	if hostConfig.CcvaletPath != "" {
+		if err := validatePath(hostConfig.CcvaletPath); err != nil {
+			return fmt.Errorf("invalid ccvalet_path: %w", err)
+		}
+	}
+	if hostConfig.SocketPath != "" {
+		if err := validatePath(hostConfig.SocketPath); err != nil {
+			return fmt.Errorf("invalid socket path: %w", err)
+		}
+	}
 	if len(opts) > 0 && opts[0].PeerSocketPath != "" && opts[0].PeerHostID != "" {
 		if err := validatePath(opts[0].PeerSocketPath); err != nil {
 			return fmt.Errorf("invalid peer socket path: %w", err)

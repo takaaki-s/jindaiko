@@ -220,6 +220,40 @@ func TestStartSlaveCommand(t *testing.T) {
 			t.Errorf("remote command = %q, want %q", lastArg, want)
 		}
 	})
+
+	t.Run("ssh with custom ccvalet_path", func(t *testing.T) {
+		hc := config.HostConfig{
+			Type:        "ssh",
+			Host:        "myhost",
+			CcvaletPath: "/home/user/.local/bin/ccvalet",
+		}
+		cmd := StartSlaveCommand(hc)
+		if cmd == nil {
+			t.Fatal("expected non-nil command")
+		}
+		lastArg := cmd.Args[len(cmd.Args)-1]
+		want := "/home/user/.local/bin/ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock"
+		if lastArg != want {
+			t.Errorf("remote command = %q, want %q", lastArg, want)
+		}
+	})
+
+	t.Run("docker with custom ccvalet_path", func(t *testing.T) {
+		hc := config.HostConfig{
+			Type:        "docker",
+			Container:   "my-container",
+			CcvaletPath: "/usr/local/bin/ccvalet",
+		}
+		cmd := StartSlaveCommand(hc)
+		if cmd == nil {
+			t.Fatal("expected non-nil command")
+		}
+		lastArg := cmd.Args[len(cmd.Args)-1]
+		want := "/usr/local/bin/ccvalet daemon start --socket ~/.ccvalet/run/daemon.sock"
+		if lastArg != want {
+			t.Errorf("remote command = %q, want %q", lastArg, want)
+		}
+	})
 }
 
 func TestValidateIdentifier(t *testing.T) {
