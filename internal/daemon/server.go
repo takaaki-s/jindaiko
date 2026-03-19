@@ -28,7 +28,7 @@ import (
 
 var debugLog = debug.NewLogger("daemon-debug.log")
 
-const remoteReconnectInterval = 30 * time.Second
+const remoteReconnectInterval = 10 * time.Second
 
 // Server is the daemon server
 type Server struct {
@@ -41,7 +41,7 @@ type Server struct {
 	createMu       sync.Mutex      // Mutual exclusion for session creation
 	hostRegistry   *host.Registry  // Multi-host management
 	tunnelMgr      *tunnel.Manager // SSH tunnel management
-	stopPoll       chan struct{}   // Signal to stop background goroutines; initialized once in initRemoteSlaves, never reassigned
+	stopPoll       chan struct{}    // Signal to stop background goroutines; initialized once in initRemoteSlaves, never reassigned
 	reconnectingMu sync.Mutex      // Protects reconnecting map
 	reconnecting   map[string]bool // Tracks hosts with a reconnect goroutine in progress
 }

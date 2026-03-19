@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/takaaki-s/claude-code-valet/internal/config"
@@ -108,7 +109,12 @@ func (m *Manager) OpenSSH(hostConfig config.HostConfig, opts ...TunnelOptions) (
 	// - -A: enable SSH agent forwarding (needed for git fetch etc. on remote)
 	// Note: ClearAllForwardings=yes cannot be used as it also clears command-line -L
 	args := make([]string, 0, len(hostConfig.SSHOpts)+10)
-	args = append(args, "-A", "-o", "ControlMaster=no", "-o", "ExitOnForwardFailure=no")
+	args = append(args, "-A",
+		"-o", "ControlMaster=no",
+		"-o", "ExitOnForwardFailure=no",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=3",
+	)
 	args = append(args, hostConfig.SSHOpts...)
 	// Create a stable symlink for the SSH agent socket on the remote,
 	// so the slave daemon can use it for git fetch etc.
@@ -271,8 +277,10 @@ func (m *Manager) isAlive(t *Tunnel) bool {
 	if t.process == nil {
 		return false
 	}
-	// On Unix, send signal 0 to check process liveness
-	err := t.process.Signal(os.Signal(nil))
+	// On Unix, send signal 0 to check process liveness without disturbing it.
+	// syscall.Signal(0) must be used; os.Signal(nil) is a nil interface and
+	// always returns "unsupported signal type", making IsAlive always false.
+	err := t.process.Signal(syscall.Signal(0))
 	return err == nil
 }
 

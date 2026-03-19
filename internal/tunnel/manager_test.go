@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,6 +50,46 @@ func TestManager_IsAlive_NotFound(t *testing.T) {
 	m := NewManager()
 	if m.IsAlive("nonexistent-host") {
 		t.Fatal("IsAlive for unknown hostID should return false")
+	}
+}
+
+// TestManager_IsAlive_SSHProcess verifies that isAlive correctly returns true
+// for a running process and false after it exits.
+// This test guards against the os.Signal(nil) bug, where passing a nil os.Signal
+// interface always returned "unsupported signal type", making IsAlive always false
+// and causing spurious reconnects every watchRemoteConnections interval.
+func TestManager_IsAlive_SSHProcess(t *testing.T) {
+	m := NewManager()
+
+	cmd := exec.Command("sleep", "3600")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	tunnel := &Tunnel{
+		HostID:   "test-ssh",
+		HostType: "ssh",
+		process:  cmd.Process,
+		cmd:      cmd,
+	}
+	m.tunnels["test-ssh"] = tunnel
+
+	if !m.isAlive(tunnel) {
+		t.Error("isAlive should return true for a running process")
+	}
+	if !m.IsAlive("test-ssh") {
+		t.Error("IsAlive should return true for a running process")
+	}
+
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+
+	if m.isAlive(tunnel) {
+		t.Error("isAlive should return false after process exits")
 	}
 }
 
