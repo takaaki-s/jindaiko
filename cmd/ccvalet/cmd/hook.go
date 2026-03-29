@@ -16,6 +16,7 @@ type hookInput struct {
 	HookEventName    string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type,omitempty"`
 	CWD              string `json:"cwd,omitempty"`
+	StopReason       string `json:"stop_reason,omitempty"`
 }
 
 var hookLog = debug.NewLogger("hook-debug.log")
@@ -60,6 +61,7 @@ var hookCmd = &cobra.Command{
 			HookEventName:    input.HookEventName,
 			NotificationType: input.NotificationType,
 			CWD:              input.CWD,
+			StopReason:       input.StopReason,
 		}); err != nil {
 			hookLog("SendHook failed: %v", err)
 		}

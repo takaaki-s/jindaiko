@@ -351,7 +351,7 @@ func TestManager_HandleHookEvent_UserPromptSubmit(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "")
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -372,7 +372,7 @@ func TestManager_HandleHookEvent_Stop(t *testing.T) {
 	// Set to thinking first
 	mgr.SetStatus(sess.ID, StatusThinking)
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "")
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -391,7 +391,7 @@ func TestManager_HandleHookEvent_Notification_Permission(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Notification", "permission_prompt", "")
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Notification", "permission_prompt", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -406,7 +406,7 @@ func TestManager_HandleHookEvent_UnknownSession(t *testing.T) {
 	mgr, _ := newTestManager(t)
 
 	// Should not panic when both IDs are unknown.
-	mgr.HandleHookEvent("unknown-cc-id", "unknown-valet-id", "Stop", "", "")
+	mgr.HandleHookEvent("unknown-cc-id", "unknown-valet-id", "Stop", "", "", "")
 }
 
 func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
@@ -418,7 +418,7 @@ func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
 	}
 
 	newCwd := "/tmp/hook-cwd-changed"
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", newCwd)
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", newCwd, "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -429,6 +429,226 @@ func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
 	}
 	if got.CurrentWorkDir != newCwd {
 		t.Errorf("CurrentWorkDir = %q, want %q", got.CurrentWorkDir, newCwd)
+	}
+}
+
+func TestManager_HandleHookEvent_CwdChanged(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-cwdch", Name: "hcwdch"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	newCwd := "/tmp/hook-cwdch-new"
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "CwdChanged", "", newCwd, "")
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.WorkDir != newCwd {
+		t.Errorf("WorkDir = %q, want %q", got.WorkDir, newCwd)
+	}
+	if got.CurrentWorkDir != newCwd {
+		t.Errorf("CurrentWorkDir = %q, want %q", got.CurrentWorkDir, newCwd)
+	}
+	// Status should remain unchanged (stopped from creation)
+	if got.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q (unchanged)", got.Status, StatusStopped)
+	}
+}
+
+func TestManager_HandleHookEvent_StopFailure(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sf", Name: "hsf"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.Status != StatusIdle {
+		t.Errorf("Status = %q, want %q", got.Status, StatusIdle)
+	}
+	if got.ErrorMessage != "rate_limit" {
+		t.Errorf("ErrorMessage = %q, want %q", got.ErrorMessage, "rate_limit")
+	}
+
+	// Verify error notification was added to history
+	history := mgr.NotificationHistory()
+	if len(history) == 0 {
+		t.Fatal("expected at least 1 notification")
+	}
+	if history[0].Type != "error" {
+		t.Errorf("notification Type = %q, want %q", history[0].Type, "error")
+	}
+}
+
+func TestManager_HandleHookEvent_StopFailure_ThenStop_ClearsError(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sfclr", Name: "hsfclr"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	// First: StopFailure sets ErrorMessage
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
+	got, _ := mgr.Get(sess.ID)
+	if got.ErrorMessage != "rate_limit" {
+		t.Fatalf("ErrorMessage after StopFailure = %q, want %q", got.ErrorMessage, "rate_limit")
+	}
+
+	// Then: Stop clears ErrorMessage
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "", "")
+	got, _ = mgr.Get(sess.ID)
+	if got.ErrorMessage != "" {
+		t.Errorf("ErrorMessage after Stop = %q, want empty", got.ErrorMessage)
+	}
+}
+
+func TestManager_HandleHookEvent_StopFailure_ThenUserPrompt_ClearsError(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sfclr2", Name: "hsfclr2"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	// StopFailure sets ErrorMessage
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "auth_error")
+	got, _ := mgr.Get(sess.ID)
+	if got.ErrorMessage != "auth_error" {
+		t.Fatalf("ErrorMessage after StopFailure = %q, want %q", got.ErrorMessage, "auth_error")
+	}
+
+	// UserPromptSubmit clears ErrorMessage
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+	got, _ = mgr.Get(sess.ID)
+	if got.ErrorMessage != "" {
+		t.Errorf("ErrorMessage after UserPromptSubmit = %q, want empty", got.ErrorMessage)
+	}
+}
+
+func TestManager_HandleHookEvent_StopFailure_EmptyReason(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sf2", Name: "hsf2"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "")
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.Status != StatusIdle {
+		t.Errorf("Status = %q, want %q", got.Status, StatusIdle)
+	}
+	if got.ErrorMessage != "" {
+		t.Errorf("ErrorMessage = %q, want empty", got.ErrorMessage)
+	}
+}
+
+func TestManager_HandleHookEvent_SessionStart(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-ss", Name: "hss"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	// Ensure ClaudeSessionStarted is false initially
+	sess.ClaudeSessionStarted = false
+
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "SessionStart", "", "", "")
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if !got.ClaudeSessionStarted {
+		t.Error("ClaudeSessionStarted should be true after SessionStart hook")
+	}
+}
+
+func TestManager_HandleHookEvent_SessionEnd(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-se", Name: "hse"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "SessionEnd", "", "", "")
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q", got.Status, StatusStopped)
+	}
+}
+
+func TestManager_HandleHookEvent_SessionEnd_Idempotent(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sei", Name: "hsei"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	// Session is already stopped (default from creation)
+	if sess.Status != StatusStopped {
+		t.Fatalf("precondition: Status = %q, want %q", sess.Status, StatusStopped)
+	}
+
+	// Should not panic or change anything
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "SessionEnd", "", "", "")
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q", got.Status, StatusStopped)
+	}
+}
+
+func TestEnsureHooksSettingsFile_NewHooks(t *testing.T) {
+	dir := t.TempDir()
+	path, err := ensureHooksSettingsFile(dir, "/usr/local/bin/ccvalet")
+	if err != nil {
+		t.Fatalf("ensureHooksSettingsFile failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	var settings hooksSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	requiredHooks := []string{"UserPromptSubmit", "Stop", "StopFailure", "PostToolUse", "CwdChanged", "SessionStart", "SessionEnd", "Notification"}
+	for _, hook := range requiredHooks {
+		if _, ok := settings.Hooks[hook]; !ok {
+			t.Errorf("hooks-settings.json missing hook: %s", hook)
+		}
 	}
 }
 
@@ -754,10 +974,10 @@ func TestManager_NotificationHistory(t *testing.T) {
 	mgr.SetStatus(sess2.ID, StatusThinking)
 
 	// Trigger Stop event (generates task_complete notification)
-	mgr.HandleHookEvent(sess1.ClaudeSessionID, sess1.ID, "Stop", "", "")
+	mgr.HandleHookEvent(sess1.ClaudeSessionID, sess1.ID, "Stop", "", "", "")
 
 	// Trigger Notification/permission event (generates permission notification)
-	mgr.HandleHookEvent(sess2.ClaudeSessionID, sess2.ID, "Notification", "permission_prompt", "")
+	mgr.HandleHookEvent(sess2.ClaudeSessionID, sess2.ID, "Notification", "permission_prompt", "", "")
 
 	history = mgr.NotificationHistory()
 	if len(history) != 2 {

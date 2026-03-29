@@ -229,6 +229,7 @@ type HookRequest struct {
 	HookEventName    string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type,omitempty"`
 	CWD              string `json:"cwd,omitempty"`
+	StopReason       string `json:"stop_reason,omitempty"`
 }
 
 func (s *Server) handleHook(data json.RawMessage) Response {
@@ -236,7 +237,7 @@ func (s *Server) handleHook(data json.RawMessage) Response {
 	if err := json.Unmarshal(data, &req); err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}
-	s.manager.HandleHookEvent(req.SessionID, req.CcvaletSessionID, req.HookEventName, req.NotificationType, req.CWD)
+	s.manager.HandleHookEvent(req.SessionID, req.CcvaletSessionID, req.HookEventName, req.NotificationType, req.CWD, req.StopReason)
 	return Response{Success: true}
 }
 
@@ -734,6 +735,8 @@ func (s *Server) pollRemoteOnce(lastSeen map[string]time.Time) {
 				s.manager.NotifyDesktop("Permission Required", entry.Message)
 			case "task_complete":
 				s.manager.NotifyDesktop("Task Complete", entry.Message)
+			case "error":
+				s.manager.NotifyDesktop("Error", entry.Message)
 			}
 			if entry.Timestamp.After(lastSeen[h.ID]) {
 				lastSeen[h.ID] = entry.Timestamp

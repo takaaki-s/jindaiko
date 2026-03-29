@@ -63,6 +63,22 @@ func (n *Notifier) NotifyTaskComplete(sessionID, sessionName string) {
 	n.notify(sessionID, "Task Complete", msg)
 }
 
+// NotifyError sends a notification when Claude stops with an error (e.g. rate limit, auth failure)
+func (n *Notifier) NotifyError(sessionID, sessionName, reason string) {
+	if reason == "" {
+		reason = "unknown error"
+	}
+	msg := fmt.Sprintf("[%s] Claude stopped with error: %s", sessionName, reason)
+	n.history.Add(Entry{
+		SessionID:   sessionID,
+		SessionName: sessionName,
+		Type:        "error",
+		Message:     msg,
+		Timestamp:   time.Now(),
+	})
+	n.notify(sessionID, "Error", msg)
+}
+
 // NotificationHistory returns a copy of the notification history (newest first)
 func (n *Notifier) NotificationHistory() []Entry {
 	return n.history.List()

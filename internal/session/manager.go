@@ -537,10 +537,30 @@ func (m *Manager) startSessionTmux(session *Session) error {
 	return nil
 }
 
+// updateGitBranch checks the git branch for the given path and updates session fields.
+// It runs git rev-parse (lightweight, <5ms) and acquires the lock internally.
+// lastTrackedPath is used to avoid clearing git info on every poll when already in a non-git dir.
+func (m *Manager) updateGitBranch(session *Session, currentPath, lastTrackedPath string) {
+	cmd := exec.Command("git", "-C", currentPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if output, err := cmd.Output(); err == nil {
+		branch := strings.TrimSpace(string(output))
+		m.mu.Lock()
+		session.CurrentBranch = branch
+		session.IsGitRepo = true
+		m.mu.Unlock()
+	} else if currentPath != lastTrackedPath {
+		// Only clear git info when entering a non-git directory
+		m.mu.Lock()
+		session.CurrentBranch = ""
+		session.IsGitRepo = false
+		m.mu.Unlock()
+	}
+}
+
 // captureOutputTmux polls tmux for process death detection and CWD/branch tracking.
 // Status detection is handled by Claude Code hooks (see HandleHookEvent).
 func (m *Manager) captureOutputTmux(session *Session) {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	// Use pane ID (%N) if available; falls back to window.pane index.
@@ -631,22 +651,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 					debugLog("[CWD] Session %s WorkDir updated to %s", sessionName, currentPath)
 				}
 
-				// Always check git branch (git rev-parse is lightweight, <5ms)
-				// Branch can change without CWD changing (e.g. git checkout)
-				cmd := exec.Command("git", "-C", currentPath, "rev-parse", "--abbrev-ref", "HEAD")
-				if output, err := cmd.Output(); err == nil {
-					branch := strings.TrimSpace(string(output))
-					m.mu.Lock()
-					session.CurrentBranch = branch
-					session.IsGitRepo = true
-					m.mu.Unlock()
-				} else if currentPath != lastTrackedPath {
-					// Only clear git info when entering a non-git directory
-					m.mu.Lock()
-					session.CurrentBranch = ""
-					session.IsGitRepo = false
-					m.mu.Unlock()
-				}
+				m.updateGitBranch(session, currentPath, lastTrackedPath)
 				lastTrackedPath = currentPath
 			}
 		}
@@ -693,7 +698,7 @@ func (m *Manager) FindByClaudeSessionID(ccSessionID string) (*Session, bool) {
 }
 
 // HandleHookEvent processes a Claude Code hook event and updates session status
-func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, notificationType, cwd string) {
+func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, notificationType, cwd, stopReason string) {
 	var session *Session
 	var ok bool
 
@@ -735,13 +740,42 @@ func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, noti
 		session.CurrentWorkDir = cwd
 	}
 
+	sessionStarted := false
 	switch eventName {
 	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
 		session.Status = StatusThinking
+		session.ErrorMessage = ""
 		session.LastOutputTime = time.Now()
 	case "Stop":
 		session.Status = StatusIdle
+		session.ErrorMessage = ""
 		session.LastOutputTime = time.Now()
+	case "StopFailure":
+		session.Status = StatusIdle
+		session.ErrorMessage = stopReason
+		session.LastOutputTime = time.Now()
+	case "CwdChanged":
+		// CWD is already updated in the common block above.
+		// Just update LastOutputTime; status is unchanged.
+		session.LastOutputTime = time.Now()
+	case "SessionStart":
+		if !session.ClaudeSessionStarted {
+			session.ClaudeSessionStarted = true
+			sessionStarted = true
+		}
+		session.LastOutputTime = time.Now()
+	case "SessionEnd":
+		if session.Status == StatusStopped {
+			// Already stopped — save any CWD/session-ID changes, then return
+			m.mu.Unlock()
+			if cwdChanged {
+				_ = m.store.Save(session)
+				debugLog("[HOOK] Session %s: CWD updated to %s (SessionEnd, already stopped)", sessionName, cwd)
+			}
+			return
+		}
+		session.Status = StatusStopped
+		session.LastActiveAt = time.Now()
 	case "Notification":
 		switch notificationType {
 		case "permission_prompt", "elicitation_dialog":
@@ -760,8 +794,13 @@ func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, noti
 	}
 	m.mu.Unlock()
 
-	// Persist status/CWD change and send notifications
-	if oldStatus != session.Status || cwdChanged {
+	// CwdChanged: immediately check git branch outside the lock
+	if eventName == "CwdChanged" && cwd != "" {
+		m.updateGitBranch(session, cwd, "")
+	}
+
+	// Persist status/CWD/session-started changes and send notifications
+	if oldStatus != session.Status || cwdChanged || sessionStarted {
 		_ = m.store.Save(session)
 		if oldStatus != session.Status {
 			debugLog("[HOOK] Session %s: %s -> %s (hook: %s)", sessionName, oldStatus, session.Status, eventName)
@@ -774,6 +813,8 @@ func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, noti
 	switch eventName {
 	case "Stop":
 		m.notifier.NotifyTaskComplete(sessionID, sessionName)
+	case "StopFailure":
+		m.notifier.NotifyError(sessionID, sessionName, stopReason)
 	case "Notification":
 		if notificationType == "permission_prompt" || notificationType == "elicitation_dialog" {
 			m.notifier.NotifyPermission(sessionID, sessionName)
@@ -954,7 +995,11 @@ func ensureHooksSettingsFile(dataDir, execPath string) (string, error) {
 		Hooks: map[string][]hooksMatcher{
 			"UserPromptSubmit": {{Hooks: []hooksEntry{entry}}},
 			"Stop":             {{Hooks: []hooksEntry{entry}}},
+			"StopFailure":      {{Hooks: []hooksEntry{entry}}},
 			"PostToolUse":      {{Hooks: []hooksEntry{entry}}},
+			"CwdChanged":       {{Hooks: []hooksEntry{entry}}},
+			"SessionStart":     {{Hooks: []hooksEntry{entry}}},
+			"SessionEnd":       {{Hooks: []hooksEntry{entry}}},
 			"Notification": {{
 				Matcher: "permission_prompt|elicitation_dialog|idle_prompt",
 				Hooks:   []hooksEntry{entry},
