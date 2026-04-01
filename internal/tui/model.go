@@ -679,6 +679,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					deleteHostID := m.deleteTargetHostID
 					m.deletingIDs[deleteID] = true
 					m.resetDeleteState()
+					m.skipDeletingSessions(1)
 					client := m.client
 					return m, func() tea.Msg {
 						if err := client.Delete(deleteID, deleteHostID, true, true); err != nil {
@@ -696,6 +697,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					deleteHostID := m.deleteTargetHostID
 					m.deletingIDs[deleteID] = true
 					m.resetDeleteState()
+					m.skipDeletingSessions(1)
 					client := m.client
 					return m, func() tea.Msg {
 						if err := client.Delete(deleteID, deleteHostID, false, false); err != nil {
@@ -718,6 +720,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				deleteHostID := m.deleteTargetHostID
 				m.deletingIDs[deleteID] = true
 				m.resetDeleteState()
+				m.skipDeletingSessions(1)
 				client := m.client
 				return m, func() tea.Msg {
 					if err := client.Delete(deleteID, deleteHostID, false, false); err != nil {
@@ -738,6 +741,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				deleteName := m.deleteTargetName
 				m.deletingIDs[deleteID] = true
 				m.resetDeleteState()
+				m.skipDeletingSessions(1)
 				client := m.client
 				return m, func() tea.Msg {
 					err := client.Delete(deleteID, deleteHostID, true, false)

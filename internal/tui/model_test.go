@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/takaaki-s/claude-code-valet/internal/config"
 	"github.com/takaaki-s/claude-code-valet/internal/session"
@@ -1220,6 +1221,55 @@ func TestSkipDeletingSessions(t *testing.T) {
 		m.skipDeletingSessions(1)
 		if m.cursor != 3 {
 			t.Errorf("expected cursor 3, got %d", m.cursor)
+		}
+	})
+}
+
+// --- Delete confirmation cursor skip ---
+
+func TestDeleteConfirmMoveCursorToNextSession(t *testing.T) {
+	makeSessions := func(ids ...string) []session.Info {
+		var ss []session.Info
+		for _, id := range ids {
+			ss = append(ss, session.Info{ID: id, Name: id})
+		}
+		return ss
+	}
+
+	yKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}
+
+	t.Run("cursor moves to next session after delete confirm", func(t *testing.T) {
+		m := Model{
+			sessions:       makeSessions("a", "b", "c"),
+			cursor:         1, // on "b"
+			deletingIDs:    make(map[string]bool),
+			height:         100,
+			confirmDelete:  true,
+			deleteTargetID: "b",
+		}
+		result, _ := m.updateListMode(yKey)
+		rm := result.(Model)
+		if rm.cursor == 1 {
+			t.Errorf("cursor should have moved away from deleted session, got %d", rm.cursor)
+		}
+		if !rm.deletingIDs["b"] {
+			t.Error("session 'b' should be marked as deleting")
+		}
+	})
+
+	t.Run("cursor moves up when deleting last session", func(t *testing.T) {
+		m := Model{
+			sessions:       makeSessions("a", "b", "c"),
+			cursor:         2, // on "c" (last)
+			deletingIDs:    make(map[string]bool),
+			height:         100,
+			confirmDelete:  true,
+			deleteTargetID: "c",
+		}
+		result, _ := m.updateListMode(yKey)
+		rm := result.(Model)
+		if rm.cursor != 1 {
+			t.Errorf("expected cursor 1 (previous session), got %d", rm.cursor)
 		}
 	})
 }
