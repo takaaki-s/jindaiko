@@ -498,8 +498,13 @@ func (m *Manager) startSessionTmux(session *Session) error {
 	// (tmux's -c flag doesn't expand ~, and RespawnPane doesn't accept -c at all)
 	// Use ; instead of && so cd failure doesn't prevent claude from starting
 	shellDir := workDirForShell(session.WorkDir)
-	shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env -u TMUX -u TMUX_PANE -u CLAUDECODE CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1 %s -ic '%s'",
-		shellDir, session.ID, shell, claudeCmd)
+	customEnv := buildEnvString(m.configMgr.GetEnv())
+	envVars := fmt.Sprintf("CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
+	if customEnv != "" {
+		envVars += " " + customEnv
+	}
+	shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env -u TMUX -u TMUX_PANE -u CLAUDECODE %s %s -ic '%s'",
+		shellDir, envVars, shell, claudeCmd)
 
 	innerSessionName := tmux.InnerSessionName(session.ID)
 
@@ -634,8 +639,13 @@ func (m *Manager) captureOutputTmux(session *Session) {
 
 				shell := m.configMgr.GetShell()
 				shellDir := workDirForShell(session.WorkDir)
-				shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env -u TMUX -u TMUX_PANE -u CLAUDECODE CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1 %s -ic 'claude --session-id %s'",
-					shellDir, session.ID, shell, newSessionID)
+				customEnv := buildEnvString(m.configMgr.GetEnv())
+				envVars := fmt.Sprintf("CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
+				if customEnv != "" {
+					envVars += " " + customEnv
+				}
+				shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env -u TMUX -u TMUX_PANE -u CLAUDECODE %s %s -ic 'claude --session-id %s'",
+					shellDir, envVars, shell, newSessionID)
 				if err := m.tmuxClient.RespawnPane(target, shellCmd); err == nil {
 					m.mu.Lock()
 					session.Status = StatusRunning

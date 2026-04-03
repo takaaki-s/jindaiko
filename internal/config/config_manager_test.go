@@ -249,6 +249,67 @@ func TestConfigManager_Reload_UpdatesConfig(t *testing.T) {
 	}
 }
 
+func TestConfigManager_GetEnv_DefaultEmpty(t *testing.T) {
+	m, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	env := m.GetEnv()
+	if env == nil {
+		t.Fatal("GetEnv() returned nil, want empty map")
+	}
+	if len(env) != 0 {
+		t.Errorf("GetEnv() length: got %d, want 0", len(env))
+	}
+}
+
+func TestConfigManager_GetEnv_Configured(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := "env:\n  CLAUDE_MODEL: claude-sonnet-4-6-20250514\n  MY_VAR: hello\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	m, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	env := m.GetEnv()
+	if len(env) != 2 {
+		t.Fatalf("GetEnv() length: got %d, want 2", len(env))
+	}
+	if env["CLAUDE_MODEL"] != "claude-sonnet-4-6-20250514" {
+		t.Errorf("CLAUDE_MODEL: got %q, want %q", env["CLAUDE_MODEL"], "claude-sonnet-4-6-20250514")
+	}
+	if env["MY_VAR"] != "hello" {
+		t.Errorf("MY_VAR: got %q, want %q", env["MY_VAR"], "hello")
+	}
+}
+
+func TestConfigManager_GetEnv_ReturnsCopy(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := "env:\n  KEY1: value1\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	m, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	env := m.GetEnv()
+	env["KEY1"] = "modified"
+
+	// Original should be unchanged
+	env2 := m.GetEnv()
+	if env2["KEY1"] != "value1" {
+		t.Errorf("GetEnv() returned reference instead of copy: got %q, want %q", env2["KEY1"], "value1")
+	}
+}
+
 func TestConfigManager_Reload_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	m, err := NewManager(dir)
