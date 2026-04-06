@@ -190,8 +190,11 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (*Session, error) {
 	}
 
 	// Check for duplicate directories
+	// Skip sessions whose CurrentWorkDir is inside a worktree — they have
+	// "moved away" from their persisted WorkDir and should not block new
+	// sessions for that directory.
 	for _, s := range m.sessions {
-		if s.WorkDir == opts.WorkDir {
+		if s.WorkDir == opts.WorkDir && !isWorktreePath(s.CurrentWorkDir) {
 			return nil, fmt.Errorf("session already exists for directory: %s (session: %s)", opts.WorkDir, s.Name)
 		}
 	}
@@ -334,7 +337,7 @@ func (m *Manager) SetWorkDir(id string, workDir string) error {
 	// Duplicate check (prevents conflicts in async mode)
 	if workDir != "" {
 		for _, s := range m.sessions {
-			if s.ID != id && s.WorkDir == workDir {
+			if s.ID != id && s.WorkDir == workDir && !isWorktreePath(s.CurrentWorkDir) {
 				return fmt.Errorf("WorkDir already in use by session %s", s.Name)
 			}
 		}

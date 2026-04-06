@@ -98,6 +98,45 @@ func TestManager_CreateWithOptions_DuplicateWorkDir(t *testing.T) {
 	}
 }
 
+func TestManager_CreateWithOptions_DuplicateWorkDir_SkipWorktreeSession(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	s1, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	if err != nil {
+		t.Fatalf("first create failed: %v", err)
+	}
+
+	// Simulate the session moving into a worktree (CurrentWorkDir updated by daemon polling)
+	mgr.mu.Lock()
+	s1.CurrentWorkDir = "/tmp/repo/.claude/worktrees/claude-worktree-fix/branch"
+	mgr.mu.Unlock()
+
+	// Creating a new session for the same WorkDir should succeed
+	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	if err != nil {
+		t.Fatalf("expected success when existing session is in worktree, got: %v", err)
+	}
+}
+
+func TestManager_CreateWithOptions_DuplicateWorkDir_BlockNonWorktree(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	s1, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	if err != nil {
+		t.Fatalf("first create failed: %v", err)
+	}
+
+	// Session is in the same directory (not a worktree)
+	mgr.mu.Lock()
+	s1.CurrentWorkDir = "/tmp/repo"
+	mgr.mu.Unlock()
+
+	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	if err == nil {
+		t.Fatal("expected error for duplicate WorkDir when session is not in worktree")
+	}
+}
+
 func TestManager_CreateWithOptions_DuplicateName(t *testing.T) {
 	mgr, _ := newTestManager(t)
 
@@ -312,6 +351,29 @@ func TestManager_SetWorkDir_DuplicateWorkDir(t *testing.T) {
 	err = mgr.SetWorkDir(s2.ID, "/tmp/wd-dup")
 	if err == nil {
 		t.Fatal("expected error when setting WorkDir to one already in use, got nil")
+	}
+}
+
+func TestManager_SetWorkDir_DuplicateWorkDir_SkipWorktreeSession(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	s1, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-dup", Name: "d1"})
+	if err != nil {
+		t.Fatalf("create first failed: %v", err)
+	}
+	s2, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-other", Name: "d2"})
+	if err != nil {
+		t.Fatalf("create second failed: %v", err)
+	}
+
+	// s1 is in a worktree — SetWorkDir should succeed
+	mgr.mu.Lock()
+	s1.CurrentWorkDir = "/tmp/wd-dup/.claude/worktrees/claude-worktree-fix/branch"
+	mgr.mu.Unlock()
+
+	err = mgr.SetWorkDir(s2.ID, "/tmp/wd-dup")
+	if err != nil {
+		t.Fatalf("expected success when conflicting session is in worktree, got: %v", err)
 	}
 }
 
