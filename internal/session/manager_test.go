@@ -108,7 +108,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_SkipWorktreeSession(t *testi
 
 	// Simulate the session moving into a worktree (CurrentWorkDir updated by daemon polling)
 	mgr.mu.Lock()
-	s1.CurrentWorkDir = "/tmp/repo/.claude/worktrees/claude-worktree-fix/branch"
+	s1.CurrentWorkDir = "/tmp/repo/.claude/worktrees/some-branch"
 	mgr.mu.Unlock()
 
 	// Creating a new session for the same WorkDir should succeed
@@ -126,7 +126,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_BlockNonWorktree(t *testing.
 		t.Fatalf("first create failed: %v", err)
 	}
 
-	// Session is in the same directory (not a worktree)
+	// Set CurrentWorkDir to repo root (not a worktree) — duplicate check should still block
 	mgr.mu.Lock()
 	s1.CurrentWorkDir = "/tmp/repo"
 	mgr.mu.Unlock()
@@ -134,6 +134,46 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_BlockNonWorktree(t *testing.
 	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
 	if err == nil {
 		t.Fatal("expected error for duplicate WorkDir when session is not in worktree")
+	}
+}
+
+func TestManager_CreateWithOptions_DuplicateWorkDir_StoppedSession(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	// CurrentWorkDir defaults to "" for a freshly created (stopped) session
+	_, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	if err != nil {
+		t.Fatalf("first create failed: %v", err)
+	}
+
+	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	if err == nil {
+		t.Fatal("stopped session (CurrentWorkDir empty) should still block duplicate WorkDir")
+	}
+}
+
+func TestManager_CreateWithOptions_DuplicateWorkDir_ReturnFromWorktree(t *testing.T) {
+	mgr, _ := newTestManager(t)
+
+	s1, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	if err != nil {
+		t.Fatalf("first create failed: %v", err)
+	}
+
+	// Session enters a worktree
+	mgr.mu.Lock()
+	s1.CurrentWorkDir = "/tmp/repo/.claude/worktrees/some-branch"
+	mgr.mu.Unlock()
+
+	// Session exits worktree, CurrentWorkDir returns to repo root
+	mgr.mu.Lock()
+	s1.CurrentWorkDir = "/tmp/repo"
+	mgr.mu.Unlock()
+
+	// Duplicate check should block again
+	_, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	if err == nil {
+		t.Fatal("expected error after session returned from worktree to original WorkDir")
 	}
 }
 
@@ -368,7 +408,7 @@ func TestManager_SetWorkDir_DuplicateWorkDir_SkipWorktreeSession(t *testing.T) {
 
 	// s1 is in a worktree — SetWorkDir should succeed
 	mgr.mu.Lock()
-	s1.CurrentWorkDir = "/tmp/wd-dup/.claude/worktrees/claude-worktree-fix/branch"
+	s1.CurrentWorkDir = "/tmp/wd-dup/.claude/worktrees/some-branch"
 	mgr.mu.Unlock()
 
 	err = mgr.SetWorkDir(s2.ID, "/tmp/wd-dup")
