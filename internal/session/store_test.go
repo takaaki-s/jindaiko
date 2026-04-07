@@ -45,7 +45,7 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 		HostID:          "local",
 		TmuxWindowName:  "sess-test-123",
 		TmuxPaneID:      "%42",
-		CurrentWorkDir:  "/runtime/dir", // json:"-"
+		CurrentWorkDir:  "/runtime/dir", // persisted
 		CurrentBranch:   "main",         // json:"-"
 	}
 
@@ -225,7 +225,7 @@ func TestStore_RuntimeFieldsNotPersisted(t *testing.T) {
 	}
 
 	runtimeFields := []string{
-		"current_work_dir", "current_branch", "is_git_repo",
+		"current_branch", "is_git_repo",
 		"ssh_auth_sock", "last_output_time", "started_at",
 	}
 	for _, field := range runtimeFields {

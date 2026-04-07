@@ -53,11 +53,12 @@ type Session struct {
 	StartedAt      time.Time `json:"-"` // Process start time (prevents false error detection right after startup)
 	SSHAuthSock    string    `json:"-"` // SSH_AUTH_SOCK (for git operations, not persisted)
 
-	// Tracked runtime fields (not persisted, updated by daemon polling)
-	CurrentWorkDir string `json:"-"` // Current working directory (tmux pane_current_path)
-	CurrentBranch  string `json:"-"` // Current git branch
-	IsGitRepo      bool   `json:"-"` // Whether CurrentWorkDir is inside a git repository
-	IsWorktree     bool   `json:"-"` // Whether CurrentWorkDir is a git worktree (not the main repo)
+	// Tracked runtime fields (CurrentWorkDir is persisted so worktree/subdir
+	// context survives daemon restarts and enables resume in the last known dir).
+	CurrentWorkDir string `json:"current_work_dir,omitempty"` // Current working directory (tmux pane_current_path)
+	CurrentBranch  string `json:"-"`                          // Current git branch
+	IsGitRepo      bool   `json:"-"`                          // Whether CurrentWorkDir is inside a git repository
+	IsWorktree     bool   `json:"-"`                          // Whether CurrentWorkDir is a git worktree (not the main repo)
 }
 
 // Info returns session information for display
