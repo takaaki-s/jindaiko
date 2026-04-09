@@ -27,6 +27,10 @@ var (
 				Foreground(lipgloss.Color("255")).
 				Background(primaryColor)
 
+	// Viewed item style (session currently shown in right pane)
+	viewedItemStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#24283b"))
+
 	// Session name style
 	sessionNameStyle = lipgloss.NewStyle().
 				Bold(true)

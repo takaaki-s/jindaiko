@@ -1273,3 +1273,67 @@ func TestDeleteConfirmMoveCursorToNextSession(t *testing.T) {
 		}
 	})
 }
+
+// --- renderSession ---
+
+func TestRenderSession_ViewedState(t *testing.T) {
+	sess := session.Info{
+		ID:     "test-id",
+		Name:   "test-session",
+		Status: session.StatusIdle,
+	}
+	m := Model{}
+	width := 40
+
+	tests := []struct {
+		name           string
+		selected       bool
+		viewed         bool
+		wantPrefix     string
+		dontWantPrefix string
+	}{
+		{
+			name:           "selected but not viewed shows cursor marker",
+			selected:       true,
+			viewed:         false,
+			wantPrefix:     "> ",
+			dontWantPrefix: "▎",
+		},
+		{
+			name:           "selected and viewed shows cursor marker",
+			selected:       true,
+			viewed:         true,
+			wantPrefix:     "> ",
+			dontWantPrefix: "▎",
+		},
+		{
+			name:       "viewed only shows viewed marker",
+			selected:   false,
+			viewed:     true,
+			wantPrefix: "▎",
+		},
+		{
+			name:           "neither selected nor viewed shows plain",
+			selected:       false,
+			viewed:         false,
+			dontWantPrefix: "▎",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.renderSession(sess, tt.selected, tt.viewed, width)
+			lines := strings.Split(result, "\n")
+			if len(lines) == 0 {
+				t.Fatal("renderSession returned empty string")
+			}
+			firstLine := lines[0]
+			if tt.wantPrefix != "" && !strings.Contains(firstLine, tt.wantPrefix) {
+				t.Errorf("first line %q should contain %q", firstLine, tt.wantPrefix)
+			}
+			if tt.dontWantPrefix != "" && strings.Contains(firstLine, tt.dontWantPrefix) {
+				t.Errorf("first line %q should not contain %q", firstLine, tt.dontWantPrefix)
+			}
+		})
+	}
+}
