@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // supportedDetachKeys is the list of supported detach keys
@@ -67,6 +68,7 @@ type Config struct {
 	HostID      string            `mapstructure:"host_id,omitempty"`     // This daemon's host ID (default: "local")
 	Keybindings KeybindingsConfig `mapstructure:"keybindings,omitempty"` // Keybinding settings
 	Hosts       []HostConfig      `mapstructure:"hosts,omitempty"`       // Remote host settings
+	Env         map[string]string `mapstructure:"-"`                     // Custom environment variables (loaded separately to preserve key case)
 }
 
 // Manager manages reading and writing configuration files
@@ -125,8 +127,26 @@ func (m *Manager) load() error {
 		return err
 	}
 
+	cfg.Env = loadEnvFromFile(m.filePath)
 	m.config = cfg
 	return nil
+}
+
+// loadEnvFromFile reads the "env" map from the YAML file directly,
+// preserving the original key case (viper lowercases all keys).
+func loadEnvFromFile(filePath string) map[string]string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+
+	var raw struct {
+		Env map[string]string `yaml:"env"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	return raw.Env
 }
 
 // Reload re-reads the configuration file
@@ -143,11 +163,13 @@ func (m *Manager) Reload() error {
 		return err
 	}
 
+	cfg.Env = loadEnvFromFile(m.filePath)
 	m.config = cfg
 	return nil
 }
 
-// Save writes the configuration to file
+// Save writes the configuration to file.
+// Note: Env field is not persisted by Save (it is loaded directly from YAML via loadEnvFromFile).
 func (m *Manager) Save() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -161,6 +183,13 @@ func (m *Manager) Get() *Config {
 	defer m.mu.RUnlock()
 
 	cfg := *m.config
+	if cfg.Env != nil {
+		env := make(map[string]string, len(cfg.Env))
+		for k, v := range cfg.Env {
+			env[k] = v
+		}
+		cfg.Env = env
+	}
 	return &cfg
 }
 
@@ -186,6 +215,24 @@ func (m *Manager) GetHost(id string) *HostConfig {
 		}
 	}
 	return nil
+}
+
+// GetEnv returns the custom environment variables configured for Claude Code sessions.
+// Returns an empty map (never nil) if no env vars are configured.
+func (m *Manager) GetEnv() map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.config.Env == nil {
+		return make(map[string]string)
+	}
+
+	// Return a copy to prevent callers from modifying the internal state
+	env := make(map[string]string, len(m.config.Env))
+	for k, v := range m.config.Env {
+		env[k] = v
+	}
+	return env
 }
 
 // GetShell returns the shell to use when launching Claude Code.
