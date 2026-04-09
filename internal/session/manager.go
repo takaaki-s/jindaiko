@@ -190,8 +190,11 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (*Session, error) {
 	}
 
 	// Check for duplicate directories
+	// Skip sessions whose CurrentWorkDir is inside a worktree — they have
+	// "moved away" from their persisted WorkDir and should not block new
+	// sessions for that directory.
 	for _, s := range m.sessions {
-		if s.WorkDir == opts.WorkDir {
+		if s.WorkDir == opts.WorkDir && !isWorktreePath(s.CurrentWorkDir) {
 			return nil, fmt.Errorf("session already exists for directory: %s (session: %s)", opts.WorkDir, s.Name)
 		}
 	}
@@ -334,7 +337,7 @@ func (m *Manager) SetWorkDir(id string, workDir string) error {
 	// Duplicate check (prevents conflicts in async mode)
 	if workDir != "" {
 		for _, s := range m.sessions {
-			if s.ID != id && s.WorkDir == workDir {
+			if s.ID != id && s.WorkDir == workDir && !isWorktreePath(s.CurrentWorkDir) {
 				return fmt.Errorf("WorkDir already in use by session %s", s.Name)
 			}
 		}
@@ -452,12 +455,24 @@ func workDirForShell(dir string) string {
 
 // startSessionTmux starts a session in a tmux window.
 func (m *Manager) startSessionTmux(session *Session) error {
-	// Expand ~ in WorkDir for tmux -c flag and trust state check
-	expandedWorkDir := expandTilde(session.WorkDir)
+	// Resume in the last known cwd (e.g. worktree) when available, so the
+	// session lands in the same directory it was in when it stopped. If the
+	// session never moved out of WorkDir, CurrentWorkDir is empty and WorkDir
+	// is used instead. We do NOT silently fall back from a missing
+	// CurrentWorkDir to WorkDir: a session that was bound to a worktree
+	// cannot be meaningfully resumed at the project root once the worktree
+	// is gone — fail loudly so the user can delete or recreate the session.
+	startDir := session.WorkDir
+	if session.CurrentWorkDir != "" {
+		startDir = session.CurrentWorkDir
+	}
 
-	// Error if WorkDir does not exist (can happen after worktree deletion etc.)
+	// Expand ~ for tmux -c flag and trust state check
+	expandedWorkDir := expandTilde(startDir)
+
+	// Error if start directory does not exist (can happen after worktree deletion etc.)
 	if info, err := os.Stat(expandedWorkDir); err != nil || !info.IsDir() {
-		return fmt.Errorf("work directory does not exist: %s (may have been deleted, e.g. git worktree removed)", session.WorkDir)
+		return fmt.Errorf("work directory does not exist: %s (may have been deleted, e.g. git worktree removed)", startDir)
 	}
 
 	// Set trust state
@@ -497,7 +512,7 @@ func (m *Manager) startSessionTmux(session *Session) error {
 	// Embed cd to WorkDir so the shell expands ~ and $HOME
 	// (tmux's -c flag doesn't expand ~, and RespawnPane doesn't accept -c at all)
 	// Use ; instead of && so cd failure doesn't prevent claude from starting
-	shellDir := workDirForShell(session.WorkDir)
+	shellDir := workDirForShell(startDir)
 	customEnv := buildEnvString(m.configMgr.GetEnv())
 	envVars := fmt.Sprintf("CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
 	if customEnv != "" {

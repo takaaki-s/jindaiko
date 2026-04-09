@@ -225,8 +225,6 @@ func TestSession_JSONOmitsRuntimeFields(t *testing.T) {
 		"started_at",
 		"SSHAuthSock",
 		"ssh_auth_sock",
-		"CurrentWorkDir",
-		"current_work_dir",
 		"CurrentBranch",
 		"current_branch",
 		"IsGitRepo",

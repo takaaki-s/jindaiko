@@ -172,7 +172,6 @@ type Model struct {
 	tuiPaneID          string       // TUI pane unique ID (e.g. "%42") in outer tmux
 	displayPaneID      string       // Right pane unique ID (for session display) in outer tmux
 	currentSessionID   string       // Session ID currently displayed in right pane
-	switchSeq          int          // Sequence number for cursor movement debounce
 	displayLocalAttach bool         // true when display pane is running tmux attach to inner tmux
 
 	// Focus after create
@@ -368,17 +367,6 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-// cursorSettledMsg is sent after a debounce delay when the cursor stops moving.
-type cursorSettledMsg struct {
-	seq int
-}
-
-func cursorSettledCmd(seq int) tea.Cmd {
-	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg {
-		return cursorSettledMsg{seq: seq}
-	})
-}
-
 // resizeSettledMsg is sent after a delay to allow WindowSizeMsg to arrive
 // after tmux pane operations (ZoomPane).
 type resizeSettledMsg struct{}
@@ -571,8 +559,8 @@ func (m *Model) openVSCode(sess *session.Info) {
 	_ = exec.Command("code", workDir).Start()
 }
 
-// handleAttach attaches to the currently selected session.
-func (m Model) handleAttach() (tea.Model, tea.Cmd) {
+// handleSelectSession switches the right pane to display the currently selected session.
+func (m Model) handleSelectSession() (tea.Model, tea.Cmd) {
 	pageSessions := m.getPageSessions()
 	if len(pageSessions) == 0 || m.cursor >= len(pageSessions) {
 		return m, nil
@@ -580,7 +568,7 @@ func (m Model) handleAttach() (tea.Model, tea.Cmd) {
 	sess := pageSessions[m.cursor]
 
 	if sess.Status == session.StatusCreating {
-		m.err = fmt.Errorf("cannot attach to creating session")
+		m.err = fmt.Errorf("cannot select creating session")
 		return m, nil
 	}
 	if m.deletingIDs[sess.ID] {
@@ -606,9 +594,6 @@ func (m Model) handleAttach() (tea.Model, tea.Cmd) {
 			m.currentSessionID = ""
 		}
 		m.switchToSession(sess.ID)
-		if m.displayPaneID != "" {
-			_ = m.tmuxClient.SelectPane(m.displayPaneID)
-		}
 		return m, m.fetchSessions
 	}
 	return m, nil
@@ -816,8 +801,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor--
 					m.skipDeletingSessions(-1)
 				}
-				m.switchSeq++
-				return m, cursorSettledCmd(m.switchSeq)
+				return m, nil
 
 			case "down":
 				pageSessions := m.getPageSessions()
@@ -825,12 +809,10 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 					m.skipDeletingSessions(1)
 				}
-				m.switchSeq++
-				return m, cursorSettledCmd(m.switchSeq)
+				return m, nil
 
 			case "enter":
-				m.switchSeq++
-				return m.handleAttach()
+				return m.handleSelectSession()
 
 			case "left":
 				if m.currentPage > 0 {
@@ -870,8 +852,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor--
 				m.skipDeletingSessions(-1)
 			}
-			m.switchSeq++
-			return m, cursorSettledCmd(m.switchSeq)
+			return m, nil
 
 		case key.Matches(msg, m.keys.Down):
 			pageSessions := m.getPageSessions()
@@ -879,12 +860,10 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m.skipDeletingSessions(1)
 			}
-			m.switchSeq++
-			return m, cursorSettledCmd(m.switchSeq)
+			return m, nil
 
 		case key.Matches(msg, m.keys.Enter):
-			m.switchSeq++
-			return m.handleAttach()
+			return m.handleSelectSession()
 
 		case key.Matches(msg, m.keys.Search):
 			m.searching = true
@@ -1091,6 +1070,13 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// Auto-display first session on initial load
+		if m.currentSessionID == "" {
+			pageSessions := m.getPageSessions()
+			if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
+				m.switchToSession(pageSessions[m.cursor].ID)
+			}
+		}
 		m.processingMsg = ""
 		return m, nil
 
@@ -1100,19 +1086,6 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.waitingForResize = false
 			m.processingMsg = ""
 			return m, tea.ClearScreen
-		}
-		return m, nil
-
-	case cursorSettledMsg:
-		if msg.seq != m.switchSeq {
-			return m, nil
-		}
-		pageSessions := m.getPageSessions()
-		if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
-			sess := pageSessions[m.cursor]
-			if !m.deletingIDs[sess.ID] {
-				m.switchToSession(sess.ID)
-			}
 		}
 		return m, nil
 
@@ -1347,7 +1320,8 @@ func (m Model) renderListContent(contentWidth int) string {
 			}
 			for _, sess := range group.Sessions {
 				idx := idToIdx[sess.ID]
-				content.WriteString(m.renderSession(sess, idx == m.cursor, contentWidth))
+				viewed := sess.ID == m.currentSessionID
+				content.WriteString(m.renderSession(sess, idx == m.cursor, viewed, contentWidth))
 			}
 		}
 	}
@@ -1377,7 +1351,7 @@ func (m Model) renderHelpLine() string {
 		return lipgloss.NewStyle().Foreground(warningColor).Bold(true).Render(confirmMsg)
 	}
 	if m.searching {
-		return helpStyle.Render(" Esc:clear  Enter:attach  ↑↓:navigate")
+		return helpStyle.Render(" Esc:clear  Enter:select  ↑↓:navigate")
 	}
 	return helpStyle.Render(" ? help  / search")
 }
@@ -1386,7 +1360,7 @@ func (m Model) renderHelpLine() string {
 // Format: >name (branch)                    STATUS    Last Active
 //
 //	details...
-func (m Model) renderSession(sess session.Info, selected bool, width int) string {
+func (m Model) renderSession(sess session.Info, selected bool, viewed bool, width int) string {
 	// Deleting sessions: dim rendering, not selectable
 	if m.deletingIDs[sess.ID] {
 		var b strings.Builder
@@ -1421,13 +1395,28 @@ func (m Model) renderSession(sess session.Info, selected bool, width int) string
 	availableForName := width - 2 // cursor(2)
 	name := truncateString(sess.Name, availableForName)
 
+	// renderLine renders a line with selected or viewed style (full-width background).
+	// Must only be called when selected || viewed is true.
+	renderLine := func(line string) {
+		if selected {
+			b.WriteString(selectedItemStyle.Render(padLine(line, width)))
+		} else if viewed {
+			b.WriteString(viewedItemStyle.Render(padLine(line, width)))
+		} else {
+			b.WriteString(line)
+		}
+		b.WriteString("\n")
+	}
+
 	if selected {
-		b.WriteString(selectedItemStyle.Render(padLine("> "+name, width)))
+		renderLine("> " + name)
+	} else if viewed {
+		renderLine("▎ " + name)
 	} else {
 		b.WriteString("  ")
 		b.WriteString(sessionNameStyle.Render(name))
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	// Build metadata: [host] workdir (branch)
 	var metaParts []string
@@ -1461,23 +1450,23 @@ func (m Model) renderSession(sess session.Info, selected bool, width int) string
 	}
 
 	// --- Line 2: status (icon + label) ---
-	if selected {
-		b.WriteString(selectedItemStyle.Render(padLine(indent+statusStr, width)))
+	if selected || viewed {
+		renderLine(indent + statusStr)
 	} else {
 		b.WriteString(indent)
 		b.WriteString(statusStyle.Render(statusStr))
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	// --- Line 3: metadata ([host] repo (branch)) ---
 	if metaStr != "" {
-		if selected {
-			b.WriteString(selectedItemStyle.Render(padLine(indent+metaStr, width)))
+		if selected || viewed {
+			renderLine(indent + metaStr)
 		} else {
 			b.WriteString(indent)
 			b.WriteString(helpStyle.Render(metaStr))
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
 	// --- Line 3: last user message ---
@@ -1488,12 +1477,12 @@ func (m Model) renderSession(sess session.Info, selected bool, width int) string
 		msgWidth = max(msgWidth, 10)
 		msgStr := truncateString(sess.LastUserMessage, msgWidth)
 
-		if selected {
-			b.WriteString(selectedItemStyle.Render(padLine(prefix+msgStr, width)))
+		if selected || viewed {
+			renderLine(prefix + msgStr)
 		} else {
 			b.WriteString("  ├─ " + helpStyle.Render("👤 "+msgStr))
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
 	// --- Line 4: last assistant message ---
@@ -1504,21 +1493,21 @@ func (m Model) renderSession(sess session.Info, selected bool, width int) string
 		msgWidth = max(msgWidth, 10)
 		msgStr := truncateStringFromEnd(sess.LastAssistantMessage, msgWidth)
 
-		if selected {
-			b.WriteString(selectedItemStyle.Render(padLine(prefix+msgStr, width)))
+		if selected || viewed {
+			renderLine(prefix + msgStr)
 		} else {
 			b.WriteString("  ├─ " + helpStyle.Render("🤖 "+msgStr))
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
 	// --- Last line: time ---
-	if selected {
-		b.WriteString(selectedItemStyle.Render(padLine("  └─ "+timeStr, width)))
+	if selected || viewed {
+		renderLine("  └─ " + timeStr)
 	} else {
 		b.WriteString("  └─ " + timeStyle.Render(timeStr))
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	return b.String()
 }
