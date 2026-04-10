@@ -594,6 +594,9 @@ func (m Model) handleSelectSession() (tea.Model, tea.Cmd) {
 			m.currentSessionID = ""
 		}
 		m.switchToSession(sess.ID)
+		if m.displayPaneID != "" {
+			_ = m.tmuxClient.SelectPane(m.displayPaneID)
+		}
 		return m, m.fetchSessions
 	}
 	return m, nil
