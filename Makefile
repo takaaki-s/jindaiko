@@ -1,9 +1,21 @@
-.PHONY: build install clean test fmt lint deploy-ec2
+.PHONY: build install clean test fmt lint lint-install deploy-ec2
 
 VERSION := 0.1.0
 BINARY := ccvalet
 BUILD_DIR := bin
 EC2_HOST ?= ec2-dev
+
+# Pinned tooling versions. Bump deliberately; both local and CI use the same value.
+# Note: golangci-lint-action@v6 in CI requires v1.x. Upgrading to v2.x requires
+# bumping golangci-lint-action to v7+ and migrating .golangci.yml (currently absent),
+# which is out of scope for incidental changes — bump deliberately.
+GOLANGCI_LINT_VERSION := v1.64.8
+# `go install` writes to $GOBIN if set, else $GOPATH/bin. Mirror that resolution.
+GOLANGCI_LINT_BIN_DIR := $(shell go env GOBIN)
+ifeq ($(strip $(GOLANGCI_LINT_BIN_DIR)),)
+GOLANGCI_LINT_BIN_DIR := $(shell go env GOPATH)/bin
+endif
+GOLANGCI_LINT := $(GOLANGCI_LINT_BIN_DIR)/golangci-lint
 
 # ldflags for version injection
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -41,8 +53,16 @@ test-coverage:
 fmt:
 	go fmt ./...
 
-lint:
-	golangci-lint run ./...
+lint: lint-install
+	$(GOLANGCI_LINT) run ./...
+
+# Install the pinned golangci-lint version into $GOPATH/bin if missing or outdated.
+# Bump GOLANGCI_LINT_VERSION above to upgrade; the next `make lint` will reinstall.
+lint-install:
+	@if ! test -x $(GOLANGCI_LINT) || [ "$$($(GOLANGCI_LINT) version --format short 2>/dev/null)" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+	fi
 
 # Deploy to EC2 (Ubuntu)
 deploy-ec2:

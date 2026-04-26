@@ -19,7 +19,9 @@ jobs:
           go-version: "1.24"
       - uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
         with:
-          version: latest
+          # Pinned to match Makefile's GOLANGCI_LINT_VERSION. Bump both together.
+          # Upgrading to v2.x also requires bumping the action to v7+.
+          version: v1.64.8
 
   test:
     runs-on: ubuntu-latest
