@@ -737,6 +737,12 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if errors.Is(err, session.ErrWorktreeDirty) {
 							return worktreeDirtyMsg{sessionID: deleteID, hostID: deleteHostID, name: deleteName}
 						}
+						if errors.Is(err, session.ErrNotWorktree) {
+							return deleteErrMsg{
+								sessionID: deleteID,
+								err:       fmt.Errorf("worktree not found for session %q (already removed, or session is not in a worktree)", deleteName),
+							}
+						}
 						return deleteErrMsg{sessionID: deleteID, err: fmt.Errorf("delete failed: %w", err)}
 					}
 					sessions, err := client.List()

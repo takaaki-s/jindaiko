@@ -236,6 +236,9 @@ func (c *Client) Delete(id, hostID string, removeWorktree, forceRemoveWorktree b
 		if strings.Contains(resp.Error, session.ErrWorktreeDirty.Error()) {
 			return session.ErrWorktreeDirty
 		}
+		if strings.Contains(resp.Error, session.ErrNotWorktree.Error()) {
+			return session.ErrNotWorktree
+		}
 		return errors.New(resp.Error)
 	}
 	return nil

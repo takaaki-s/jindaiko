@@ -25,6 +25,12 @@ var debugLog = debug.NewLogger("daemon-debug.log")
 // and force removal was not requested.
 var ErrWorktreeDirty = errors.New("worktree has uncommitted changes")
 
+// ErrNotWorktree is returned when worktree removal was requested but the
+// resolved target directory is not a git worktree (e.g., the main repository
+// or a non-git directory). Returned instead of silently succeeding so the
+// caller can surface the discrepancy to the user.
+var ErrNotWorktree = errors.New("path is not a git worktree")
+
 // Manager manages multiple Claude Code sessions
 type Manager struct {
 	sessions   map[string]*Session
@@ -424,6 +430,42 @@ func isWorktreePath(path string) bool {
 func isGitRoot(path string) bool {
 	_, err := os.Stat(filepath.Join(path, ".git"))
 	return err == nil
+}
+
+// isGitWorktreeDir returns true when the directory at path is a git worktree
+// (its .git entry is a regular file that points at the main repo). Returns
+// false for the main repo (.git is a directory) or non-git directories.
+func isGitWorktreeDir(path string) bool {
+	if path == "" {
+		return false
+	}
+	fi, err := os.Lstat(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	return fi.Mode().IsRegular()
+}
+
+// resolveWorktreeDir picks the best path to use when removing the session's
+// git worktree. Prefers currentWorkDir (persisted, reflects most recent CWD)
+// when it is a worktree, then workDir. Falls back to either even when neither
+// is a worktree so removeGitWorktree can return ErrNotWorktree against the
+// caller's intent rather than silently doing nothing.
+//
+// Takes the two paths as strings (rather than *Session) so the caller can
+// snapshot them under the manager lock and run the os.Lstat probes outside
+// the critical section.
+func resolveWorktreeDir(currentWorkDir, workDir string) string {
+	if isGitWorktreeDir(currentWorkDir) {
+		return currentWorkDir
+	}
+	if isGitWorktreeDir(workDir) {
+		return workDir
+	}
+	if currentWorkDir != "" {
+		return currentWorkDir
+	}
+	return workDir
 }
 
 // expandTilde expands a leading ~ in a path to the current user's home directory.
@@ -942,14 +984,20 @@ func (m *Manager) Delete(id string, removeWorktree, forceRemoveWorktree bool) er
 		return fmt.Errorf("session %s not found", id)
 	}
 
-	workDir := session.WorkDir
+	currentWorkDir := session.CurrentWorkDir
+	persistedWorkDir := session.WorkDir
 	m.mu.Unlock()
 
+	// Resolve the actual worktree path outside the lock — resolveWorktreeDir
+	// performs os.Lstat probes which would otherwise block other goroutines.
+	workDir := resolveWorktreeDir(currentWorkDir, persistedWorkDir)
+
 	// Remove worktree if requested (outside lock to avoid blocking during exec).
-	// This runs before tmux kill so that ErrWorktreeDirty can abort without side effects.
+	// This runs before tmux kill so that ErrWorktreeDirty / ErrNotWorktree can
+	// abort without side effects.
 	if removeWorktree && workDir != "" {
 		if err := m.removeGitWorktree(workDir, forceRemoveWorktree); err != nil {
-			if errors.Is(err, ErrWorktreeDirty) {
+			if errors.Is(err, ErrWorktreeDirty) || errors.Is(err, ErrNotWorktree) {
 				return err
 			}
 			debugLog("[DELETE] worktree removal failed for %s: %v", workDir, err)
@@ -974,18 +1022,24 @@ func (m *Manager) Delete(id string, removeWorktree, forceRemoveWorktree bool) er
 }
 
 // removeGitWorktree removes a git worktree at the given path.
-// Returns ErrWorktreeDirty if the worktree has uncommitted changes and force is false.
+// Returns ErrWorktreeDirty if the worktree has uncommitted changes and force
+// is false. Returns ErrNotWorktree if workDir is not a git worktree (e.g.,
+// the main repository or a non-git directory) so the caller can surface the
+// discrepancy. A non-existent directory is treated as already-removed and
+// returns nil to keep removal idempotent.
 func (m *Manager) removeGitWorktree(workDir string, force bool) error {
-	// Skip if directory doesn't exist
+	// Idempotent: directory already gone (e.g., removed manually).
 	if _, err := os.Stat(workDir); os.IsNotExist(err) {
 		return nil
 	}
 
-	// Verify it's actually a worktree (.git is a file, not a directory)
+	// Verify it's actually a worktree (.git must be a regular file, not a
+	// directory). The main repo or non-git dirs are refused to protect them
+	// from accidental removal.
 	gitPath := filepath.Join(workDir, ".git")
 	fi, err := os.Lstat(gitPath)
-	if err != nil || fi.IsDir() {
-		return nil // Not a worktree; skip silently
+	if err != nil || !fi.Mode().IsRegular() {
+		return ErrNotWorktree
 	}
 
 	// Read .git file to find the main repo
@@ -996,7 +1050,7 @@ func (m *Manager) removeGitWorktree(workDir string, force bool) error {
 	}
 	raw := strings.TrimSpace(string(content))
 	if !strings.HasPrefix(raw, "gitdir: ") {
-		return nil // Not a standard worktree .git file
+		return ErrNotWorktree
 	}
 	gitdir := strings.TrimPrefix(raw, "gitdir: ")
 

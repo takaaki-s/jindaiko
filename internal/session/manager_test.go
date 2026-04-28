@@ -2,7 +2,9 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1725,5 +1727,162 @@ func TestManager_HandleHookEvent_CWDUpdate_WorktreePathSkipped(t *testing.T) {
 	// CurrentWorkDir should still be updated
 	if got.CurrentWorkDir != worktreeDir {
 		t.Errorf("CurrentWorkDir = %q, want %q", got.CurrentWorkDir, worktreeDir)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Worktree removal tests (Delete + removeGitWorktree)
+// ---------------------------------------------------------------------------
+
+// setupTestWorktree initializes a fresh git repo at a temp dir and adds a
+// worktree under it. Returns (mainRepoDir, worktreeDir). Skips the test if
+// `git` is not on PATH.
+func setupTestWorktree(t *testing.T) (string, string) {
+	t.Helper()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoDir := t.TempDir()
+
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %s: %v", strings.Join(args, " "), out, err)
+		}
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "test")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("init"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit("add", ".")
+	runGit("commit", "-m", "init")
+
+	worktreeDir := filepath.Join(repoDir, "wt")
+	runGit("worktree", "add", worktreeDir, "-b", "test-branch")
+
+	return repoDir, worktreeDir
+}
+
+func TestManager_Delete_RemovesWorktree(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	_, worktreeDir := setupTestWorktree(t)
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: worktreeDir, Name: "wt"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	if err := mgr.Delete(sess.ID, true, false); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
+		t.Errorf("worktree directory should be removed, but still exists: stat err=%v", err)
+	}
+}
+
+func TestManager_Delete_PrefersCurrentWorkDirForWorktree(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	mainRepo, worktreeDir := setupTestWorktree(t)
+
+	// Reproduce the bug: WorkDir points at the main repo (because the
+	// fix-worktree-workdir-overwrite guard prevents WorkDir from being
+	// updated to a worktree path), while CurrentWorkDir tracks the actual
+	// worktree the session is in.
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: mainRepo, Name: "wt-current"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.mu.Lock()
+	sess.CurrentWorkDir = worktreeDir
+	mgr.mu.Unlock()
+
+	if err := mgr.Delete(sess.ID, true, false); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
+		t.Errorf("worktree directory should be removed, but still exists: stat err=%v", err)
+	}
+	// Main repo must remain intact.
+	if _, err := os.Stat(filepath.Join(mainRepo, ".git")); err != nil {
+		t.Errorf("main repo .git should still exist: %v", err)
+	}
+}
+
+func TestManager_Delete_NonWorktreeReturnsError(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	mainRepo, _ := setupTestWorktree(t)
+
+	// Both WorkDir and CurrentWorkDir point at the main repo (no worktree).
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: mainRepo, Name: "main-only"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	err = mgr.Delete(sess.ID, true, false)
+	if !errors.Is(err, ErrNotWorktree) {
+		t.Fatalf("expected ErrNotWorktree, got: %v", err)
+	}
+
+	// Session must still exist (Delete aborted before tmux kill / store removal).
+	if _, ok := mgr.Get(sess.ID); !ok {
+		t.Error("session should still exist after ErrNotWorktree")
+	}
+	// Main repo must remain intact.
+	if _, err := os.Stat(filepath.Join(mainRepo, ".git")); err != nil {
+		t.Errorf("main repo .git should still exist: %v", err)
+	}
+}
+
+func TestManager_Delete_DirtyWorktreeReturnsErrWorktreeDirty(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	_, worktreeDir := setupTestWorktree(t)
+
+	if err := os.WriteFile(filepath.Join(worktreeDir, "dirty.txt"), []byte("uncommitted"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	sess, err := mgr.CreateWithOptions(CreateOptions{WorkDir: worktreeDir, Name: "wt-dirty"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	err = mgr.Delete(sess.ID, true, false)
+	if !errors.Is(err, ErrWorktreeDirty) {
+		t.Fatalf("expected ErrWorktreeDirty, got: %v", err)
+	}
+
+	if _, err := os.Stat(worktreeDir); err != nil {
+		t.Errorf("worktree should still exist after dirty rejection: %v", err)
+	}
+
+	// Force removal should succeed.
+	if err := mgr.Delete(sess.ID, true, true); err != nil {
+		t.Fatalf("force Delete failed: %v", err)
+	}
+	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
+		t.Errorf("worktree should be removed after force delete: stat err=%v", err)
+	}
+}
+
+func TestRemoveGitWorktree_AlreadyDeletedIsIdempotent(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	_, worktreeDir := setupTestWorktree(t)
+
+	// Remove the worktree directory out-of-band.
+	if err := os.RemoveAll(worktreeDir); err != nil {
+		t.Fatalf("pre-remove worktree: %v", err)
+	}
+
+	if err := mgr.removeGitWorktree(worktreeDir, false); err != nil {
+		t.Errorf("removeGitWorktree on missing dir should be nil, got: %v", err)
 	}
 }
