@@ -2,7 +2,7 @@
 
 ## Transport
 
-- Unix domain socket: `~/.ccvalet/run/daemon.sock`
+- Unix domain socket: `$XDG_RUNTIME_DIR/ccvalet/daemon.sock` (fallback `$TMPDIR/ccvalet-<uid>/daemon.sock`)
 - One request / one response per connection (no connection pooling)
 - JSON encoding/decoding
 

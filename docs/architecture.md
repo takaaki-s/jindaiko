@@ -86,14 +86,20 @@ Requests destined for remote hosts are forwarded via `forwardToSlave()`, which s
 
 ## File Storage
 
+ccvalet follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/):
+
 ```
-~/.ccvalet/
-  ├─ config.yaml            ... User settings (keybindings, hosts)
-  ├─ state.yaml             ... Persistent state (StateManager)
+$XDG_CONFIG_HOME/ccvalet/        (default: ~/.config/ccvalet)
+  └─ config.yaml                 ... User settings (keybindings, hosts)
+
+$XDG_STATE_HOME/ccvalet/         (default: ~/.local/state/ccvalet)
+  ├─ state.yaml                  ... Persistent state (StateManager)
   ├─ sessions/
-  │   └─ {uuid}.json        ... Session persistence data
-  ├─ run/
-  │   └─ daemon.sock        ... Unix domain socket
-  ├─ daemon-debug.log       ... Daemon debug log
-  └─ hook-debug.log         ... Hook debug log
+  │   └─ {uuid}.json             ... Session persistence data
+  ├─ hooks-settings.json         ... Generated Claude Code hooks settings
+  ├─ daemon-debug.log            ... Daemon debug log
+  └─ hook-debug.log              ... Hook debug log
+
+$XDG_RUNTIME_DIR/ccvalet/        (fallback: $TMPDIR/ccvalet-<uid>)
+  └─ daemon.sock                 ... Unix domain socket
 ```

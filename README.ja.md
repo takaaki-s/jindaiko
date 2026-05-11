@@ -211,18 +211,44 @@ ccvalet completion fish | source
 
 ## 設定
 
-設定ファイルとデータは `~/.ccvalet/` に保存されます。
+[XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/) に準拠して、ファイルが config / state / runtime に分かれて保存されます:
 
 ```
-~/.ccvalet/
-├── config.yaml      # 設定ファイル
-├── state.yaml       # 状態ファイル（前回使用したリポジトリ等）
-├── sessions/        # セッションデータ
-└── run/
-    └── daemon.sock  # デーモンソケット
+$XDG_CONFIG_HOME/ccvalet/      （デフォルト: ~/.config/ccvalet）
+└── config.yaml                # 設定ファイル
+
+$XDG_STATE_HOME/ccvalet/       （デフォルト: ~/.local/state/ccvalet）
+├── state.yaml                 # 状態ファイル（前回使用したリポジトリ等）
+├── sessions/                  # セッションデータ
+├── hooks-settings.json        # Claude Code フック設定（自動生成）
+├── daemon-debug.log           # デーモンデバッグログ（CCVALET_DEBUG=1 時）
+└── hook-debug.log             # フックデバッグログ（CCVALET_DEBUG=1 時）
+
+$XDG_RUNTIME_DIR/ccvalet/      （未設定時のフォールバック: $TMPDIR/ccvalet-<uid>）
+└── daemon.sock                # デーモンソケット
 ```
 
-### 設定例 (`~/.ccvalet/config.yaml`)
+### `~/.ccvalet/` からの移行（旧バージョンからのアップグレード）
+
+XDG レイアウト導入前のバージョンはすべて `~/.ccvalet/` 配下に保存していました。一度きりの移行スクリプトを同梱しています:
+
+```bash
+# 何が動くか先に確認
+bash scripts/migrate-to-xdg.sh --dry-run
+
+# 適用
+bash scripts/migrate-to-xdg.sh
+```
+
+スクリプトの挙動:
+
+- `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME` を尊重します。
+- 移動先に既にファイルがある場合は中断します（上書きしない／再実行安全）。
+- 旧ディレクトリは空になったときのみ削除します。
+- **`~/.ccvalet/run/daemon.sock` を握ったままの旧デーモンプロセスを SIGTERM で停止します（3秒待って終了しなければ SIGKILL）。** 新バイナリの `ccvalet daemon stop` はソケットパス移動の影響で旧デーモンに到達できないため、スクリプト側で直接終了します。
+- `~/.ccvalet/run/` 配下の旧ソケットは破棄します。新ソケットは次回 `ccvalet daemon start` 時に再生成されます。
+
+### 設定例 (`~/.config/ccvalet/config.yaml`)
 
 ```yaml
 # キーバインドのカスタマイズ（省略時はデフォルト値を使用）
@@ -296,7 +322,7 @@ keybindings:
 
 ccvalet はセッションの状態検知に Claude Code の hooks を使用します。**Hooks は自動で設定されます** — 手動設定は不要です。
 
-セッション起動時に ccvalet が `~/.ccvalet/hooks-settings.json` を生成し、`claude --settings` 経由で Claude Code に渡します。
+セッション起動時に ccvalet が `$XDG_STATE_HOME/ccvalet/hooks-settings.json`（デフォルト `~/.local/state/ccvalet/hooks-settings.json`）を生成し、`claude --settings` 経由で Claude Code に渡します。
 
 各 hook の役割:
 
@@ -408,10 +434,10 @@ RUN go install github.com/takaaki-s/claude-code-valet/cmd/ccvalet@latest
 
 ```bash
 # root ユーザーの場合
-docker run -v /tmp/ccvalet-tunnels/docker-dev:/root/.ccvalet/run my-image
+docker run -v /tmp/ccvalet-tunnels/docker-dev:/root/.local/state/ccvalet my-image
 
 # non-root ユーザー（app）の場合
-docker run -v /tmp/ccvalet-tunnels/docker-dev:/home/app/.ccvalet/run my-image
+docker run -v /tmp/ccvalet-tunnels/docker-dev:/home/app/.local/state/ccvalet my-image
 
 # socket_path をオーバーライドする場合
 docker run -v /tmp/ccvalet-tunnels/docker-dev:/var/run/ccvalet my-image
@@ -421,7 +447,7 @@ docker run -v /tmp/ccvalet-tunnels/docker-dev:/var/run/ccvalet my-image
 
 ```yaml
 hosts:
-  # 基本設定（デフォルトソケットパス: ~/.ccvalet/run/daemon.sock）
+  # 基本設定（デフォルトソケットパス: ~/.local/state/ccvalet/daemon.sock）
   - id: docker-dev
     type: docker
     container: my-container
@@ -439,7 +465,7 @@ hosts:
     ccvalet_path: /usr/local/bin/ccvalet
 ```
 
-`socket_path` はコンテナ内（リモート側）のソケットパスを指定します。省略時は `~/.ccvalet/run/daemon.sock` が使用されます。
+`socket_path` はコンテナ内（リモート側）のソケットパスを指定します。省略時は `~/.local/state/ccvalet/daemon.sock` が使用されます。
 
 `ccvalet_path` はコンテナ内の ccvalet バイナリのフルパスを指定します。省略時は `ccvalet`（PATH から解決）が使用されます。
 
@@ -462,7 +488,7 @@ export CCVALET_DEBUG=1
 ccvalet daemon start
 
 # ログ確認
-tail -f ~/.ccvalet/debug.log
+tail -f ~/.local/state/ccvalet/daemon-debug.log
 ```
 
 ## 必要要件

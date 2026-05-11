@@ -242,18 +242,44 @@ ccvalet completion fish | source
 
 ## Configuration
 
-Configuration files and data are stored in `~/.ccvalet/`.
+ccvalet follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/). Files are split across config / state / runtime directories:
 
 ```
-~/.ccvalet/
-├── config.yaml      # Configuration file
-├── state.yaml       # State file (last used repository, etc.)
-├── sessions/        # Session data
-└── run/
-    └── daemon.sock  # Daemon socket
+$XDG_CONFIG_HOME/ccvalet/      (default: ~/.config/ccvalet)
+└── config.yaml                # Configuration file
+
+$XDG_STATE_HOME/ccvalet/       (default: ~/.local/state/ccvalet)
+├── state.yaml                 # State file (last used repository, etc.)
+├── sessions/                  # Session data
+├── hooks-settings.json        # Generated hooks settings (auto-managed)
+├── daemon-debug.log           # Daemon debug log (when CCVALET_DEBUG=1)
+└── hook-debug.log             # Hook debug log (when CCVALET_DEBUG=1)
+
+$XDG_RUNTIME_DIR/ccvalet/      (fallback: $TMPDIR/ccvalet-<uid>)
+└── daemon.sock                # Daemon socket
 ```
 
-### Example configuration (`~/.ccvalet/config.yaml`)
+### Migrating from `~/.ccvalet/` (older versions)
+
+Versions prior to the XDG layout stored everything under `~/.ccvalet/`. A one-shot migration script is provided:
+
+```bash
+# Preview what will move
+bash scripts/migrate-to-xdg.sh --dry-run
+
+# Apply
+bash scripts/migrate-to-xdg.sh
+```
+
+The script:
+
+- Honors `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME`.
+- Refuses to overwrite anything that already exists at the target (re-run safe).
+- Removes the legacy directory only when it ends up empty.
+- **Stops any legacy daemon process still holding `~/.ccvalet/run/daemon.sock` (SIGTERM, then SIGKILL after 3s)**. The post-XDG `ccvalet daemon stop` cannot reach a legacy daemon because the socket path moved, so the script handles termination directly.
+- Drops the legacy socket under `~/.ccvalet/run/`; the new socket is regenerated on the next `ccvalet daemon start`.
+
+### Example configuration (`~/.config/ccvalet/config.yaml`)
 
 ```yaml
 # Customize keybindings (defaults are used when omitted)
@@ -327,7 +353,7 @@ Supported detach keys:
 
 ccvalet uses Claude Code hooks to detect session state changes. **Hooks are configured automatically** — no manual setup required.
 
-When a session starts, ccvalet generates `~/.ccvalet/hooks-settings.json` and passes it to Claude Code via `claude --settings`. This file wires up the following hooks:
+When a session starts, ccvalet generates `$XDG_STATE_HOME/ccvalet/hooks-settings.json` (default `~/.local/state/ccvalet/hooks-settings.json`) and passes it to Claude Code via `claude --settings`. This file wires up the following hooks:
 
 | Hook Event | Role |
 |-----------|------|
@@ -349,7 +375,7 @@ Communication is **bidirectional**: the Master establishes a forward tunnel (`-L
 Each daemon has a **host ID** (default: `"local"`). You can set it in `config.yaml` or via the `--host-id` flag:
 
 ```yaml
-# ~/.ccvalet/config.yaml
+# ~/.config/ccvalet/config.yaml
 host_id: mac   # Identifies this daemon in bidirectional routing
 hosts:
   - id: my-server
@@ -450,10 +476,10 @@ The local socket path is automatically computed as `/tmp/ccvalet-tunnels/{hostID
 
 ```bash
 # Root user
-docker run -v /tmp/ccvalet-tunnels/docker-dev:/root/.ccvalet/run my-image
+docker run -v /tmp/ccvalet-tunnels/docker-dev:/root/.local/state/ccvalet my-image
 
 # Non-root user (app)
-docker run -v /tmp/ccvalet-tunnels/docker-dev:/home/app/.ccvalet/run my-image
+docker run -v /tmp/ccvalet-tunnels/docker-dev:/home/app/.local/state/ccvalet my-image
 
 # Override socket_path
 docker run -v /tmp/ccvalet-tunnels/docker-dev:/var/run/ccvalet my-image
@@ -463,7 +489,7 @@ docker run -v /tmp/ccvalet-tunnels/docker-dev:/var/run/ccvalet my-image
 
 ```yaml
 hosts:
-  # Basic setup (default socket path: ~/.ccvalet/run/daemon.sock)
+  # Basic setup (default socket path: ~/.local/state/ccvalet/daemon.sock)
   - id: docker-dev
     type: docker
     container: my-container
@@ -481,7 +507,7 @@ hosts:
     ccvalet_path: /usr/local/bin/ccvalet
 ```
 
-`socket_path` specifies the socket path inside the container (remote side). Defaults to `~/.ccvalet/run/daemon.sock` when omitted.
+`socket_path` specifies the socket path inside the container (remote side). Defaults to `~/.local/state/ccvalet/daemon.sock` when omitted.
 
 `ccvalet_path` specifies the full path to the ccvalet binary inside the container. Defaults to `ccvalet` (resolved from PATH) when omitted.
 
@@ -504,7 +530,7 @@ export CCVALET_DEBUG=1
 ccvalet daemon start
 
 # View logs
-tail -f ~/.ccvalet/debug.log
+tail -f ~/.local/state/ccvalet/daemon-debug.log
 ```
 
 ## Requirements

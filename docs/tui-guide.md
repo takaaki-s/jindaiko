@@ -87,4 +87,4 @@ After popup completion, results are returned to the parent TUI via environment v
 
 Keybindings are retrieved from `config.GetKeybindings()`.
 Default values are defined in `config.DefaultKeybindings()`.
-Users can customize them in the `keybindings` section of `~/.ccvalet/config.yaml`.
+Users can customize them in the `keybindings` section of `~/.config/ccvalet/config.yaml` (or wherever `$XDG_CONFIG_HOME/ccvalet/config.yaml` resolves to).

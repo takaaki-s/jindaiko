@@ -19,7 +19,7 @@ make install        # go install ./cmd/ccvalet
 ```
 cmd/ccvalet/cmd/     Cobra CLI commands (root, daemon, session, tui, hook, ...)
 internal/
-  config/            Viper config management (~/.ccvalet/config.yaml)
+  config/            Viper config management (~/.config/ccvalet/config.yaml)
   daemon/            Unix socket IPC server/client
   session/           Session management (core domain, largest module)
   tui/               BubbleTea TUI (largest codebase)
@@ -48,7 +48,7 @@ See each file for details:
 CCVALET_DEBUG=1 ccvalet daemon start
 ```
 
-Logs: `~/.ccvalet/daemon-debug.log`, `~/.ccvalet/hook-debug.log`
+Logs: `~/.local/state/ccvalet/daemon-debug.log`, `~/.local/state/ccvalet/hook-debug.log`
 
 ## Key Dependencies
 
@@ -56,12 +56,17 @@ Go 1.24.5 / cobra (CLI) / bubbletea (TUI) / viper (config) / lipgloss (styling)
 
 ## Data Directories
 
+XDG Base Directory compliant. Defaults shown; override with `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_RUNTIME_DIR`.
+
 ```
-~/.ccvalet/
-  config.yaml          User settings
-  state.yaml           Persistent state
-  sessions/{uuid}.json Session data
-  run/daemon.sock      IPC Unix socket
+~/.config/ccvalet/
+  config.yaml                  User settings
+~/.local/state/ccvalet/
+  state.yaml                   Persistent state
+  sessions/{uuid}.json         Session data
+  hooks-settings.json          Generated Claude Code hooks settings
+$XDG_RUNTIME_DIR/ccvalet/      (fallback $TMPDIR/ccvalet-<uid>/)
+  daemon.sock                  IPC Unix socket
 ```
 
 ## Claude Code Hooks
