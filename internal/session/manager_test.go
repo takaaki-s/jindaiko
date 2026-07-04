@@ -2041,7 +2041,7 @@ func TestManager_CreateWithOptions_Worktree_HappyPath(t *testing.T) {
 		t.Errorf("fetch args = %v, want %v", fetchCall, wantFetch)
 	}
 
-	// Assert AddWorktree used the auto-generated branch (wip/jin-<8hex>),
+	// Assert AddWorktree used the auto-generated branch (jin/<8hex>),
 	// the resolved worktree path, and origin/main as the base ref.
 	addCall := runner.findCall("worktree", "add")
 	if addCall == nil {
@@ -2055,7 +2055,7 @@ func TestManager_CreateWithOptions_Worktree_HappyPath(t *testing.T) {
 		t.Errorf("worktree add[2] = %q, want -b", addCall[2])
 	}
 	gotBranch := addCall[3]
-	wantBranchPrefix := "wip/jin-"
+	wantBranchPrefix := "jin/"
 	if !strings.HasPrefix(gotBranch, wantBranchPrefix) {
 		t.Errorf("worktree add branch = %q, want prefix %q", gotBranch, wantBranchPrefix)
 	}

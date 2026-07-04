@@ -599,7 +599,7 @@ func (m CreateFormModel) viewWorktreeStep() string {
 			b.WriteString("\n")
 			b.WriteString("  " + mutedStyle.Render("  Worktree: (auto — jin-<8hex>)"))
 			b.WriteString("\n")
-			b.WriteString("  " + mutedStyle.Render("  Branch:   (auto — wip/jin-<8hex>)"))
+			b.WriteString("  " + mutedStyle.Render("  Branch:   (auto — jin/<8hex>)"))
 			b.WriteString("\n")
 			b.WriteString("  " + mutedStyle.Render("  Base:     (origin/HEAD)"))
 			b.WriteString("\n\n")

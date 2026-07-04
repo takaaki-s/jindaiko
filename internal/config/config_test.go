@@ -113,8 +113,8 @@ func TestDefaultWorktreeConfig(t *testing.T) {
 	if cfg.BaseDir != "" {
 		t.Errorf("BaseDir default = %q, want empty (resolved at runtime)", cfg.BaseDir)
 	}
-	if cfg.BranchPrefix != "wip/" {
-		t.Errorf("BranchPrefix default = %q, want %q", cfg.BranchPrefix, "wip/")
+	if cfg.BranchPrefix != "jin/" {
+		t.Errorf("BranchPrefix default = %q, want %q", cfg.BranchPrefix, "jin/")
 	}
 	if cfg.FetchFailure != FetchFailureWarn {
 		t.Errorf("FetchFailure default = %q, want %q", cfg.FetchFailure, FetchFailureWarn)
@@ -126,8 +126,8 @@ func TestDefaultWorktreeConfig(t *testing.T) {
 func TestManager_GetWorktreeConfig_FillsDefaults(t *testing.T) {
 	m := &Manager{config: &Config{}}
 	got := m.GetWorktreeConfig()
-	if got.BranchPrefix != "wip/" {
-		t.Errorf("BranchPrefix = %q, want %q", got.BranchPrefix, "wip/")
+	if got.BranchPrefix != "jin/" {
+		t.Errorf("BranchPrefix = %q, want %q", got.BranchPrefix, "jin/")
 	}
 	if got.FetchFailure != FetchFailureWarn {
 		t.Errorf("FetchFailure = %q, want %q", got.FetchFailure, FetchFailureWarn)

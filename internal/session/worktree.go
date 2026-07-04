@@ -36,12 +36,14 @@ func deriveWorktreeName(sessionID, override string) string {
 }
 
 // deriveBranchName picks the branch name. An explicit override wins;
-// otherwise it is prefix + worktreeName.
+// otherwise the branch is prefix + worktreeName with the auto "jin-" prefix
+// stripped — so a "jin-abcd1234" worktree pairs with a "jin/abcd1234" branch
+// instead of the doubled "jin/jin-abcd1234".
 func deriveBranchName(worktreeName, prefix, override string) string {
 	if override != "" {
 		return override
 	}
-	return prefix + worktreeName
+	return prefix + strings.TrimPrefix(worktreeName, "jin-")
 }
 
 // expandBaseDir expands {name}, {repo}, and ${ENV} in the base_dir template.

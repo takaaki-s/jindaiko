@@ -35,10 +35,11 @@ func TestDeriveBranchName(t *testing.T) {
 		override     string
 		want         string
 	}{
-		{"default prefix", "jin-3f9a2b4c", "wip/", "", "wip/jin-3f9a2b4c"},
-		{"custom prefix", "jin-3f9a2b4c", "topic/", "", "topic/jin-3f9a2b4c"},
-		{"empty prefix", "jin-3f9a2b4c", "", "", "jin-3f9a2b4c"},
-		{"override wins", "jin-3f9a2b4c", "wip/", "feat/xyz", "feat/xyz"},
+		{"default prefix strips jin-", "jin-3f9a2b4c", "jin/", "", "jin/3f9a2b4c"},
+		{"custom prefix strips jin-", "jin-3f9a2b4c", "topic/", "", "topic/3f9a2b4c"},
+		{"empty prefix strips jin-", "jin-3f9a2b4c", "", "", "3f9a2b4c"},
+		{"non jin- worktree name preserved", "custom-wt", "jin/", "", "jin/custom-wt"},
+		{"override wins", "jin-3f9a2b4c", "jin/", "feat/xyz", "feat/xyz"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

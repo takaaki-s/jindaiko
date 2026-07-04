@@ -55,7 +55,7 @@ type KeybindingsConfig struct {
 // WorktreeConfig represents settings for the git-worktree session option.
 type WorktreeConfig struct {
 	BaseDir       string `mapstructure:"base_dir,omitempty"`       // Placement template. Empty → paths.State()/worktrees/{name}
-	BranchPrefix  string `mapstructure:"branch_prefix,omitempty"`  // Auto-generated branch name prefix (default: "wip/")
+	BranchPrefix  string `mapstructure:"branch_prefix,omitempty"`  // Auto-generated branch name prefix (default: "jin/")
 	DefaultBranch string `mapstructure:"default_branch,omitempty"` // Fallback when origin/HEAD detection fails
 	FetchFailure  string `mapstructure:"fetch_failure,omitempty"`  // "warn" (continue on fetch error) or "strict" (fail)
 }
@@ -137,7 +137,7 @@ func defaultConfig() *Config {
 func DefaultWorktreeConfig() WorktreeConfig {
 	return WorktreeConfig{
 		BaseDir:       "",
-		BranchPrefix:  "wip/",
+		BranchPrefix:  "jin/",
 		DefaultBranch: "",
 		FetchFailure:  FetchFailureWarn,
 	}
