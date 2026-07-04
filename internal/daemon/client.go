@@ -16,22 +16,11 @@ import (
 // Client is the daemon client
 type Client struct {
 	socketPath string
-	hostID     string // Host identifier ("local", "ec2", "docker-dev", etc.)
 }
 
 // NewClient creates a new daemon client
 func NewClient(socketPath string) *Client {
-	return &Client{socketPath: socketPath, hostID: "local"}
-}
-
-// NewRemoteClient creates a daemon client for a remote slave
-func NewRemoteClient(socketPath, hostID string) *Client {
-	return &Client{socketPath: socketPath, hostID: hostID}
-}
-
-// HostID returns the host identifier for this client
-func (c *Client) HostID() string {
-	return c.hostID
+	return &Client{socketPath: socketPath}
 }
 
 // IsRunning checks if the daemon is running
@@ -70,7 +59,6 @@ type NewOptions struct {
 	Name    string
 	WorkDir string
 	Start   bool
-	HostID  string // Target host (empty = "local")
 	Fleet   string // Fleet name for session grouping
 
 	Worktree       bool   // Create a git worktree for this session
@@ -94,7 +82,6 @@ func (c *Client) NewWithOptions(opts NewOptions) (*session.Info, error) {
 		Name:           opts.Name,
 		WorkDir:        opts.WorkDir,
 		Start:          opts.Start,
-		HostID:         opts.HostID,
 		SSHAuthSock:    os.Getenv("SSH_AUTH_SOCK"),
 		Fleet:          opts.Fleet,
 		Worktree:       opts.Worktree,
@@ -118,9 +105,9 @@ func (c *Client) NewWithOptions(opts NewOptions) (*session.Info, error) {
 	return &info, nil
 }
 
-// Get retrieves a single session by ID, optionally on a remote host
-func (c *Client) Get(id string, hostID string) (*session.Info, error) {
-	data, _ := json.Marshal(IDRequest{ID: id, HostID: hostID})
+// Get retrieves a single session by ID
+func (c *Client) Get(id string) (*session.Info, error) {
+	data, _ := json.Marshal(IDRequest{ID: id})
 
 	resp, err := c.send(Request{Action: "get", Data: data})
 	if err != nil {
@@ -137,9 +124,9 @@ func (c *Client) Get(id string, hostID string) (*session.Info, error) {
 	return &info, nil
 }
 
-// Send sends a prompt to a session, optionally on a remote host
-func (c *Client) Send(id, prompt, hostID string) error {
-	data, _ := json.Marshal(SendRequest{ID: id, Prompt: prompt, HostID: hostID})
+// Send sends a prompt to a session
+func (c *Client) Send(id, prompt string) error {
+	data, _ := json.Marshal(SendRequest{ID: id, Prompt: prompt})
 	resp, err := c.send(Request{Action: "send", Data: data})
 	if err != nil {
 		return err
@@ -186,29 +173,9 @@ func (c *Client) List() ([]session.Info, error) {
 	return sessions, nil
 }
 
-// ListWithHostID lists sessions on the slave, passing visited to prevent routing loops,
-// and tags each result with this client's HostID.
-func (c *Client) ListWithHostID(visited []string) ([]session.Info, error) {
-	resp, err := c.send(Request{Action: "list", Visited: visited})
-	if err != nil {
-		return nil, err
-	}
-	if !resp.Success {
-		return nil, errors.New(resp.Error)
-	}
-	var sessions []session.Info
-	if err := json.Unmarshal(resp.Data, &sessions); err != nil {
-		return nil, err
-	}
-	for i := range sessions {
-		sessions[i].HostID = c.hostID
-	}
-	return sessions, nil
-}
-
 // Start starts a session
-func (c *Client) Start(id string, hostID string) error {
-	data, _ := json.Marshal(IDRequest{ID: id, HostID: hostID})
+func (c *Client) Start(id string) error {
+	data, _ := json.Marshal(IDRequest{ID: id})
 	resp, err := c.send(Request{Action: "start", Data: data})
 	if err != nil {
 		return err
@@ -220,8 +187,8 @@ func (c *Client) Start(id string, hostID string) error {
 }
 
 // Kill kills a session
-func (c *Client) Kill(id string, hostID string) error {
-	data, _ := json.Marshal(IDRequest{ID: id, HostID: hostID})
+func (c *Client) Kill(id string) error {
+	data, _ := json.Marshal(IDRequest{ID: id})
 	resp, err := c.send(Request{Action: "kill", Data: data})
 	if err != nil {
 		return err
@@ -235,8 +202,8 @@ func (c *Client) Kill(id string, hostID string) error {
 // Delete deletes a session. If removeWorktree is true, the session's git worktree
 // will also be removed. If the worktree has uncommitted changes and forceRemoveWorktree
 // is false, an error is returned.
-func (c *Client) Delete(id, hostID string, removeWorktree, forceRemoveWorktree bool) error {
-	data, _ := json.Marshal(DeleteRequest{ID: id, HostID: hostID, RemoveWorktree: removeWorktree, ForceRemoveWorktree: forceRemoveWorktree})
+func (c *Client) Delete(id string, removeWorktree, forceRemoveWorktree bool) error {
+	data, _ := json.Marshal(DeleteRequest{ID: id, RemoveWorktree: removeWorktree, ForceRemoveWorktree: forceRemoveWorktree})
 	resp, err := c.send(Request{Action: "delete", Data: data})
 	if err != nil {
 		return err
@@ -295,32 +262,11 @@ func (c *Client) NotificationHistory() ([]notify.Entry, error) {
 	return entries, nil
 }
 
-// NotificationHistoryWithHostID retrieves notification history from the slave, passing visited
-// to prevent routing loops, and tags each entry with this client's HostID.
-func (c *Client) NotificationHistoryWithHostID(visited []string) ([]notify.Entry, error) {
-	resp, err := c.send(Request{Action: "notification-history", Visited: visited})
-	if err != nil {
-		return nil, err
-	}
-	if !resp.Success {
-		return nil, errors.New(resp.Error)
-	}
-	var entries []notify.Entry
-	if err := json.Unmarshal(resp.Data, &entries); err != nil {
-		return nil, err
-	}
-	for i := range entries {
-		entries[i].HostID = c.hostID
-	}
-	return entries, nil
-}
-
 // DirHistory retrieves directory usage history
-func (c *Client) DirHistory(hostID string, maxEntries int) ([]config.DirHistoryEntry, error) {
+func (c *Client) DirHistory(maxEntries int) ([]config.DirHistoryEntry, error) {
 	data, _ := json.Marshal(struct {
-		HostID     string `json:"host_id"`
-		MaxEntries int    `json:"max_entries"`
-	}{HostID: hostID, MaxEntries: maxEntries})
+		MaxEntries int `json:"max_entries"`
+	}{MaxEntries: maxEntries})
 
 	resp, err := c.send(Request{Action: "dir-history", Data: data})
 	if err != nil {
@@ -338,11 +284,10 @@ func (c *Client) DirHistory(hostID string, maxEntries int) ([]config.DirHistoryE
 }
 
 // RemoveDirHistory removes a directory history entry
-func (c *Client) RemoveDirHistory(hostID, path string) error {
+func (c *Client) RemoveDirHistory(path string) error {
 	data, _ := json.Marshal(struct {
-		HostID string `json:"host_id"`
-		Path   string `json:"path"`
-	}{HostID: hostID, Path: path})
+		Path string `json:"path"`
+	}{Path: path})
 
 	resp, err := c.send(Request{Action: "remove-dir-history", Data: data})
 	if err != nil {
@@ -352,45 +297,4 @@ func (c *Client) RemoveDirHistory(hostID, path string) error {
 		return errors.New(resp.Error)
 	}
 	return nil
-}
-
-// SendRaw sends a raw JSON request and returns the raw JSON response.
-// Implements host.SlaveClient interface for use in forwardToHost.
-func (c *Client) SendRaw(action string, data, visited []byte) ([]byte, error) {
-	req := Request{Action: action}
-	if data != nil {
-		req.Data = json.RawMessage(data)
-	}
-	if visited != nil {
-		if err := json.Unmarshal(visited, &req.Visited); err != nil {
-			return nil, fmt.Errorf("invalid visited JSON: %w", err)
-		}
-	}
-
-	resp, err := c.send(req)
-	if err != nil {
-		return nil, err
-	}
-
-	raw, err := json.Marshal(resp)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// ListHosts retrieves the list of hosts
-func (c *Client) ListHosts() ([]HostInfo, error) {
-	resp, err := c.send(Request{Action: "list-hosts"})
-	if err != nil {
-		return nil, err
-	}
-	if !resp.Success {
-		return nil, errors.New(resp.Error)
-	}
-	var hosts []HostInfo
-	if err := json.Unmarshal(resp.Data, &hosts); err != nil {
-		return nil, err
-	}
-	return hosts, nil
 }

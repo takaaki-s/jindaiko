@@ -980,22 +980,22 @@ func TestConvertDirHistoryEntries(t *testing.T) {
 	now := time.Now()
 
 	t.Run("empty input returns empty", func(t *testing.T) {
-		got := convertDirHistoryEntries(nil, "local")
+		got := convertDirHistoryEntries(nil)
 		if len(got) != 0 {
 			t.Errorf("convertDirHistoryEntries(nil) should return empty, got %d entries", len(got))
 		}
 	})
 
-	t.Run("local host converts home prefix to tilde in DisplayPath", func(t *testing.T) {
+	t.Run("home prefix converted to tilde in DisplayPath", func(t *testing.T) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			t.Skip("cannot determine home directory")
 		}
 		entries := []config.DirHistoryEntry{
-			{Path: home + "/myproject", HostID: "local", LastUsedAt: now},
+			{Path: home + "/myproject", LastUsedAt: now},
 		}
 
-		got := convertDirHistoryEntries(entries, "local")
+		got := convertDirHistoryEntries(entries)
 
 		if len(got) != 1 {
 			t.Fatalf("expected 1 entry, got %d", len(got))
@@ -1008,27 +1008,12 @@ func TestConvertDirHistoryEntries(t *testing.T) {
 		}
 	})
 
-	t.Run("remote host does not apply tilde conversion", func(t *testing.T) {
-		entries := []config.DirHistoryEntry{
-			{Path: "~/remote-project", HostID: "remote-dev", LastUsedAt: now},
-		}
-
-		got := convertDirHistoryEntries(entries, "remote-dev")
-
-		if len(got) != 1 {
-			t.Fatalf("expected 1 entry, got %d", len(got))
-		}
-		if got[0].DisplayPath != "~/remote-project" {
-			t.Errorf("DisplayPath = %q, want %q", got[0].DisplayPath, "~/remote-project")
-		}
-	})
-
 	t.Run("preserves LastUsedAt", func(t *testing.T) {
 		entries := []config.DirHistoryEntry{
-			{Path: "/a", HostID: "local", LastUsedAt: now},
+			{Path: "/a", LastUsedAt: now},
 		}
 
-		got := convertDirHistoryEntries(entries, "local")
+		got := convertDirHistoryEntries(entries)
 		if !got[0].LastUsedAt.Equal(now) {
 			t.Errorf("LastUsedAt not preserved")
 		}

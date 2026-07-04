@@ -24,7 +24,6 @@ func TestRenderResultText_Empty(t *testing.T) {
 func TestRenderResultText_BlocksAndTruncationNote(t *testing.T) {
 	resp := &daemon.ResultResponse{
 		SessionID: "s1",
-		HostID:    "local",
 		Truncated: true,
 		Entries: []transcript.Entry{
 			{

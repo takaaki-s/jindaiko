@@ -83,7 +83,6 @@ func (m NotifyModel) View() string {
 	typePermStyle := lipgloss.NewStyle().Foreground(warningColor).Bold(true)
 	typeCompleteStyle := lipgloss.NewStyle().Foreground(successColor).Bold(true)
 	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
-	hostStyle := lipgloss.NewStyle().Foreground(secondaryColor)
 
 	var b strings.Builder
 
@@ -120,26 +119,18 @@ func (m NotifyModel) View() string {
 		// Session name
 		sessionName := entry.SessionName
 
-		// Host indicator (for remote sessions)
-		hostStr := ""
-		if entry.HostID != "" && entry.HostID != "local" {
-			hostStr = hostStyle.Render(fmt.Sprintf(" [%s]", entry.HostID))
-		}
-
-		line := fmt.Sprintf("  %s %s %s%s",
+		line := fmt.Sprintf("  %s %s %s",
 			timeColStyle.Render(timeStr),
 			typeStr,
 			nameStyle.Render(sessionName),
-			hostStr,
 		)
 
 		if i == m.cursor {
 			// Highlight the entire line for selected item
-			line = cursorStyle.Render(fmt.Sprintf("▸ %s %s %s%s",
+			line = cursorStyle.Render(fmt.Sprintf("▸ %s %s %s",
 				timeStr,
 				entryTypeLabel(entry.Type),
 				sessionName,
-				hostIndicator(entry.HostID),
 			))
 		}
 
@@ -168,11 +159,4 @@ func entryTypeLabel(t string) string {
 	default:
 		return fmt.Sprintf("   %-14s", t)
 	}
-}
-
-func hostIndicator(hostID string) string {
-	if hostID != "" && hostID != "local" {
-		return fmt.Sprintf(" [%s]", hostID)
-	}
-	return ""
 }

@@ -16,11 +16,6 @@ func TestConfigManager_NewWithDefaults(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("Get() returned nil")
 	}
-
-	// Default config should have no hosts
-	if len(cfg.Hosts) != 0 {
-		t.Errorf("default hosts: got %d, want 0", len(cfg.Hosts))
-	}
 }
 
 func TestConfigManager_SaveAndReload(t *testing.T) {
@@ -30,10 +25,6 @@ func TestConfigManager_SaveAndReload(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	// Modify config via viper and save
-	m.v.Set("hosts", []map[string]any{
-		{"id": "ec2", "type": "ssh", "host": "ec2-host"},
-	})
 	if err := m.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -44,55 +35,8 @@ func TestConfigManager_SaveAndReload(t *testing.T) {
 	}
 
 	// Create new manager from the same directory
-	m2, err := NewManager(dir)
-	if err != nil {
+	if _, err := NewManager(dir); err != nil {
 		t.Fatalf("NewManager (reload): %v", err)
-	}
-
-	hosts := m2.GetHosts()
-	if len(hosts) != 1 {
-		t.Fatalf("hosts after reload: got %d, want 1", len(hosts))
-	}
-	if hosts[0].ID != "ec2" {
-		t.Errorf("host ID: got %q, want %q", hosts[0].ID, "ec2")
-	}
-}
-
-func TestConfigManager_GetHost_Found(t *testing.T) {
-	dir := t.TempDir()
-	m, err := NewManager(dir)
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-
-	m.mu.Lock()
-	m.config.Hosts = []HostConfig{
-		{ID: "ec2", Type: "ssh", Host: "ec2-host"},
-		{ID: "docker-dev", Type: "docker", Container: "my-container"},
-	}
-	m.mu.Unlock()
-
-	h := m.GetHost("docker-dev")
-	if h == nil {
-		t.Fatal("GetHost returned nil for existing host")
-	}
-	if h.Type != "docker" {
-		t.Errorf("Type: got %q, want %q", h.Type, "docker")
-	}
-	if h.Container != "my-container" {
-		t.Errorf("Container: got %q, want %q", h.Container, "my-container")
-	}
-}
-
-func TestConfigManager_GetHost_NotFound(t *testing.T) {
-	m, err := NewManager(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-
-	h := m.GetHost("nonexistent")
-	if h != nil {
-		t.Errorf("GetHost: expected nil for nonexistent host, got %+v", h)
 	}
 }
 
@@ -200,55 +144,6 @@ func TestConfigManager_GetShell(t *testing.T) {
 	}
 }
 
-func TestConfigManager_Reload_UpdatesConfig(t *testing.T) {
-	dir := t.TempDir()
-
-	// Write initial config file with one host
-	initialYAML := "hosts:\n  - id: host1\n    type: ssh\n    host: host1.example.com\n"
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(initialYAML), 0644); err != nil {
-		t.Fatalf("WriteFile (initial): %v", err)
-	}
-
-	m, err := NewManager(dir)
-	if err != nil {
-		t.Fatalf("NewManager: %v", err)
-	}
-
-	// Verify initial state loaded correctly
-	hosts := m.GetHosts()
-	if len(hosts) != 1 || hosts[0].ID != "host1" {
-		t.Fatalf("initial hosts: got %+v, want [{ID:host1 ...}]", hosts)
-	}
-
-	// Modify the YAML file directly (simulate external edit)
-	updatedYAML := "hosts:\n  - id: host2\n    type: docker\n    container: my-container\n  - id: host3\n    type: ssh\n    host: host3.example.com\n"
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(updatedYAML), 0644); err != nil {
-		t.Fatalf("WriteFile (updated): %v", err)
-	}
-
-	// Reload and verify new values
-	if err := m.Reload(); err != nil {
-		t.Fatalf("Reload: %v", err)
-	}
-
-	hosts = m.GetHosts()
-	if len(hosts) != 2 {
-		t.Fatalf("hosts after Reload: got %d, want 2", len(hosts))
-	}
-	if hosts[0].ID != "host2" {
-		t.Errorf("hosts[0].ID: got %q, want %q", hosts[0].ID, "host2")
-	}
-	if hosts[0].Type != "docker" {
-		t.Errorf("hosts[0].Type: got %q, want %q", hosts[0].Type, "docker")
-	}
-	if hosts[0].Container != "my-container" {
-		t.Errorf("hosts[0].Container: got %q, want %q", hosts[0].Container, "my-container")
-	}
-	if hosts[1].ID != "host3" {
-		t.Errorf("hosts[1].ID: got %q, want %q", hosts[1].ID, "host3")
-	}
-}
-
 func TestConfigManager_GetEnv_DefaultEmpty(t *testing.T) {
 	m, err := NewManager(t.TempDir())
 	if err != nil {
@@ -323,7 +218,7 @@ func TestConfigManager_Reload_InvalidYAML(t *testing.T) {
 	}
 
 	// Overwrite with invalid YAML
-	invalidYAML := "hosts:\n  - id: [invalid\n    broken: {yaml\n"
+	invalidYAML := "keybindings:\n  up: [invalid\n    broken: {yaml\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(invalidYAML), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

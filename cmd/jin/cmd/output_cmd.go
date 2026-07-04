@@ -29,12 +29,12 @@ Examples:
 
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, _, hostID, err := resolveSession(client, nameOrID)
+		sessionID, _, err := resolveSession(client, nameOrID)
 		if err != nil {
 			return err
 		}
 
-		info, err := client.Get(sessionID, hostID)
+		info, err := client.Get(sessionID)
 		if err != nil {
 			return err
 		}

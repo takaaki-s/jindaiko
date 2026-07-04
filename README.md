@@ -10,13 +10,12 @@ https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 
 - **Multi-session management**: Run multiple Claude Code sessions in the background simultaneously
 - **tmux-native**: Each session runs in its own tmux pane, so your existing `~/.tmux.conf`, custom keybindings, status bar, and copy-mode setup work as-is
-- **Decoupled UI / logic architecture**: All session management, state transitions, hook handling, and remote coordination live in the daemon. The TUI is a thin client that talks to the daemon over a Unix socket and holds no session-management logic. In principle any alternate UI (web, editor extension, ...) can drive the same IPC (see [docs/architecture.md](docs/architecture.md) / [docs/ipc-protocol.md](docs/ipc-protocol.md))
+- **Decoupled UI / logic architecture**: All session management, state transitions, and hook handling live in the daemon. The TUI is a thin client that talks to the daemon over a Unix socket and holds no session-management logic. In principle any alternate UI (web, editor extension, ...) can drive the same IPC (see [docs/architecture.md](docs/architecture.md) / [docs/ipc-protocol.md](docs/ipc-protocol.md))
 - **TUI**: Interactive terminal UI for listing, monitoring, and operating sessions
 - **Attach/Detach**: Quickly switch between sessions (`Ctrl+]` to detach)
 - **Real-time status tracking**: Live display of working directory, branch, and latest message
 - **Search & Paging**: Incremental search by session name, directory, or branch
 - **Desktop notifications**: OS notifications for permission requests and task completion (macOS / Linux)
-- **Remote host support**: Manage remote sessions via SSH / Docker
 
 ## Installation
 
@@ -187,7 +186,7 @@ jin session result my-session --tool Bash --json
 jin session result my-session --errors-only --json
 ```
 
-`prompt` is an alias for `send`. All flags work with `--host` for remote/peer sessions.
+`prompt` is an alias for `send`.
 
 #### Exit codes
 
@@ -205,8 +204,6 @@ jin session result my-session --errors-only --json
 jin session workdir <session-name>    # Print session's working directory path
 jin session edit <session-name>       # Open session's working directory in EDITOR
 ```
-
-> **Note**: `workdir` / `edit` only work correctly for local sessions (host type `local`).
 
 The following shell functions are useful:
 
@@ -343,164 +340,6 @@ When a session starts, honjin generates `$XDG_STATE_HOME/honjin/hooks-settings.j
 | `PostToolUse` | Tool execution ends → set session to `thinking` (recovers from `permission` state) |
 | `Stop` | Claude's turn ends → set session to `idle` (send task completion notification) |
 | `Notification` | Permission request, etc. → set session to `permission` (send permission request notification) |
-
-## Remote Hosts (SSH / Docker)
-
-In addition to local sessions, you can manage Claude Code sessions running on remote SSH hosts or Docker containers.
-
-### Architecture
-
-The Master daemon on your local machine communicates with Slave daemons on remote hosts via SSH tunnels (or Docker volume mounts). The Slave runs the same `jin daemon` binary.
-
-Communication is **bidirectional**: the Master establishes a forward tunnel (`-L`) to reach the Slave, and a reverse tunnel (`-R`) so the Slave can reach the Master back. This allows either side to act as an orchestrator. A `visited` array in each request prevents routing loops.
-
-Each daemon has a **host ID** (default: `"local"`). You can set it in `config.yaml` or via the `--host-id` flag:
-
-```yaml
-# ~/.config/honjin/config.yaml
-host_id: mac   # Identifies this daemon in bidirectional routing
-hosts:
-  - id: my-server
-    type: ssh
-    host: my-remote-host
-```
-
-### SSH Remote Prerequisites
-
-The SSH tunnel uses Unix socket forwarding (`-L`). Ensure the remote sshd allows it:
-
-```bash
-# Check on the remote host
-sudo sshd -T | grep allowtcpforwarding
-```
-
-If the output is `allowtcpforwarding no`, add to `/etc/ssh/sshd_config`:
-
-```
-AllowTcpForwarding local
-```
-
-Then restart sshd:
-
-```bash
-sudo systemctl restart sshd
-```
-
-> **Note:** `AllowStreamLocalForwarding yes` alone is not sufficient — `AllowTcpForwarding` controls Unix socket `-L` forwarding as well, regardless of the OpenSSH version.
-
-### SSH Remote Setup
-
-**1. Install jin and tmux on the remote host (first time only)**
-
-```bash
-# Log in to remote host
-ssh my-remote-host
-
-# Install jin
-go install github.com/takaaki-s/honjin/cmd/jin@latest
-
-# Install tmux (if not already installed)
-sudo apt install -y tmux  # Ubuntu/Debian
-```
-
-**2. Add host configuration to config.yaml on your local machine**
-
-```yaml
-hosts:
-  - id: my-server
-    type: ssh
-    host: my-remote-host
-    ssh_opts:          # SSH connection optimization (recommended)
-      - "-o"
-      - "ControlMaster=auto"
-      - "-o"
-      - "ControlPath=~/.ssh/sockets/%r@%h-%p"
-      - "-o"
-      - "ControlPersist=600"
-```
-
-**3. Start Master to auto-connect**
-
-```bash
-jin daemon start  # Auto-start Slave + establish tunnel
-jin ui            # Manage local + remote sessions in one TUI
-```
-
-The Master automatically starts the Slave daemon on the remote host via SSH. An error message is displayed if jin is not installed on the remote host.
-
-#### Specifying the remote jin binary path
-
-By default, `jin` is resolved from the remote shell's `PATH`. If the binary is installed in a non-standard location (e.g., `~/.local/bin`) and is not available in non-interactive SSH sessions, specify the full path explicitly:
-
-```yaml
-hosts:
-  - id: my-server
-    type: ssh
-    host: my-remote-host
-    jin_path: /home/user/.local/bin/jin  # full path to jin on remote
-```
-
-> **Note**: SSH sessions are non-interactive, so `.bashrc` / `.zshrc` are not sourced. If jin is installed via `go install` or to `~/.local/bin` and PATH is only configured in those files, use `jin_path` or add the path to `~/.bash_profile` / `~/.profile` instead.
-
-### Docker Setup
-
-**1. Include jin and tmux in the container**
-
-```dockerfile
-# Add to Dockerfile
-RUN apt-get update && apt-get install -y tmux
-RUN go install github.com/takaaki-s/honjin/cmd/jin@latest
-```
-
-**2. Start the container with a volume mount for socket sharing**
-
-The local socket path is automatically computed as `/tmp/jin-tunnels/{hostID}/daemon.sock` (same convention as SSH). The volume mount maps this directory to the socket directory inside the container.
-
-```bash
-# Root user
-docker run -v /tmp/jin-tunnels/docker-dev:/root/.local/state/honjin my-image
-
-# Non-root user (app)
-docker run -v /tmp/jin-tunnels/docker-dev:/home/app/.local/state/honjin my-image
-
-# Override socket_path
-docker run -v /tmp/jin-tunnels/docker-dev:/var/run/honjin my-image
-```
-
-**3. Add host configuration to config.yaml on your local machine**
-
-```yaml
-hosts:
-  # Basic setup (default socket path: ~/.local/state/honjin/daemon.sock)
-  - id: docker-dev
-    type: docker
-    container: my-container
-
-  # socket_path override (specify path inside container)
-  - id: docker-ci
-    type: docker
-    container: ci-runner
-    socket_path: /var/run/honjin/daemon.sock
-
-  # jin_path override (if binary is not in default PATH)
-  - id: docker-custom
-    type: docker
-    container: my-container
-    jin_path: /usr/local/bin/jin
-```
-
-`socket_path` specifies the socket path inside the container (remote side). Defaults to `~/.local/state/honjin/daemon.sock` when omitted.
-
-`jin_path` specifies the full path to the jin binary inside the container. Defaults to `jin` (resolved from PATH) when omitted.
-
-**4. Start Master**
-
-```bash
-jin daemon start  # Auto-start Slave via docker exec
-jin ui
-```
-
-> **Note**: If you recreate the container (`docker rm`), jin will be lost. Include it in the Dockerfile or persist the binary via volume mount.
 
 ## Debugging
 

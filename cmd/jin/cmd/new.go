@@ -19,7 +19,6 @@ var newCmd = &cobra.Command{
 Examples:
   jin session new --workdir ~/projects/myapp
   jin session new --workdir . --name myapp
-  jin session new --workdir ~/projects/myapp --host ec2
   jin session new --workdir . --fleet backend
 
 For interactive session creation, use 'jin ui' (TUI).`,
@@ -27,17 +26,12 @@ For interactive session creation, use 'jin ui' (TUI).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		workDir, _ := cmd.Flags().GetString("workdir")
 		name, _ := cmd.Flags().GetString("name")
-		hostID, _ := cmd.Flags().GetString("host")
 		fleet, _ := cmd.Flags().GetString("fleet")
 		noStart, _ := cmd.Flags().GetBool("no-start")
 		worktree, _ := cmd.Flags().GetBool("worktree")
 		worktreeName, _ := cmd.Flags().GetString("worktree-name")
 		worktreeBranch, _ := cmd.Flags().GetString("worktree-branch")
 		worktreeBase, _ := cmd.Flags().GetString("worktree-base")
-
-		if worktree && hostID != "" && hostID != "local" {
-			return fmt.Errorf("--worktree is not supported for remote hosts yet")
-		}
 
 		// Default WorkDir: current directory
 		if workDir == "" {
@@ -48,25 +42,10 @@ For interactive session creation, use 'jin ui' (TUI).`,
 			}
 		}
 
-		// Check WorkDir existence (skip for remote hosts)
-		if hostID == "" || hostID == "local" {
-			if info, err := os.Stat(workDir); err != nil {
-				return fmt.Errorf("work directory does not exist: %s", workDir)
-			} else if !info.IsDir() {
-				return fmt.Errorf("not a directory: %s", workDir)
-			}
-		}
-
-		// For remote hosts, convert local home prefix to ~
-		// (because the shell expands ~/path to /Users/xxx/path)
-		if hostID != "" && hostID != "local" {
-			if home, err := os.UserHomeDir(); err == nil {
-				if workDir == home {
-					workDir = "~"
-				} else if len(workDir) > len(home) && workDir[:len(home)+1] == home+"/" {
-					workDir = "~/" + workDir[len(home)+1:]
-				}
-			}
+		if info, err := os.Stat(workDir); err != nil {
+			return fmt.Errorf("work directory does not exist: %s", workDir)
+		} else if !info.IsDir() {
+			return fmt.Errorf("not a directory: %s", workDir)
 		}
 
 		client := daemon.NewClient(getSocketPath())
@@ -74,7 +53,6 @@ For interactive session creation, use 'jin ui' (TUI).`,
 			Name:           name,
 			WorkDir:        workDir,
 			Start:          !noStart,
-			HostID:         hostID,
 			Fleet:          fleet,
 			Worktree:       worktree,
 			WorktreeName:   worktreeName,
@@ -102,7 +80,6 @@ func init() {
 
 	newCmd.Flags().StringP("workdir", "d", "", "Working directory (default: current directory)")
 	newCmd.Flags().StringP("name", "n", "", "Session name (default: directory basename)")
-	newCmd.Flags().StringP("host", "H", "", "Target host (default: local)")
 	newCmd.Flags().StringP("fleet", "f", "", "Fleet name for session grouping (default: \"default\")")
 	newCmd.Flags().Bool("no-start", false, "Don't start the session immediately")
 	newCmd.Flags().Bool("worktree", false, "Create a git worktree for this session (from the repo's default branch)")

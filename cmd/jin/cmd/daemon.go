@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/takaaki-s/honjin/internal/config"
 	"github.com/takaaki-s/honjin/internal/daemon"
 	"github.com/takaaki-s/honjin/internal/paths"
 )
@@ -18,9 +17,6 @@ type daemonStatusResult struct {
 }
 
 var socketPathFlag string
-var hostIDFlag string
-var peerSocketFlag string
-var peerIDFlag string
 
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
@@ -33,19 +29,9 @@ var daemonCmd = &cobra.Command{
 			return fmt.Errorf("daemon is already running. Use 'jin daemon stop' to stop it first")
 		}
 
-		hostID := resolveHostID()
-		server, err := daemon.NewServer(getSocketPath(), getDataDir(), getConfigDir(), getStateDir(), hostID)
+		server, err := daemon.NewServer(getSocketPath(), getDataDir(), getConfigDir(), getStateDir())
 		if err != nil {
 			return err
-		}
-
-		// Register peer if --peer-socket and --peer-id are specified (slave mode)
-		if (peerSocketFlag != "") != (peerIDFlag != "") {
-			return fmt.Errorf("--peer-socket and --peer-id must be specified together")
-		}
-		if peerSocketFlag != "" && peerIDFlag != "" {
-			peerClient := daemon.NewRemoteClient(peerSocketFlag, peerIDFlag)
-			server.RegisterPeer(peerIDFlag, "ssh", peerClient)
 		}
 
 		return server.Start()
@@ -67,15 +53,6 @@ var daemonStartCmd = &cobra.Command{
 		daemonArgs := []string{"daemon"}
 		if socketPathFlag != "" {
 			daemonArgs = append(daemonArgs, "--socket", socketPathFlag)
-		}
-		if hostIDFlag != "" {
-			daemonArgs = append(daemonArgs, "--host-id", hostIDFlag)
-		}
-		if peerSocketFlag != "" {
-			daemonArgs = append(daemonArgs, "--peer-socket", peerSocketFlag)
-		}
-		if peerIDFlag != "" {
-			daemonArgs = append(daemonArgs, "--peer-id", peerIDFlag)
 		}
 		bgCmd := exec.Command(exe, daemonArgs...)
 		bgCmd.Env = os.Environ() // Inherit environment variables
@@ -142,32 +119,11 @@ func init() {
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 
-	// --socket flag: specify custom socket path for slave mode
-	daemonCmd.PersistentFlags().StringVar(&socketPathFlag, "socket", "", "custom socket path (for slave mode)")
-	// --host-id flag: set this daemon's host ID for bidirectional routing
-	daemonCmd.PersistentFlags().StringVar(&hostIDFlag, "host-id", "", "host ID for this daemon (default: config value or \"local\")")
-	// --peer-socket / --peer-id flags: register a peer daemon (used by master to tell slave about reverse tunnel)
-	daemonCmd.PersistentFlags().StringVar(&peerSocketFlag, "peer-socket", "", "peer daemon socket path (reverse tunnel)")
-	daemonCmd.PersistentFlags().StringVar(&peerIDFlag, "peer-id", "", "peer daemon host ID")
+	daemonCmd.PersistentFlags().StringVar(&socketPathFlag, "socket", "", "custom socket path")
 }
 
 func renderDaemonStatusJSON(w io.Writer, result daemonStatusResult) error {
 	return writeJSON(w, result)
-}
-
-// resolveHostID determines the host ID with priority: flag > config > "local"
-func resolveHostID() string {
-	if hostIDFlag != "" {
-		return hostIDFlag
-	}
-	// Try loading from config
-	configDir := getConfigDir()
-	if configMgr, err := config.NewManager(configDir); err == nil {
-		if id := configMgr.GetHostID(); id != "" {
-			return id
-		}
-	}
-	return "local"
 }
 
 func getSocketPath() string {

@@ -185,7 +185,6 @@ type CreateOptions struct {
 	WorkDir string // Working directory path
 	Name    string // Session name (defaults to directory basename)
 	Fleet   string // Fleet name for session grouping; defaults to DefaultFleet if empty
-	HostID  string // Target host ("local" or a configured remote host id)
 
 	Worktree       bool   // Create a git worktree for this session
 	WorktreeName   string // Override auto-generated worktree name
@@ -229,9 +228,6 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, retErr
 	)
 
 	if opts.Worktree {
-		if opts.HostID != "" && opts.HostID != "local" {
-			return nil, fmt.Errorf("worktree option is not supported for remote hosts yet")
-		}
 		if !git.IsGitRoot(opts.WorkDir) {
 			return nil, fmt.Errorf("not a git repository: %s", opts.WorkDir)
 		}

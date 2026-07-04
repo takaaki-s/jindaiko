@@ -42,7 +42,7 @@ If a new package needs debug logging, duplicate the same pattern.
 
 ## Naming
 
-- Package names: singular (`session`, `daemon`, `host`)
+- Package names: singular (`session`, `daemon`, `tmux`)
 - JSON tags: snake_case (`json:"work_dir"`)
 - Runtime-only fields: `json:"-"` tag
 - Constants: `StatusXxx` format (`StatusRunning`, `StatusIdle`)

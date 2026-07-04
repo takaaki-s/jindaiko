@@ -13,7 +13,6 @@ type Entry struct {
 	Type        string    `json:"type"` // "permission" | "task_complete"
 	Message     string    `json:"message"`
 	Timestamp   time.Time `json:"timestamp"`
-	HostID      string    `json:"host_id"`
 }
 
 // History stores recent notification entries in a ring buffer

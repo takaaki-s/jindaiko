@@ -39,7 +39,6 @@ Examples:
 		last, _ := cmd.Flags().GetInt("last")
 		tool, _ := cmd.Flags().GetString("tool")
 		errorsOnly, _ := cmd.Flags().GetBool("errors-only")
-		hostFlag, _ := cmd.Flags().GetString("host")
 
 		if last < 0 {
 			return fmt.Errorf("--last must be >= 0")
@@ -47,17 +46,13 @@ Examples:
 
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, sessionName, hostID, err := resolveSession(client, nameOrID)
+		sessionID, sessionName, err := resolveSession(client, nameOrID)
 		if err != nil {
 			return err
-		}
-		if hostFlag != "" {
-			hostID = hostFlag
 		}
 
 		resp, err := client.Result(daemon.ResultRequest{
 			ID:         sessionID,
-			HostID:     hostID,
 			Since:      since,
 			Last:       last,
 			Tool:       tool,
@@ -156,5 +151,4 @@ func init() {
 	resultCmd.Flags().Int("last", 0, "Truncate to last N entries (0 = no truncation)")
 	resultCmd.Flags().String("tool", "", "Keep only entries containing tool_use/tool_result for this tool name")
 	resultCmd.Flags().Bool("errors-only", false, "Keep only entries with at least one tool_result.is_error=true")
-	resultCmd.Flags().StringP("host", "H", "", "Target host (default: resolved from session)")
 }

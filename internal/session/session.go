@@ -41,9 +41,6 @@ type Session struct {
 	// Fleet grouping
 	Fleet string `json:"fleet"` // Fleet name for session grouping
 
-	// Host info (multi-host support)
-	HostID string `json:"host_id,omitempty"` // Host identifier ("local", "ec2", "docker-dev", etc.)
-
 	// tmux integration
 	TmuxWindowName string `json:"tmux_window_name,omitempty"` // tmux window name for this session
 	TmuxPaneID     string `json:"tmux_pane_id,omitempty"`     // CC pane ID (e.g., "%42") for capture-pane
@@ -73,7 +70,6 @@ type Info struct {
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
 	TmuxWindowName  string    `json:"tmux_window_name,omitempty"`  // tmux window name
 	Fleet           string    `json:"fleet"`                       // Fleet name for session grouping
-	HostID          string    `json:"host_id,omitempty"`           // Host identifier
 
 	// Tracked fields (dynamic, from daemon polling)
 	CurrentWorkDir string `json:"current_work_dir,omitempty"` // Current working directory
@@ -118,7 +114,6 @@ func (s *Session) ToInfo() Info {
 		ClaudeSessionID: s.ClaudeSessionID,
 		TmuxWindowName:  s.TmuxWindowName,
 		Fleet:           s.Fleet,
-		HostID:          s.HostID,
 		CurrentWorkDir:  s.CurrentWorkDir,
 		CurrentBranch:   s.CurrentBranch,
 		IsWorktree:      s.IsWorktree,

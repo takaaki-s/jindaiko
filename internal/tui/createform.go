@@ -21,8 +21,7 @@ import (
 type formStep int
 
 const (
-	stepHost     formStep = iota // Host selection (only with multiple hosts)
-	stepWorkDir                  // Work directory selection
+	stepWorkDir  formStep = iota // Work directory selection
 	stepName                     // Session name
 	stepFleet                    // Fleet selection
 	stepWorktree                 // Worktree yes/no
@@ -47,26 +46,18 @@ type CreateFormModel struct {
 	// Config managers
 	configMgr *config.Manager
 
-	// Step 1: Host selection
-	selectedHostID    string
-	hosts             []daemon.HostInfo
-	hostInput         textinput.Model
-	filteredHosts     []daemon.HostInfo
-	hostSelectedIndex int
-	hostDropdownOpen  bool
-
-	// Step 2: Work directory selection
+	// Step 1: Work directory selection
 	dirPicker DirPickerModel
 
-	// Step 3: Session name
+	// Step 2: Session name
 	nameInput textinput.Model
 
-	// Step 4: Fleet selection
+	// Step 3: Fleet selection
 	fleetInput textinput.Model
 
-	// Step 5: Worktree
+	// Step 4: Worktree
 	worktreeEnabled  bool   // user selection
-	worktreeDisabled bool   // true when the current host/dir cannot support worktree
+	worktreeDisabled bool   // true when the current dir cannot support worktree
 	worktreeReason   string // shown when disabled
 }
 
@@ -82,12 +73,6 @@ func NewCreateFormModel(socketPath string) CreateFormModel {
 	configMgr, _ := config.NewManager(paths.Config())
 
 	client := daemon.NewClient(socketPath)
-
-	// Host input
-	hostInput := textinput.New()
-	hostInput.Placeholder = "local"
-	hostInput.CharLimit = 50
-	hostInput.Width = 40
 
 	// Name input
 	nameInput := textinput.New()
@@ -107,25 +92,10 @@ func NewCreateFormModel(socketPath string) CreateFormModel {
 	m := CreateFormModel{
 		client:     client,
 		configMgr:  configMgr,
-		hostInput:  hostInput,
 		nameInput:  nameInput,
 		fleetInput: fleetInput,
 		dirPicker:  dirPicker,
-	}
-
-	// Fetch hosts
-	if hosts, err := client.ListHosts(); err == nil {
-		m.hosts = hosts
-		m.filteredHosts = hosts
-	}
-
-	// Determine starting step
-	if m.hasMultipleHosts() {
-		m.step = stepHost
-		m.hostInput.Focus()
-		m.hostDropdownOpen = true
-	} else {
-		m.step = stepWorkDir
+		step:       stepWorkDir,
 	}
 
 	// Fetch existing sessions for duplicate check
@@ -134,12 +104,8 @@ func NewCreateFormModel(socketPath string) CreateFormModel {
 	}
 
 	// Fetch directory history from persistent state
-	hostID := m.selectedHostID
-	if hostID == "" {
-		hostID = "local"
-	}
-	if entries, err := client.DirHistory(hostID, 5); err == nil {
-		m.dirPicker.SetHistory(convertDirHistoryEntries(entries, hostID))
+	if entries, err := client.DirHistory(5); err == nil {
+		m.dirPicker.SetHistory(convertDirHistoryEntries(entries))
 	}
 
 	return m
@@ -173,12 +139,6 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Change Esc behavior based on current step
 			switch m.step {
 			case stepWorkDir:
-				if m.hasMultipleHosts() {
-					m.step = stepHost
-					m.hostInput.Focus()
-					m.hostDropdownOpen = true
-					return m, nil
-				}
 				return m, tea.Quit
 			case stepName:
 				m.step = stepWorkDir
@@ -214,14 +174,12 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case DirHistoryRemoveMsg:
 		// Remove from persistent history since directory does not exist
-		_ = m.client.RemoveDirHistory(msg.HostID, msg.Path)
+		_ = m.client.RemoveDirHistory(msg.Path)
 		return m, nil
 	}
 
 	// Step-specific update
 	switch m.step {
-	case stepHost:
-		return m.updateHostStep(msg)
 	case stepWorkDir:
 		return m.updateWorkDirStep(msg)
 	case stepName:
@@ -258,37 +216,21 @@ func (m CreateFormModel) View() string {
 	// Step indicator
 	stepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))
 	switch m.step {
-	case stepHost:
-		b.WriteString(stepStyle.Render("  Step 1: Select Host"))
-		b.WriteString("\n\n")
-		b.WriteString(m.viewHostStep())
 	case stepWorkDir:
-		if m.selectedHostID != "" && m.selectedHostID != "local" {
-			b.WriteString(stepStyle.Render(fmt.Sprintf("  Host: %s", m.selectedHostID)))
-			b.WriteString("\n")
-		}
-		b.WriteString(stepStyle.Render("  Step 2: Select Work Directory"))
+		b.WriteString(stepStyle.Render("  Step 1: Select Work Directory"))
 		b.WriteString("\n")
 		b.WriteString(m.dirPicker.View())
 	case stepName:
-		if m.selectedHostID != "" && m.selectedHostID != "local" {
-			b.WriteString(stepStyle.Render(fmt.Sprintf("  Host: %s", m.selectedHostID)))
-			b.WriteString("\n")
-		}
 		displayDir := m.dirPicker.Result()
 		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
 			displayDir = "~" + displayDir[len(home):]
 		}
 		b.WriteString(stepStyle.Render(fmt.Sprintf("  Dir: %s", displayDir)))
 		b.WriteString("\n")
-		b.WriteString(stepStyle.Render("  Step 3: Session Name"))
+		b.WriteString(stepStyle.Render("  Step 2: Session Name"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewNameStep())
 	case stepFleet:
-		if m.selectedHostID != "" && m.selectedHostID != "local" {
-			b.WriteString(stepStyle.Render(fmt.Sprintf("  Host: %s", m.selectedHostID)))
-			b.WriteString("\n")
-		}
 		displayDir := m.dirPicker.Result()
 		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
 			displayDir = "~" + displayDir[len(home):]
@@ -301,14 +243,10 @@ func (m CreateFormModel) View() string {
 		}
 		b.WriteString(stepStyle.Render(fmt.Sprintf("  Name: %s", name)))
 		b.WriteString("\n")
-		b.WriteString(stepStyle.Render("  Step 4: Fleet"))
+		b.WriteString(stepStyle.Render("  Step 3: Fleet"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewFleetStep())
 	case stepWorktree:
-		if m.selectedHostID != "" && m.selectedHostID != "local" {
-			b.WriteString(stepStyle.Render(fmt.Sprintf("  Host: %s", m.selectedHostID)))
-			b.WriteString("\n")
-		}
 		displayDir := m.dirPicker.Result()
 		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
 			displayDir = "~" + displayDir[len(home):]
@@ -327,107 +265,10 @@ func (m CreateFormModel) View() string {
 		}
 		b.WriteString(stepStyle.Render(fmt.Sprintf("  Fleet: %s", fleet)))
 		b.WriteString("\n")
-		b.WriteString(stepStyle.Render("  Step 5: Worktree"))
+		b.WriteString(stepStyle.Render("  Step 4: Worktree"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewWorktreeStep())
 	}
-
-	return b.String()
-}
-
-// --- Step: Host ---
-
-func (m CreateFormModel) updateHostStep(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.String() {
-		case "enter":
-			if m.hostDropdownOpen && len(m.filteredHosts) > 0 {
-				m.selectHost()
-			}
-			// Move to next step
-			m.step = stepWorkDir
-			m.hostInput.Blur()
-			m.hostDropdownOpen = false
-
-			// Re-fetch history when host changes
-			hostID := m.selectedHostID
-			if hostID == "" {
-				hostID = "local"
-			}
-			if entries, err := m.client.DirHistory(hostID, 5); err == nil {
-				m.dirPicker.SetHistory(convertDirHistoryEntries(entries, hostID))
-			}
-
-			// Switch directory picker to remote mode when remote host is selected
-			if m.selectedHostID != "" && m.selectedHostID != "local" && m.configMgr != nil {
-				if hc := m.configMgr.GetHost(m.selectedHostID); hc != nil {
-					cmd := m.dirPicker.SetRemoteHost(hc)
-					return m, cmd
-				}
-			} else {
-				m.dirPicker.ClearRemoteHost()
-			}
-			return m, nil
-
-		case "up":
-			if m.hostDropdownOpen && m.hostSelectedIndex > 0 {
-				m.hostSelectedIndex--
-			}
-			return m, nil
-
-		case "down":
-			if m.hostDropdownOpen && m.hostSelectedIndex < len(m.filteredHosts)-1 {
-				m.hostSelectedIndex++
-			}
-			return m, nil
-		}
-	}
-
-	oldQuery := m.hostInput.Value()
-	var cmd tea.Cmd
-	m.hostInput, cmd = m.hostInput.Update(msg)
-	if m.hostInput.Value() != oldQuery {
-		m.filterHosts()
-	}
-
-	return m, cmd
-}
-
-func (m CreateFormModel) viewHostStep() string {
-	var b strings.Builder
-
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))
-	b.WriteString("  " + labelStyle.Render("▸ Host:"))
-	b.WriteString("\n")
-	b.WriteString("    " + m.hostInput.View())
-	b.WriteString("\n")
-
-	if m.hostDropdownOpen && len(m.filteredHosts) > 0 {
-		selectedStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("255")).
-			Background(lipgloss.Color("#7aa2f7"))
-		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#414868"))
-
-		for i, h := range m.filteredHosts {
-			connStatus := ""
-			if !h.Connected {
-				connStatus = " (disconnected)"
-			}
-			entry := h.ID + connStatus
-			if i == m.hostSelectedIndex {
-				padded := "▸ " + entry
-				b.WriteString("    " + selectedStyle.Render(padded))
-			} else {
-				b.WriteString("      " + dimStyle.Render(entry))
-			}
-			b.WriteString("\n")
-		}
-	}
-
-	b.WriteString("\n")
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	b.WriteString("  " + helpStyle.Render("Enter:confirm  ↑↓:navigate  Esc:cancel"))
 
 	return b.String()
 }
@@ -520,19 +361,14 @@ func (m CreateFormModel) viewFleetStep() string {
 // --- Step: Worktree ---
 
 // computeWorktreeAvailability decides whether the worktree option can be
-// enabled for the currently-selected host/dir and resets the user's choice.
-// Called on each entry to stepWorktree so a WorkDir/host change made via
+// enabled for the currently-selected dir and resets the user's choice.
+// Called on each entry to stepWorktree so a WorkDir change made via
 // Esc-back is picked up.
 func (m *CreateFormModel) computeWorktreeAvailability() {
 	m.worktreeEnabled = false
 	m.worktreeDisabled = false
 	m.worktreeReason = ""
 
-	if m.selectedHostID != "" && m.selectedHostID != "local" {
-		m.worktreeDisabled = true
-		m.worktreeReason = "remote hosts not supported yet"
-		return
-	}
 	if !git.IsGitRoot(m.dirPicker.Result()) {
 		m.worktreeDisabled = true
 		m.worktreeReason = "not a git repository"
@@ -621,20 +457,16 @@ func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Validate directory exists (local only; remote is validated by the remote dir picker)
-	if m.selectedHostID == "" || m.selectedHostID == "local" {
-		if info, err := os.Stat(workDir); err != nil {
-			m.err = fmt.Errorf("directory does not exist: %s", workDir)
-			return m, nil
-		} else if !info.IsDir() {
-			m.err = fmt.Errorf("not a directory: %s", workDir)
-			return m, nil
-		}
+	if info, err := os.Stat(workDir); err != nil {
+		m.err = fmt.Errorf("directory does not exist: %s", workDir)
+		return m, nil
+	} else if !info.IsDir() {
+		m.err = fmt.Errorf("not a directory: %s", workDir)
+		return m, nil
 	}
 
 	name := strings.TrimSpace(m.nameInput.Value())
 	fleet := strings.TrimSpace(m.fleetInput.Value())
-	hostID := m.selectedHostID
 
 	m.processingMsg = "Creating session..."
 	m.err = nil
@@ -646,7 +478,6 @@ func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
 			Name:     name,
 			WorkDir:  workDir,
 			Start:    true,
-			HostID:   hostID,
 			Fleet:    fleet,
 			Worktree: worktree,
 		})
@@ -659,54 +490,20 @@ func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
 
 // --- Internal helpers ---
 
-func (m *CreateFormModel) hasMultipleHosts() bool {
-	return len(m.hosts) > 1
-}
-
-func (m *CreateFormModel) filterHosts() {
-	query := strings.ToLower(m.hostInput.Value())
-	if query == "" {
-		m.filteredHosts = m.hosts
-		m.hostDropdownOpen = true
-		m.hostSelectedIndex = 0
-		return
-	}
-	m.filteredHosts = nil
-	for _, h := range m.hosts {
-		if strings.Contains(strings.ToLower(h.ID), query) {
-			m.filteredHosts = append(m.filteredHosts, h)
-		}
-	}
-	m.hostDropdownOpen = len(m.filteredHosts) > 0
-	m.hostSelectedIndex = 0
-}
-
-func (m *CreateFormModel) selectHost() {
-	if m.hostSelectedIndex < len(m.filteredHosts) {
-		selected := m.filteredHosts[m.hostSelectedIndex]
-		m.selectedHostID = selected.ID
-		m.hostInput.SetValue(selected.ID)
-		m.hostDropdownOpen = false
-	}
-}
-
 // convertDirHistoryEntries converts config.DirHistoryEntry to tui.HistoryEntry,
 // applying display path formatting (~ for home directory).
-func convertDirHistoryEntries(entries []config.DirHistoryEntry, hostID string) []HistoryEntry {
+func convertDirHistoryEntries(entries []config.DirHistoryEntry) []HistoryEntry {
 	home, _ := os.UserHomeDir()
 	result := make([]HistoryEntry, 0, len(entries))
 	for _, e := range entries {
 		displayPath := e.Path
-		// Local: convert home prefix to ~
-		if hostID == "local" && home != "" && strings.HasPrefix(displayPath, home) {
+		if home != "" && strings.HasPrefix(displayPath, home) {
 			displayPath = "~" + displayPath[len(home):]
 		}
-		// Remote: Path is already stored in ~/... format, use as-is
 		result = append(result, HistoryEntry{
 			Path:        e.Path,
 			DisplayPath: displayPath,
 			LastUsedAt:  e.LastUsedAt,
-			HostID:      hostID,
 		})
 	}
 	return result

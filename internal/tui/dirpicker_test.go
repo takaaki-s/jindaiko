@@ -8,99 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/takaaki-s/honjin/internal/config"
 )
-
-// --- sshArgs ---
-
-func TestSSHArgs(t *testing.T) {
-	t.Run("without SSHOpts", func(t *testing.T) {
-		hc := &config.HostConfig{
-			ID:   "test-host",
-			Type: "ssh",
-			Host: "example.com",
-		}
-		args := sshArgs(hc)
-
-		// Should contain the 3 fixed -o options (6 args)
-		if len(args) != 6 {
-			t.Fatalf("sshArgs() returned %d args, want 6: %v", len(args), args)
-		}
-
-		if args[0] != "-o" || !strings.HasPrefix(args[1], "ControlMaster=") {
-			t.Errorf("expected ControlMaster option, got %q %q", args[0], args[1])
-		}
-		if args[2] != "-o" || !strings.HasPrefix(args[3], "ControlPath=") {
-			t.Errorf("expected ControlPath option, got %q %q", args[2], args[3])
-		}
-		if !strings.Contains(args[3], "test-host") {
-			t.Errorf("ControlPath should contain host ID 'test-host', got %q", args[3])
-		}
-		if args[4] != "-o" || args[5] != "ClearAllForwardings=yes" {
-			t.Errorf("expected ClearAllForwardings option, got %q %q", args[4], args[5])
-		}
-	})
-
-	t.Run("with SSHOpts", func(t *testing.T) {
-		hc := &config.HostConfig{
-			ID:      "remote-dev",
-			Type:    "ssh",
-			Host:    "dev.example.com",
-			SSHOpts: []string{"-p", "2222", "-i", "/path/to/key"},
-		}
-		args := sshArgs(hc)
-
-		// 6 fixed args + 4 SSHOpts
-		if len(args) != 10 {
-			t.Fatalf("sshArgs() returned %d args, want 10: %v", len(args), args)
-		}
-
-		// Verify SSHOpts are appended at the end
-		if args[6] != "-p" || args[7] != "2222" {
-			t.Errorf("expected -p 2222, got %q %q", args[6], args[7])
-		}
-		if args[8] != "-i" || args[9] != "/path/to/key" {
-			t.Errorf("expected -i /path/to/key, got %q %q", args[8], args[9])
-		}
-	})
-
-	t.Run("with empty SSHOpts", func(t *testing.T) {
-		hc := &config.HostConfig{
-			ID:      "host-empty",
-			Type:    "ssh",
-			Host:    "host.local",
-			SSHOpts: []string{},
-		}
-		args := sshArgs(hc)
-		if len(args) != 6 {
-			t.Fatalf("sshArgs() with empty SSHOpts returned %d args, want 6: %v", len(args), args)
-		}
-	})
-}
-
-// --- DirPickerModel.IsRemote ---
-
-func TestDirPickerModel_IsRemote(t *testing.T) {
-	t.Run("default is not remote", func(t *testing.T) {
-		m := DirPickerModel{}
-		if m.IsRemote() {
-			t.Error("IsRemote() should return false by default")
-		}
-	})
-
-	t.Run("with hostConfig is remote", func(t *testing.T) {
-		m := DirPickerModel{
-			hostConfig: &config.HostConfig{
-				ID:   "remote",
-				Type: "ssh",
-				Host: "example.com",
-			},
-		}
-		if !m.IsRemote() {
-			t.Error("IsRemote() should return true when hostConfig is set")
-		}
-	})
-}
 
 // --- DirPickerModel.Selected ---
 
@@ -180,47 +88,6 @@ func TestDirPickerModel_TotalItems(t *testing.T) {
 			t.Errorf("totalItems() = %d, want 3", m.totalItems())
 		}
 	})
-}
-
-// --- DirPickerModel.ClearRemoteHost ---
-
-func TestDirPickerModel_ClearRemoteHost(t *testing.T) {
-	m := DirPickerModel{
-		hostConfig: &config.HostConfig{
-			ID:   "remote",
-			Type: "ssh",
-			Host: "example.com",
-		},
-		remoteHome: "/home/remoteuser",
-		loading:    true,
-		cursor:     5,
-		offset:     3,
-	}
-
-	m.ClearRemoteHost()
-
-	if m.hostConfig != nil {
-		t.Error("ClearRemoteHost() should set hostConfig to nil")
-	}
-	if m.remoteHome != "" {
-		t.Errorf("ClearRemoteHost() should clear remoteHome, got %q", m.remoteHome)
-	}
-	if m.loading {
-		t.Error("ClearRemoteHost() should set loading to false")
-	}
-	if m.IsRemote() {
-		t.Error("IsRemote() should return false after ClearRemoteHost()")
-	}
-	if m.cursor != 0 {
-		t.Errorf("ClearRemoteHost() should reset cursor to 0, got %d", m.cursor)
-	}
-	if m.offset != 0 {
-		t.Errorf("ClearRemoteHost() should reset offset to 0, got %d", m.offset)
-	}
-	// currentDir should be set to home or "/"
-	if m.currentDir == "" {
-		t.Error("ClearRemoteHost() should set currentDir to home directory or /")
-	}
 }
 
 // --- DirPickerModel.SetHistory ---
@@ -352,9 +219,9 @@ func TestDirPickerModel_ApplyFilter(t *testing.T) {
 	})
 }
 
-// --- DirPickerModel.loadLocalEntries ---
+// --- DirPickerModel.loadEntries ---
 
-func TestDirPickerModel_LoadLocalEntries(t *testing.T) {
+func TestDirPickerModel_LoadEntries(t *testing.T) {
 	t.Run("loads subdirectories from temp dir", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
@@ -373,10 +240,10 @@ func TestDirPickerModel_LoadLocalEntries(t *testing.T) {
 		m := DirPickerModel{
 			currentDir: tmpDir,
 		}
-		m.loadLocalEntries()
+		m.loadEntries()
 
 		if len(m.entries) != 3 {
-			t.Fatalf("loadLocalEntries() returned %d entries, want 3: %v", len(m.entries), m.entries)
+			t.Fatalf("loadEntries() returned %d entries, want 3: %v", len(m.entries), m.entries)
 		}
 		// Entries should be sorted
 		if m.entries[0] != "alpha" || m.entries[1] != "beta" || m.entries[2] != "gamma" {
@@ -398,10 +265,10 @@ func TestDirPickerModel_LoadLocalEntries(t *testing.T) {
 			currentDir: tmpDir,
 			showHidden: false,
 		}
-		m.loadLocalEntries()
+		m.loadEntries()
 
 		if len(m.entries) != 1 {
-			t.Fatalf("loadLocalEntries() should exclude hidden, got %d entries: %v", len(m.entries), m.entries)
+			t.Fatalf("loadEntries() should exclude hidden, got %d entries: %v", len(m.entries), m.entries)
 		}
 		if m.entries[0] != "visible" {
 			t.Errorf("expected 'visible', got %q", m.entries[0])
@@ -418,10 +285,10 @@ func TestDirPickerModel_LoadLocalEntries(t *testing.T) {
 			currentDir: tmpDir,
 			showHidden: true,
 		}
-		m.loadLocalEntries()
+		m.loadEntries()
 
 		if len(m.entries) != 2 {
-			t.Fatalf("loadLocalEntries() with showHidden should include hidden, got %d entries: %v", len(m.entries), m.entries)
+			t.Fatalf("loadEntries() with showHidden should include hidden, got %d entries: %v", len(m.entries), m.entries)
 		}
 	})
 
@@ -431,10 +298,10 @@ func TestDirPickerModel_LoadLocalEntries(t *testing.T) {
 		m := DirPickerModel{
 			currentDir: tmpDir,
 		}
-		m.loadLocalEntries()
+		m.loadEntries()
 
 		if len(m.entries) != 0 {
-			t.Errorf("loadLocalEntries() on empty dir should return 0 entries, got %d", len(m.entries))
+			t.Errorf("loadEntries() on empty dir should return 0 entries, got %d", len(m.entries))
 		}
 	})
 
@@ -442,10 +309,10 @@ func TestDirPickerModel_LoadLocalEntries(t *testing.T) {
 		m := DirPickerModel{
 			currentDir: "/nonexistent/path/that/does/not/exist",
 		}
-		m.loadLocalEntries()
+		m.loadEntries()
 
 		if m.entries != nil {
-			t.Errorf("loadLocalEntries() on nonexistent dir should return nil, got %v", m.entries)
+			t.Errorf("loadEntries() on nonexistent dir should return nil, got %v", m.entries)
 		}
 	})
 }
@@ -588,122 +455,8 @@ func TestNewDirPickerModel(t *testing.T) {
 		if m.offset != 0 {
 			t.Errorf("offset should be 0 by default, got %d", m.offset)
 		}
-		if m.hostConfig != nil {
-			t.Error("hostConfig should be nil by default")
-		}
-		if m.loading {
-			t.Error("loading should be false by default")
-		}
 		if m.showHidden {
 			t.Error("showHidden should be false by default")
-		}
-	})
-}
-
-// --- DirPickerModel.SetRemoteHost ---
-
-func TestDirPickerModel_SetRemoteHost(t *testing.T) {
-	t.Run("sets SSH host config", func(t *testing.T) {
-		m := NewDirPickerModel("")
-		hc := &config.HostConfig{
-			ID:   "remote-dev",
-			Type: "ssh",
-			Host: "dev.example.com",
-		}
-
-		cmd := m.SetRemoteHost(hc)
-
-		if m.hostConfig == nil {
-			t.Fatal("hostConfig should be set after SetRemoteHost")
-		}
-		if m.hostConfig.ID != "remote-dev" {
-			t.Errorf("hostConfig.ID = %q, want %q", m.hostConfig.ID, "remote-dev")
-		}
-		if !m.IsRemote() {
-			t.Error("IsRemote() should return true after SetRemoteHost")
-		}
-		if !m.loading {
-			t.Error("loading should be true after SetRemoteHost")
-		}
-		if m.currentDir != "/home" {
-			t.Errorf("currentDir should be reset to /home, got %q", m.currentDir)
-		}
-		if m.cursor != 0 {
-			t.Errorf("cursor should be reset to 0, got %d", m.cursor)
-		}
-		if m.offset != 0 {
-			t.Errorf("offset should be reset to 0, got %d", m.offset)
-		}
-		if m.entries != nil {
-			t.Errorf("entries should be nil, got %v", m.entries)
-		}
-		if m.filtered != nil {
-			t.Errorf("filtered should be nil, got %v", m.filtered)
-		}
-		if cmd == nil {
-			t.Error("SetRemoteHost should return a non-nil tea.Cmd for SSH host")
-		}
-	})
-
-	t.Run("nil hostConfig is no-op", func(t *testing.T) {
-		m := NewDirPickerModel("")
-		cmd := m.SetRemoteHost(nil)
-
-		if m.hostConfig != nil {
-			t.Error("hostConfig should remain nil for nil input")
-		}
-		if cmd != nil {
-			t.Error("SetRemoteHost(nil) should return nil cmd")
-		}
-	})
-
-	t.Run("non-SSH type is no-op", func(t *testing.T) {
-		m := NewDirPickerModel("")
-		hc := &config.HostConfig{
-			ID:        "docker-dev",
-			Type:      "docker",
-			Container: "my-container",
-		}
-		cmd := m.SetRemoteHost(hc)
-
-		if m.hostConfig != nil {
-			t.Error("hostConfig should remain nil for non-SSH type")
-		}
-		if cmd != nil {
-			t.Error("SetRemoteHost with non-SSH type should return nil cmd")
-		}
-	})
-
-	t.Run("clears previous state", func(t *testing.T) {
-		m := DirPickerModel{
-			currentDir: "/some/old/dir",
-			cursor:     10,
-			offset:     5,
-			entries:    []string{"old1", "old2"},
-			filtered:   []string{"old1"},
-		}
-		hc := &config.HostConfig{
-			ID:   "new-host",
-			Type: "ssh",
-			Host: "new.example.com",
-		}
-
-		m.SetRemoteHost(hc)
-
-		if m.currentDir != "/home" {
-			t.Errorf("currentDir should be reset to /home, got %q", m.currentDir)
-		}
-		if m.cursor != 0 {
-			t.Errorf("cursor should be reset to 0, got %d", m.cursor)
-		}
-		if m.offset != 0 {
-			t.Errorf("offset should be reset to 0, got %d", m.offset)
-		}
-		if m.entries != nil {
-			t.Errorf("entries should be nil, got %v", m.entries)
-		}
-		if m.filtered != nil {
-			t.Errorf("filtered should be nil, got %v", m.filtered)
 		}
 	})
 }
@@ -800,146 +553,6 @@ func TestDirPickerModel_LeftRightNavigation(t *testing.T) {
 		m = sendKey(m, "right")
 		if m.cursor != 0 {
 			t.Errorf("cursor should remain 0 when no directories, got %d", m.cursor)
-		}
-	})
-}
-
-// --- View() history visibility during loading ---
-
-func TestDirPickerModel_View_HistoryDuringLoading(t *testing.T) {
-	t.Run("shows history section while loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading: true,
-			width:   80,
-			height:  24,
-		}
-		m.SetHistory([]HistoryEntry{
-			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
-		})
-
-		view := m.View()
-
-		if !strings.Contains(view, "Recently Used") {
-			t.Error("View() should show 'Recently Used' section even while loading")
-		}
-		if !strings.Contains(view, "/home/user/project") {
-			t.Error("View() should show history entry even while loading")
-		}
-		if !strings.Contains(view, "Loading...") {
-			t.Error("View() should still show spinner while loading")
-		}
-	})
-
-	t.Run("shows history section and directories when not loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading:  false,
-			width:    80,
-			height:   24,
-			filtered: []string{"subdir1", "subdir2"},
-		}
-		m.SetHistory([]HistoryEntry{
-			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
-		})
-
-		view := m.View()
-
-		if !strings.Contains(view, "Recently Used") {
-			t.Error("View() should show 'Recently Used' section when not loading")
-		}
-		if !strings.Contains(view, "/home/user/project") {
-			t.Error("View() should show history entry when not loading")
-		}
-		if !strings.Contains(view, "Directories") {
-			t.Error("View() should show 'Directories' section when not loading")
-		}
-	})
-
-	t.Run("no history section when history is empty during loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading: true,
-			width:   80,
-			height:  24,
-		}
-
-		view := m.View()
-
-		if strings.Contains(view, "Recently Used") {
-			t.Error("View() should not show 'Recently Used' section when history is empty")
-		}
-		if !strings.Contains(view, "Loading...") {
-			t.Error("View() should show spinner when loading with no history")
-		}
-	})
-}
-
-// --- Update() history selection during loading ---
-
-func TestDirPickerModel_Update_HistorySelectionDuringLoading(t *testing.T) {
-	t.Run("enter selects history entry while loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading: true,
-			cursor:  0,
-		}
-		m.SetHistory([]HistoryEntry{
-			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
-		})
-
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-		if !updated.selected {
-			t.Error("Enter should select history entry while loading")
-		}
-		if updated.result != "/home/user/project" {
-			t.Errorf("result = %q, want %q", updated.result, "/home/user/project")
-		}
-	})
-
-	t.Run("up/down moves cursor within history while loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading: true,
-			cursor:  0,
-		}
-		m.SetHistory([]HistoryEntry{
-			{Path: "/home/user/project1", DisplayPath: "/home/user/project1"},
-			{Path: "/home/user/project2", DisplayPath: "/home/user/project2"},
-		})
-
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		if updated.cursor != 1 {
-			t.Errorf("cursor after down = %d, want 1", updated.cursor)
-		}
-
-		updated2, _ := updated.Update(tea.KeyMsg{Type: tea.KeyUp})
-		if updated2.cursor != 0 {
-			t.Errorf("cursor after up = %d, want 0", updated2.cursor)
-		}
-	})
-
-	t.Run("down does not exceed history length while loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading: true,
-			cursor:  0,
-		}
-		m.SetHistory([]HistoryEntry{
-			{Path: "/home/user/project", DisplayPath: "/home/user/project"},
-		})
-
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		if updated.cursor != 0 {
-			t.Errorf("cursor should stay at 0 when only 1 history entry, got %d", updated.cursor)
-		}
-	})
-
-	t.Run("enter does nothing when history is empty while loading", func(t *testing.T) {
-		m := DirPickerModel{
-			loading: true,
-			cursor:  0,
-		}
-
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-		if updated.selected {
-			t.Error("Enter should not select when history is empty while loading")
 		}
 	})
 }

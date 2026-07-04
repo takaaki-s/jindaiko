@@ -66,22 +66,9 @@ const (
 	FetchFailureStrict = "strict"
 )
 
-// HostConfig represents a remote host configuration
-type HostConfig struct {
-	ID         string   `mapstructure:"id"`                    // Host identifier (e.g., "ec2", "docker-dev")
-	Type       string   `mapstructure:"type"`                  // "ssh" or "docker"
-	Host       string   `mapstructure:"host,omitempty"`        // SSH target (e.g., "ec2-host")
-	SSHOpts    []string `mapstructure:"ssh_opts,omitempty"`    // Additional SSH options
-	Container  string   `mapstructure:"container,omitempty"`   // Docker container name/ID
-	SocketPath string   `mapstructure:"socket_path,omitempty"` // Remote socket path (default: ~/.local/state/honjin/daemon.sock)
-	JinPath    string   `mapstructure:"jin_path,omitempty"`    // Full path to jin binary on remote (default: jin)
-}
-
 // Config represents the application-wide configuration
 type Config struct {
-	HostID      string            `mapstructure:"host_id,omitempty"`     // This daemon's host ID (default: "local")
 	Keybindings KeybindingsConfig `mapstructure:"keybindings,omitempty"` // Keybinding settings
-	Hosts       []HostConfig      `mapstructure:"hosts,omitempty"`       // Remote host settings
 	Worktree    WorktreeConfig    `mapstructure:"worktree,omitempty"`    // Git worktree session settings
 	Env         map[string]string `mapstructure:"-"`                     // Custom environment variables (loaded separately to preserve key case)
 }
@@ -223,16 +210,6 @@ func (m *Manager) Get() *Config {
 	return &cfg
 }
 
-// GetHosts returns the list of remote hosts
-func (m *Manager) GetHosts() []HostConfig {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	hosts := make([]HostConfig, len(m.config.Hosts))
-	copy(hosts, m.config.Hosts)
-	return hosts
-}
-
 // GetWorktreeConfig returns the worktree configuration, filling unset fields
 // from DefaultWorktreeConfig so callers can rely on non-empty defaults.
 // BaseDir is intentionally kept empty when unset — the caller resolves it via
@@ -250,20 +227,6 @@ func (m *Manager) GetWorktreeConfig() WorktreeConfig {
 		cfg.FetchFailure = defaults.FetchFailure
 	}
 	return cfg
-}
-
-// GetHost returns the host with the given ID
-func (m *Manager) GetHost(id string) *HostConfig {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, h := range m.config.Hosts {
-		if h.ID == id {
-			hc := h
-			return &hc
-		}
-	}
-	return nil
 }
 
 // GetEnv returns the custom environment variables configured for Claude Code sessions.
@@ -398,13 +361,6 @@ func (m *Manager) GetKeybindings() KeybindingsConfig {
 	}
 
 	return cfg
-}
-
-// GetHostID returns the configured host ID (empty string if not set)
-func (m *Manager) GetHostID() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.config.HostID
 }
 
 // GetDetachKey returns the byte value of the detach key used while attached

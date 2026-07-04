@@ -44,7 +44,7 @@ Examples:
 
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, sessionName, hostID, err := resolveSession(client, nameOrID)
+		sessionID, sessionName, err := resolveSession(client, nameOrID)
 		if err != nil {
 			return err
 		}
@@ -52,7 +52,7 @@ Examples:
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		info, err := pollSessionStatusAny(ctx, client, sessionID, hostID, targets, time.Duration(timeout)*time.Second)
+		info, err := pollSessionStatusAny(ctx, client, sessionID, targets, time.Duration(timeout)*time.Second)
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ func parseWaitTargets(status, until string) ([]session.Status, error) {
 
 // pollSessionStatusAny polls until the session's status matches any of the given targets,
 // or until ctx is done or timeout elapses.
-func pollSessionStatusAny(ctx context.Context, client *daemon.Client, sessionID, hostID string, targets []session.Status, timeout time.Duration) (*session.Info, error) {
+func pollSessionStatusAny(ctx context.Context, client *daemon.Client, sessionID string, targets []session.Status, timeout time.Duration) (*session.Info, error) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -112,7 +112,7 @@ func pollSessionStatusAny(ctx context.Context, client *daemon.Client, sessionID,
 	}
 
 	// Check immediately before first tick
-	info, err := client.Get(sessionID, hostID)
+	info, err := client.Get(sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func pollSessionStatusAny(ctx context.Context, client *daemon.Client, sessionID,
 		case <-timer.C:
 			return nil, exitcode.Errorf(exitcode.Timeout, "timeout waiting for session to reach status %s", formatTargets(targets))
 		case <-ticker.C:
-			info, err := client.Get(sessionID, hostID)
+			info, err := client.Get(sessionID)
 			if err != nil {
 				return nil, err
 			}
