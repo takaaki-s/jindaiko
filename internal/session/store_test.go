@@ -35,7 +35,7 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 	now := time.Now().Truncate(time.Millisecond)
 	session := &Session{
 		ID:              "test-123",
-		Name:            "my-session",
+		Description:     "my-session",
 		WorkDir:         "/home/user/project",
 		CreatedAt:       now,
 		Status:          StatusIdle,
@@ -60,8 +60,8 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 	if loaded.ID != session.ID {
 		t.Errorf("ID: got %q, want %q", loaded.ID, session.ID)
 	}
-	if loaded.Name != session.Name {
-		t.Errorf("Name: got %q, want %q", loaded.Name, session.Name)
+	if loaded.Description != session.Description {
+		t.Errorf("Description: got %q, want %q", loaded.Description, session.Description)
 	}
 	if loaded.WorkDir != session.WorkDir {
 		t.Errorf("WorkDir: got %q, want %q", loaded.WorkDir, session.WorkDir)
@@ -99,7 +99,7 @@ func TestStore_LoadAll_Multiple(t *testing.T) {
 	}
 
 	for _, id := range []string{"a", "b", "c"} {
-		s := &Session{ID: id, Name: "session-" + id, Status: StatusStopped}
+		s := &Session{ID: id, Description: "session-" + id, Status: StatusStopped}
 		if err := store.Save(s); err != nil {
 			t.Fatalf("Save(%s): %v", id, err)
 		}
@@ -132,7 +132,7 @@ func TestStore_LoadAll_SkipsInvalidFiles(t *testing.T) {
 	}
 
 	// Valid session
-	s := &Session{ID: "valid", Name: "valid-session", Status: StatusStopped}
+	s := &Session{ID: "valid", Description: "valid-session", Status: StatusStopped}
 	if err := store.Save(s); err != nil {
 		t.Fatalf("Save: %v", err)
 	}

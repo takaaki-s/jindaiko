@@ -60,9 +60,9 @@ func TestCreateWithOptions_HookNoScript(t *testing.T) {
 	// discoverExists left empty → Discover returns exists=false
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "no-script",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "no-script",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -91,9 +91,9 @@ func TestCreateWithOptions_HookOK(t *testing.T) {
 	hookMock.verdictFor[scriptPath] = worktreehook.VerdictOK
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "hook-ok",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "hook-ok",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -116,9 +116,9 @@ func TestCreateWithOptions_HookNotAllowed(t *testing.T) {
 	hookMock.verdictFor[scriptPath] = worktreehook.VerdictNotAllowed
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "hook-notallowed",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "hook-notallowed",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -140,9 +140,9 @@ func TestCreateWithOptions_HookChanged(t *testing.T) {
 	hookMock.verdictFor[scriptPath] = worktreehook.VerdictChanged
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "hook-changed",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "hook-changed",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -204,9 +204,9 @@ func TestCreateWithOptions_HookFail(t *testing.T) {
 	hookMock.runErr = fmt.Errorf("exit status 1")
 
 	_, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "hook-fail",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "hook-fail",
+		Worktree:    true,
 	})
 	if err == nil {
 		t.Fatal("expected error from hook failure, got nil")
@@ -235,10 +235,10 @@ func TestCreateWithOptions_NoHookFlag(t *testing.T) {
 	hookMock.verdictFor[scriptPath] = worktreehook.VerdictOK
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "no-hook-flag",
-		Worktree: true,
-		NoHook:   true,
+		WorkDir:     workDir,
+		Description: "no-hook-flag",
+		Worktree:    true,
+		NoHook:      true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -278,9 +278,9 @@ func TestCreateWithOptions_HookDisabledConfig(t *testing.T) {
 	mgr.configMgr = newCfg
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "hook-disabled-cfg",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "hook-disabled-cfg",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -303,9 +303,9 @@ func TestCreateWithOptions_HookNilRunner(t *testing.T) {
 	mgr.SetHookRunner(nil)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "hook-nil",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "hook-nil",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)

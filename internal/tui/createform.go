@@ -18,12 +18,17 @@ import (
 	"github.com/takaaki-s/honjin/internal/worktreehook"
 )
 
-// formStep represents the current form step
+// formStep represents the current form step.
+//
+// The TUI creation flow intentionally omits a "Description" step: Layer A
+// seeds a repo-derived baseline at creation time and Layer C upgrades it
+// from the first user prompt via the Stop hook. Users who really want a
+// manual label reach for `jin session new --description` or
+// `jin session set-description` — both are unaffected by this.
 type formStep int
 
 const (
 	stepWorkDir    formStep = iota // Work directory selection
-	stepName                       // Session name
 	stepFleet                      // Fleet selection
 	stepWorktree                   // Worktree yes/no
 	stepHookPrompt                 // Post-create hook not-allowed / changed prompt
@@ -51,18 +56,15 @@ type CreateFormModel struct {
 	// Step 1: Work directory selection
 	dirPicker DirPickerModel
 
-	// Step 2: Session name
-	nameInput textinput.Model
-
-	// Step 3: Fleet selection
+	// Step 2: Fleet selection
 	fleetInput textinput.Model
 
-	// Step 4: Worktree
+	// Step 3: Worktree
 	worktreeEnabled  bool   // user selection
 	worktreeDisabled bool   // true when the current dir cannot support worktree
 	worktreeReason   string // shown when disabled
 
-	// Step 5: Hook prompt (only reached when a post-create hook exists but
+	// Step 4: Hook prompt (only reached when a post-create hook exists but
 	// is not on the allowlist, or its SHA256 has changed).
 	hookScriptPath string
 	hookVerdict    worktreehook.Verdict
@@ -82,12 +84,6 @@ func NewCreateFormModel(socketPath string) CreateFormModel {
 
 	client := daemon.NewClient(socketPath)
 
-	// Name input
-	nameInput := textinput.New()
-	nameInput.Placeholder = "(auto: directory name)"
-	nameInput.CharLimit = 100
-	nameInput.Width = 40
-
 	// Fleet input
 	fleetInput := textinput.New()
 	fleetInput.Placeholder = "default"
@@ -100,7 +96,6 @@ func NewCreateFormModel(socketPath string) CreateFormModel {
 	m := CreateFormModel{
 		client:     client,
 		configMgr:  configMgr,
-		nameInput:  nameInput,
 		fleetInput: fleetInput,
 		dirPicker:  dirPicker,
 		step:       stepWorkDir,
@@ -148,15 +143,10 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.step {
 			case stepWorkDir:
 				return m, tea.Quit
-			case stepName:
+			case stepFleet:
 				m.step = stepWorkDir
 				m.dirPicker.selected = false
-				m.nameInput.Blur()
-				return m, nil
-			case stepFleet:
-				m.step = stepName
 				m.fleetInput.Blur()
-				m.nameInput.Focus()
 				return m, nil
 			case stepWorktree:
 				m.step = stepFleet
@@ -198,8 +188,6 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.step {
 	case stepWorkDir:
 		return m.updateWorkDirStep(msg)
-	case stepName:
-		return m.updateNameStep(msg)
 	case stepFleet:
 		return m.updateFleetStep(msg)
 	case stepWorktree:
@@ -238,16 +226,6 @@ func (m CreateFormModel) View() string {
 		b.WriteString(stepStyle.Render("  Step 1: Select Work Directory"))
 		b.WriteString("\n")
 		b.WriteString(m.dirPicker.View())
-	case stepName:
-		displayDir := m.dirPicker.Result()
-		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
-			displayDir = "~" + displayDir[len(home):]
-		}
-		b.WriteString(stepStyle.Render(fmt.Sprintf("  Dir: %s", displayDir)))
-		b.WriteString("\n")
-		b.WriteString(stepStyle.Render("  Step 2: Session Name"))
-		b.WriteString("\n\n")
-		b.WriteString(m.viewNameStep())
 	case stepFleet:
 		displayDir := m.dirPicker.Result()
 		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
@@ -255,13 +233,7 @@ func (m CreateFormModel) View() string {
 		}
 		b.WriteString(stepStyle.Render(fmt.Sprintf("  Dir: %s", displayDir)))
 		b.WriteString("\n")
-		name := m.nameInput.Value()
-		if name == "" {
-			name = filepath.Base(m.dirPicker.Result())
-		}
-		b.WriteString(stepStyle.Render(fmt.Sprintf("  Name: %s", name)))
-		b.WriteString("\n")
-		b.WriteString(stepStyle.Render("  Step 3: Fleet"))
+		b.WriteString(stepStyle.Render("  Step 2: Fleet"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewFleetStep())
 	case stepWorktree:
@@ -271,19 +243,13 @@ func (m CreateFormModel) View() string {
 		}
 		b.WriteString(stepStyle.Render(fmt.Sprintf("  Dir: %s", displayDir)))
 		b.WriteString("\n")
-		name := m.nameInput.Value()
-		if name == "" {
-			name = filepath.Base(m.dirPicker.Result())
-		}
-		b.WriteString(stepStyle.Render(fmt.Sprintf("  Name: %s", name)))
-		b.WriteString("\n")
 		fleet := m.fleetInput.Value()
 		if fleet == "" {
 			fleet = "default"
 		}
 		b.WriteString(stepStyle.Render(fmt.Sprintf("  Fleet: %s", fleet)))
 		b.WriteString("\n")
-		b.WriteString(stepStyle.Render("  Step 4: Worktree"))
+		b.WriteString(stepStyle.Render("  Step 3: Worktree"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewWorktreeStep())
 	case stepHookPrompt:
@@ -301,48 +267,12 @@ func (m CreateFormModel) updateWorkDirStep(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Check if directory was selected
 	if m.dirPicker.Selected() {
-		m.step = stepName
-		m.nameInput.Focus()
-		// Set default name to directory basename
-		basename := filepath.Base(m.dirPicker.Result())
-		m.nameInput.SetValue(basename)
+		m.step = stepFleet
+		m.fleetInput.Focus()
 		return m, textinput.Blink
 	}
 
 	return m, cmd
-}
-
-// --- Step: Name ---
-
-func (m CreateFormModel) updateNameStep(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.String() {
-		case "enter":
-			m.step = stepFleet
-			m.nameInput.Blur()
-			m.fleetInput.Focus()
-			return m, textinput.Blink
-		}
-	}
-
-	var cmd tea.Cmd
-	m.nameInput, cmd = m.nameInput.Update(msg)
-	return m, cmd
-}
-
-func (m CreateFormModel) viewNameStep() string {
-	var b strings.Builder
-
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))
-	b.WriteString("  " + labelStyle.Render("▸ Name:"))
-	b.WriteString("\n")
-	b.WriteString("    " + m.nameInput.View())
-	b.WriteString("\n\n")
-
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	b.WriteString("  " + helpStyle.Render("Enter:next  Esc:back"))
-
-	return b.String()
 }
 
 // --- Step: Fleet ---
@@ -625,15 +555,17 @@ func (m CreateFormModel) evaluateHook(workDir string) (string, worktreehook.Verd
 // submitWith returns the tea.Cmd that dispatches the actual daemon call.
 // noHook is passed through to skip the post-create hook. Caller is
 // responsible for setting m.processingMsg before dispatching.
+//
+// Description is intentionally sent empty: the daemon populates it via
+// Layer A at creation, and Layer C promotes it from the first user prompt
+// once the transcript is flushed.
 func (m CreateFormModel) submitWith(noHook bool) tea.Cmd {
 	workDir := m.dirPicker.Result()
-	name := strings.TrimSpace(m.nameInput.Value())
 	fleet := strings.TrimSpace(m.fleetInput.Value())
 	client := m.client
 	worktree := m.worktreeEnabled
 	return func() tea.Msg {
 		s, warning, err := client.NewWithOptions(daemon.NewOptions{
-			Name:     name,
 			WorkDir:  workDir,
 			Start:    true,
 			Fleet:    fleet,

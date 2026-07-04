@@ -11,11 +11,12 @@ import (
 )
 
 var outputCmd = &cobra.Command{
-	Use:   "output <session-name>",
+	Use:   "output <selector>",
 	Short: "Get the output of a session",
 	Long: `Get the conversation output from a Claude Code session.
 
 By default, shows the last assistant message. Use --last N to get the last N conversation pairs.
+The selector may be an ID prefix or a description substring (case-insensitive).
 
 Examples:
   jin session output my-session

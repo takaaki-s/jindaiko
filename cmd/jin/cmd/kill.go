@@ -12,23 +12,34 @@ import (
 	"github.com/takaaki-s/honjin/internal/session"
 )
 
+// resolveSession is a thin wrapper around resolveSelector that returns the
+// (id, description) tuple used by legacy call sites. New callers should
+// prefer resolveSelector directly.
+func resolveSession(client *daemon.Client, selector string) (id, desc string, err error) {
+	sess, err := resolveSelector(client, selector)
+	if err != nil {
+		return "", "", err
+	}
+	return sess.ID, sess.Description, nil
+}
+
 type actionResult struct {
-	Success bool   `json:"success"`
-	ID      string `json:"id"`
-	Name    string `json:"name"`
+	Success     bool   `json:"success"`
+	ID          string `json:"id"`
+	Description string `json:"description"`
 }
 
 var killCmd = &cobra.Command{
-	Use:               "kill <session-name>",
+	Use:               "kill <selector>",
 	Short:             "Kill a running session",
-	Long:              `Kill a running Claude Code session without deleting it. You can specify either session name or ID.`,
+	Long:              `Kill a running Claude Code session without deleting it. The selector may be an ID prefix or a description substring (case-insensitive).`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		nameOrID := args[0]
+		selector := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, sessionName, err := resolveSession(client, nameOrID)
+		sessionID, sessionDesc, err := resolveSession(client, selector)
 		if err != nil {
 			return err
 		}
@@ -37,18 +48,18 @@ var killCmd = &cobra.Command{
 			return err
 		}
 		if jsonOutput {
-			return renderActionResultJSON(os.Stdout, actionResult{Success: true, ID: sessionID, Name: sessionName})
+			return renderActionResultJSON(os.Stdout, actionResult{Success: true, ID: sessionID, Description: sessionDesc})
 		}
-		fmt.Printf("Killed session: %s\n", sessionName)
+		fmt.Printf("Killed session: %s\n", sessionDesc)
 		return nil
 	},
 }
 
 var deleteCmd = &cobra.Command{
-	Use:               "delete <session-name>",
+	Use:               "delete <selector>",
 	Aliases:           []string{"rm"},
 	Short:             "Delete a session",
-	Long:              `Delete a Claude Code session. This will kill the session if running. You can specify either session name or ID.`,
+	Long:              `Delete a Claude Code session. This will kill the session if running. The selector may be an ID prefix or a description substring (case-insensitive).`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,10 +70,10 @@ var deleteCmd = &cobra.Command{
 			return exitcode.Errorf(exitcode.GeneralError, "--force-worktree requires --worktree")
 		}
 
-		nameOrID := args[0]
+		selector := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, sessionName, err := resolveSession(client, nameOrID)
+		sessionID, sessionDesc, err := resolveSession(client, selector)
 		if err != nil {
 			return err
 		}
@@ -75,32 +86,11 @@ var deleteCmd = &cobra.Command{
 			return err
 		}
 		if jsonOutput {
-			return renderActionResultJSON(os.Stdout, actionResult{Success: true, ID: sessionID, Name: sessionName})
+			return renderActionResultJSON(os.Stdout, actionResult{Success: true, ID: sessionID, Description: sessionDesc})
 		}
-		fmt.Printf("Deleted session: %s\n", sessionName)
+		fmt.Printf("Deleted session: %s\n", sessionDesc)
 		return nil
 	},
-}
-
-// resolveSession resolves a session name or ID to the actual session ID and name
-func resolveSession(client *daemon.Client, nameOrID string) (id, name string, err error) {
-	sessions, err := client.List()
-	if err != nil {
-		return "", "", err
-	}
-
-	return resolveSessionFromList(sessions, nameOrID)
-}
-
-// resolveSessionFromList resolves a session name or ID from a pre-fetched session list
-func resolveSessionFromList(sessions []session.Info, nameOrID string) (id, name string, err error) {
-	for _, s := range sessions {
-		if s.Name == nameOrID || s.ID == nameOrID {
-			return s.ID, s.Name, nil
-		}
-	}
-
-	return "", "", exitcode.Errorf(exitcode.SessionNotFound, "session not found: %s", nameOrID)
 }
 
 func renderActionResultJSON(w io.Writer, result actionResult) error {

@@ -17,10 +17,11 @@ import (
 )
 
 var waitCmd = &cobra.Command{
-	Use:   "wait <session-name>",
+	Use:   "wait <selector>",
 	Short: "Wait for a session to reach a specific status",
 	Long: `Wait for a Claude Code session to reach one of the target statuses.
 Polls the session status every 2 seconds until a target is reached or timeout occurs.
+The selector may be an ID prefix or a description substring (case-insensitive).
 
 By default, waits for "idle". Pass --until to wait for any of several statuses
 (useful for orchestration where "permission" is also an acceptable terminal state).

@@ -13,11 +13,12 @@ import (
 )
 
 var resultCmd = &cobra.Command{
-	Use:   "result <session-name>",
+	Use:   "result <selector>",
 	Short: "Fetch structured transcript entries for a session (orchestration)",
 	Long: `Fetch structured transcript entries (text/thinking/tool_use/tool_result)
 for a Claude Code session. Designed for orchestration scripts that need to
 inspect what a child session actually did, not just the final assistant text.
+The selector may be an ID prefix or a description substring (case-insensitive).
 
 Examples:
   # Show a summary of recent activity
@@ -135,13 +136,6 @@ func compactInputSummary(raw json.RawMessage) string {
 		s = s[:200] + "…"
 	}
 	return s
-}
-
-func shortID(id string) string {
-	if len(id) <= 8 {
-		return id
-	}
-	return id[:8]
 }
 
 func init() {

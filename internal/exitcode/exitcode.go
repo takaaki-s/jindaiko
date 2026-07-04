@@ -5,12 +5,13 @@ import "fmt"
 
 // Exit code constants.
 const (
-	Success          = 0
-	GeneralError     = 1
-	SessionNotFound  = 2
-	DaemonNotRunning = 3
-	Timeout          = 4
-	WorktreeDirty    = 5
+	Success           = 0
+	GeneralError      = 1
+	SessionNotFound   = 2
+	DaemonNotRunning  = 3
+	Timeout           = 4
+	WorktreeDirty     = 5
+	AmbiguousSelector = 6
 )
 
 // ExitError represents an error with a specific exit code.

@@ -13,7 +13,7 @@ func TestRenderSessionInfoJSON(t *testing.T) {
 	t.Run("outputs full session info as JSON", func(t *testing.T) {
 		info := &session.Info{
 			ID:              "abc-123",
-			Name:            "my-session",
+			Description:     "my-session",
 			WorkDir:         "/home/user/project",
 			Status:          session.StatusIdle,
 			CreatedAt:       time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -32,8 +32,8 @@ func TestRenderSessionInfoJSON(t *testing.T) {
 		if parsed.ID != "abc-123" {
 			t.Errorf("expected id %q, got %q", "abc-123", parsed.ID)
 		}
-		if parsed.Name != "my-session" {
-			t.Errorf("expected name %q, got %q", "my-session", parsed.Name)
+		if parsed.Description != "my-session" {
+			t.Errorf("expected name %q, got %q", "my-session", parsed.Description)
 		}
 		if parsed.Status != session.StatusIdle {
 			t.Errorf("expected status %q, got %q", session.StatusIdle, parsed.Status)
@@ -51,7 +51,7 @@ func TestRenderSessionInfoText(t *testing.T) {
 	t.Run("outputs key-value format", func(t *testing.T) {
 		info := &session.Info{
 			ID:             "abc-123",
-			Name:           "my-session",
+			Description:    "my-session",
 			WorkDir:        "/home/user/project",
 			Status:         session.StatusIdle,
 			CreatedAt:      time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),

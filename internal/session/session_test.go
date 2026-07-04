@@ -11,7 +11,7 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	s := &Session{
 		ID:                   "test-id-123",
-		Name:                 "my-session",
+		Description:          "my-session",
 		WorkDir:              "/home/user/project",
 		CreatedAt:            now,
 		Status:               StatusThinking,
@@ -38,8 +38,8 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 	if info.ID != s.ID {
 		t.Errorf("ID: got %q, want %q", info.ID, s.ID)
 	}
-	if info.Name != s.Name {
-		t.Errorf("Name: got %q, want %q", info.Name, s.Name)
+	if info.Description != s.Description {
+		t.Errorf("Description: got %q, want %q", info.Description, s.Description)
 	}
 	if info.WorkDir != s.WorkDir {
 		t.Errorf("WorkDir: got %q, want %q", info.WorkDir, s.WorkDir)
@@ -105,7 +105,7 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	original := &Session{
 		ID:                   "round-trip-id",
-		Name:                 "roundtrip",
+		Description:          "roundtrip",
 		WorkDir:              "/tmp/work",
 		CreatedAt:            now,
 		Status:               StatusIdle,
@@ -132,8 +132,8 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	if restored.ID != original.ID {
 		t.Errorf("ID: got %q, want %q", restored.ID, original.ID)
 	}
-	if restored.Name != original.Name {
-		t.Errorf("Name: got %q, want %q", restored.Name, original.Name)
+	if restored.Description != original.Description {
+		t.Errorf("Description: got %q, want %q", restored.Description, original.Description)
 	}
 	if restored.WorkDir != original.WorkDir {
 		t.Errorf("WorkDir: got %q, want %q", restored.WorkDir, original.WorkDir)
@@ -169,11 +169,11 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 
 func TestSession_FleetAlwaysPresentInJSON(t *testing.T) {
 	s := &Session{
-		ID:      "fleet-json-test",
-		Name:    "fj",
-		WorkDir: "/tmp/fj",
-		Fleet:   DefaultFleet,
-		Status:  StatusIdle,
+		ID:          "fleet-json-test",
+		Description: "fj",
+		WorkDir:     "/tmp/fj",
+		Fleet:       DefaultFleet,
+		Status:      StatusIdle,
 	}
 	data, err := json.Marshal(s)
 	if err != nil {
@@ -187,11 +187,11 @@ func TestSession_FleetAlwaysPresentInJSON(t *testing.T) {
 func TestSession_JSONOmitsRuntimeFields(t *testing.T) {
 	now := time.Now()
 	s := &Session{
-		ID:        "omit-test",
-		Name:      "omit",
-		WorkDir:   "/tmp/omit",
-		CreatedAt: now,
-		Status:    StatusRunning,
+		ID:          "omit-test",
+		Description: "omit",
+		WorkDir:     "/tmp/omit",
+		CreatedAt:   now,
+		Status:      StatusRunning,
 
 		// Runtime fields (json:"-") -- these should NOT appear in JSON
 		LastOutputTime: now.Add(-1 * time.Minute),
@@ -230,7 +230,7 @@ func TestSession_JSONOmitsRuntimeFields(t *testing.T) {
 	}
 
 	// Sanity check: persisted fields SHOULD be present
-	persistedFields := []string{"id", "name", "work_dir", "status"}
+	persistedFields := []string{"id", "description", "work_dir", "status"}
 	for _, field := range persistedFields {
 		if !strings.Contains(jsonStr, field) {
 			t.Errorf("JSON output should contain persisted field %q, but got: %s", field, jsonStr)

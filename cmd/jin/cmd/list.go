@@ -34,7 +34,7 @@ var listCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSTATUS\tWORKDIR\tBRANCH\tLAST_ACTIVE")
+		fmt.Fprintln(w, "DESCRIPTION\tSTATUS\tWORKDIR\tBRANCH\tLAST_ACTIVE")
 		for _, s := range sessions {
 			statusStr := string(s.Status)
 			if s.Status == "error" && s.ErrorMessage != "" {
@@ -63,8 +63,12 @@ var listCmd = &cobra.Command{
 				lastActive = s.CreatedAt.Format("2006-01-02 15:04")
 			}
 
+			desc := s.Description
+			if s.DescriptionLocked {
+				desc += "*"
+			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				s.Name,
+				truncateStr(desc, 40),
 				statusStr,
 				truncatePath(displayDir, 40),
 				branch,

@@ -39,9 +39,19 @@ Claude Code (hook event)
 ```
 
 Hook Events:
-- `UserPromptSubmit` → StatusThinking
+- `UserPromptSubmit` → StatusThinking + Layer C Description upgrade attempt (see below)
 - `Stop` → StatusIdle + task completion notification
 - `Notification(permission_prompt)` → StatusPermission + permission-waiting notification
+
+## Session Description Model
+
+Sessions carry a human-readable `Description` field decoupled from the technical `ID`. It is filled by a 3-layer generation pipeline (see [session-lifecycle.md](session-lifecycle.md) for the state machine):
+
+- **Layer A (baseline)** — Always populated at creation from `<repo>[:<branch>][:<subpath>]`, or `<main-repo>:<worktree-name>` for worktree sessions. Agent-independent. Implemented in `internal/session/description.go`.
+- **Layer B (manual)** — CLI `--description` on `jin session new` and the `jin session set-description` subcommand. Sets `DescriptionLocked = true` to freeze the value against auto-upgrade. (The TUI create form intentionally does not expose a manual description step: Layer A + Layer C cover the common case; users who need a manual label use the CLI paths.)
+- **Layer C (agent-specific enhancer)** — Registered per-agent via `Manager.SetDescriptionEnhancer(DescriptionEnhancer)`. Currently only the Claude Code implementation (`internal/agent/claude/`) is wired in; it reads the first user turn from the transcript and upgrades the Description if the session is unlocked and still at the baseline. Fires from `HandleHookEvent` on both `UserPromptSubmit` (fast path when the transcript is already flushed) and `Stop` (reliable path after Claude Code finishes responding). Future agents (Codex, Aider, …) will register their own enhancers under `internal/agent/<name>/` — see the planned `feat/agent-abstraction` task.
+
+The `Name` field was retired in favour of `Description` + `DescriptionLocked`. Existing session JSON is migrated in place on daemon startup by `internal/session/migration.go`.
 
 ## Package Dependency
 

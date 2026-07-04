@@ -48,7 +48,7 @@ var cleanupStoppedCmd = &cobra.Command{
 
 		fmt.Printf("Found %d stopped session(s):\n", len(stoppedSessions))
 		for _, s := range stoppedSessions {
-			fmt.Printf("  - %s (%s)\n", s.Name, s.ID[:8])
+			fmt.Printf("  - %s (%s)\n", s.Description, s.ID[:8])
 		}
 
 		if cleanupDryRun {
@@ -61,9 +61,9 @@ var cleanupStoppedCmd = &cobra.Command{
 		deletedSessions := 0
 		for _, s := range stoppedSessions {
 			if err := client.Delete(s.ID, false, false); err != nil {
-				fmt.Printf("Warning: failed to delete session %s: %v\n", s.Name, err)
+				fmt.Printf("Warning: failed to delete session %s: %v\n", s.Description, err)
 			} else {
-				fmt.Printf("Deleted session: %s (%s)\n", s.Name, s.ID[:8])
+				fmt.Printf("Deleted session: %s (%s)\n", s.Description, s.ID[:8])
 				deletedSessions++
 			}
 		}

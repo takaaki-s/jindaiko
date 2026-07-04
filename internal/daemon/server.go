@@ -12,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/takaaki-s/honjin/internal/agent/claude"
 	"github.com/takaaki-s/honjin/internal/config"
 	"github.com/takaaki-s/honjin/internal/debug"
 	"github.com/takaaki-s/honjin/internal/session"
@@ -64,6 +65,10 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir string) (*Server, er
 	if err != nil {
 		return nil, err
 	}
+
+	// Wire the Claude Code Layer C enhancer. The Manager keeps only the
+	// interface, so agent-specific packages stay out of the session domain.
+	mgr.SetDescriptionEnhancer(claude.NewCCDescriptionEnhancer())
 
 	// Set up tmux client if tmux is available and jin tmux session exists
 	if tc, err := tmux.NewClient(); err == nil {
@@ -184,6 +189,8 @@ func (s *Server) handleRequest(req *Request) Response {
 		return s.handleRemoveDirHistory(req.Data)
 	case "result":
 		return s.handleResult(req.Data)
+	case "set-description":
+		return s.handleSetDescription(req.Data)
 	default:
 		return Response{Success: false, Error: fmt.Sprintf("unknown action: %s", req.Action)}
 	}
@@ -215,11 +222,10 @@ func (s *Server) handleNotificationHistory() Response {
 }
 
 type NewRequest struct {
-	Name        string `json:"name"`
+	Description string `json:"description"`
 	WorkDir     string `json:"work_dir"`
 	Start       bool   `json:"start"`
-	SSHAuthSock string `json:"ssh_auth_sock,omitempty"` // SSH_AUTH_SOCK (for git operations)
-	Fleet       string `json:"fleet"`                   // Fleet name for session grouping
+	Fleet       string `json:"fleet"` // Fleet name for session grouping
 
 	Worktree       bool   `json:"worktree,omitempty"`        // Create a git worktree for this session
 	WorktreeName   string `json:"worktree_name,omitempty"`   // Override auto-generated worktree name
@@ -247,7 +253,7 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 	s.createMu.Lock()
 
 	sess, warning, err := s.manager.CreateWithOptions(session.CreateOptions{
-		Name:           req.Name,
+		Description:    req.Description,
 		WorkDir:        req.WorkDir,
 		Fleet:          req.Fleet,
 		Worktree:       req.Worktree,
@@ -455,6 +461,39 @@ func entryMatches(e transcript.Entry, tool string, errorsOnly bool, useNameByID 
 		}
 	}
 	return false
+}
+
+// SetDescriptionRequest is the request payload for the "set-description" action.
+// Description intentionally has no omitempty tag: an empty string is a valid,
+// meaningful request (unlock + regenerate the Layer A baseline), distinct from
+// an absent field.
+type SetDescriptionRequest struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+// SetDescriptionResponse is the response payload for the "set-description" action.
+type SetDescriptionResponse struct {
+	Session session.Info `json:"session"`
+}
+
+func (s *Server) handleSetDescription(data json.RawMessage) Response {
+	var req SetDescriptionRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+
+	if err := s.manager.SetDescription(req.ID, req.Description); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+
+	sess, ok := s.manager.Get(req.ID)
+	if !ok {
+		return Response{Success: false, Error: fmt.Sprintf("session not found: %s", req.ID)}
+	}
+
+	respData, _ := json.Marshal(SetDescriptionResponse{Session: sess.ToInfo()})
+	return Response{Success: true, Data: respData}
 }
 
 type IDRequest struct {

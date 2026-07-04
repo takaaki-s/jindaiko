@@ -22,11 +22,12 @@ const (
 
 // Session represents a Claude Code session
 type Session struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	WorkDir   string    `json:"work_dir"`
-	CreatedAt time.Time `json:"created_at"`
-	Status    Status    `json:"status"`
+	ID                string    `json:"id"`
+	Description       string    `json:"description"`
+	DescriptionLocked bool      `json:"description_locked,omitempty"`
+	WorkDir           string    `json:"work_dir"`
+	CreatedAt         time.Time `json:"created_at"`
+	Status            Status    `json:"status"`
 
 	// Last active time (persisted)
 	LastActiveAt time.Time `json:"last_active_at,omitzero"`
@@ -60,16 +61,17 @@ type Session struct {
 
 // Info returns session information for display
 type Info struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	WorkDir         string    `json:"work_dir"`
-	Status          Status    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	LastActiveAt    time.Time `json:"last_active_at,omitzero"`
-	ErrorMessage    string    `json:"error_message,omitempty"`
-	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
-	TmuxWindowName  string    `json:"tmux_window_name,omitempty"`  // tmux window name
-	Fleet           string    `json:"fleet"`                       // Fleet name for session grouping
+	ID                string    `json:"id"`
+	Description       string    `json:"description"`
+	DescriptionLocked bool      `json:"description_locked,omitempty"`
+	WorkDir           string    `json:"work_dir"`
+	Status            Status    `json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+	LastActiveAt      time.Time `json:"last_active_at,omitzero"`
+	ErrorMessage      string    `json:"error_message,omitempty"`
+	ClaudeSessionID   string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
+	TmuxWindowName    string    `json:"tmux_window_name,omitempty"`  // tmux window name
+	Fleet             string    `json:"fleet"`                       // Fleet name for session grouping
 
 	// Tracked fields (dynamic, from daemon polling)
 	CurrentWorkDir string `json:"current_work_dir,omitempty"` // Current working directory
@@ -104,18 +106,19 @@ func SortInfos(infos []Info) {
 // ToInfo converts Session to Info
 func (s *Session) ToInfo() Info {
 	return Info{
-		ID:              s.ID,
-		Name:            s.Name,
-		WorkDir:         s.WorkDir,
-		Status:          s.Status,
-		CreatedAt:       s.CreatedAt,
-		LastActiveAt:    s.LastActiveAt,
-		ErrorMessage:    s.ErrorMessage,
-		ClaudeSessionID: s.ClaudeSessionID,
-		TmuxWindowName:  s.TmuxWindowName,
-		Fleet:           s.Fleet,
-		CurrentWorkDir:  s.CurrentWorkDir,
-		CurrentBranch:   s.CurrentBranch,
-		IsWorktree:      s.IsWorktree,
+		ID:                s.ID,
+		Description:       s.Description,
+		DescriptionLocked: s.DescriptionLocked,
+		WorkDir:           s.WorkDir,
+		Status:            s.Status,
+		CreatedAt:         s.CreatedAt,
+		LastActiveAt:      s.LastActiveAt,
+		ErrorMessage:      s.ErrorMessage,
+		ClaudeSessionID:   s.ClaudeSessionID,
+		TmuxWindowName:    s.TmuxWindowName,
+		Fleet:             s.Fleet,
+		CurrentWorkDir:    s.CurrentWorkDir,
+		CurrentBranch:     s.CurrentBranch,
+		IsWorktree:        s.IsWorktree,
 	}
 }

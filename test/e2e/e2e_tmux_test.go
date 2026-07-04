@@ -104,9 +104,9 @@ func TestE2E_TmuxSessionCreation(t *testing.T) {
 	client := setupE2E(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "tmux-create",
-		WorkDir: t.TempDir(),
-		Start:   true,
+		Description: "tmux-create",
+		WorkDir:     t.TempDir(),
+		Start:       true,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -134,9 +134,9 @@ func TestE2E_KillWithTmuxCleanup(t *testing.T) {
 	client := setupE2E(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "tmux-kill",
-		WorkDir: t.TempDir(),
-		Start:   true,
+		Description: "tmux-kill",
+		WorkDir:     t.TempDir(),
+		Start:       true,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -179,9 +179,9 @@ func TestE2E_DeleteWithTmuxCleanup(t *testing.T) {
 	client := setupE2E(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "tmux-delete",
-		WorkDir: t.TempDir(),
-		Start:   true,
+		Description: "tmux-delete",
+		WorkDir:     t.TempDir(),
+		Start:       true,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -225,9 +225,9 @@ func TestE2E_SessionDataPersistence(t *testing.T) {
 
 	workDir := t.TempDir()
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "persist-test",
-		WorkDir: workDir,
-		Start:   true,
+		Description: "persist-test",
+		WorkDir:     workDir,
+		Start:       true,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -248,8 +248,14 @@ func TestE2E_SessionDataPersistence(t *testing.T) {
 	if persisted["id"] != info.ID {
 		t.Errorf("persisted ID = %v, want %q", persisted["id"], info.ID)
 	}
-	if persisted["name"] != "persist-test" {
-		t.Errorf("persisted name = %v, want %q", persisted["name"], "persist-test")
+	if persisted["description"] != "persist-test" {
+		t.Errorf("persisted description = %v, want %q", persisted["description"], "persist-test")
+	}
+	if persisted["description_locked"] != true {
+		t.Errorf("persisted description_locked = %v, want true (--description sets Layer B lock)", persisted["description_locked"])
+	}
+	if _, hasName := persisted["name"]; hasName {
+		t.Errorf("persisted JSON should not carry the retired \"name\" field (v1 schema)")
 	}
 	if persisted["work_dir"] != workDir {
 		t.Errorf("persisted work_dir = %v, want %q", persisted["work_dir"], workDir)
@@ -275,9 +281,9 @@ func TestE2E_SessionRecovery(t *testing.T) {
 	client, server := setupE2EWithDataDir(t, dataDir, configDir)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "recovery-test",
-		WorkDir: t.TempDir(),
-		Start:   true,
+		Description: "recovery-test",
+		WorkDir:     t.TempDir(),
+		Start:       true,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -325,8 +331,8 @@ func TestE2E_SessionRecovery(t *testing.T) {
 	if recovered[0].ID != info.ID {
 		t.Errorf("recovered ID = %q, want %q", recovered[0].ID, info.ID)
 	}
-	if recovered[0].Name != "recovery-test" {
-		t.Errorf("recovered Name = %q, want %q", recovered[0].Name, "recovery-test")
+	if recovered[0].Description != "recovery-test" {
+		t.Errorf("recovered Description = %q, want %q", recovered[0].Description, "recovery-test")
 	}
 }
 
@@ -343,9 +349,9 @@ func TestE2E_MultipleSessionsTmux(t *testing.T) {
 	sessions := make([]sess, 3)
 	for i := range 3 {
 		info, _, err := client.NewWithOptions(daemon.NewOptions{
-			Name:    filepath.Base(t.TempDir()),
-			WorkDir: t.TempDir(),
-			Start:   true,
+			Description: filepath.Base(t.TempDir()),
+			WorkDir:     t.TempDir(),
+			Start:       true,
 		})
 		if err != nil {
 			t.Fatalf("NewWithOptions(%d): %v", i, err)
@@ -401,9 +407,9 @@ func TestE2E_HookCWDUpdateOnStartedSession(t *testing.T) {
 	client := setupE2E(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "cwd-update",
-		WorkDir: t.TempDir(),
-		Start:   true,
+		Description: "cwd-update",
+		WorkDir:     t.TempDir(),
+		Start:       true,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -484,8 +490,8 @@ func TestE2E_DeleteWithWorktreeCleanup(t *testing.T) {
 	_, worktreeDir := setupGitWorktree(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "wt-cleanup",
-		WorkDir: worktreeDir,
+		Description: "wt-cleanup",
+		WorkDir:     worktreeDir,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -518,8 +524,8 @@ func TestE2E_DeleteWithoutWorktreeCleanup(t *testing.T) {
 	_, worktreeDir := setupGitWorktree(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "wt-no-cleanup",
-		WorkDir: worktreeDir,
+		Description: "wt-no-cleanup",
+		WorkDir:     worktreeDir,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -558,8 +564,8 @@ func TestE2E_DeleteWorktreeDirty(t *testing.T) {
 	}
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "wt-dirty",
-		WorkDir: worktreeDir,
+		Description: "wt-dirty",
+		WorkDir:     worktreeDir,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)
@@ -615,8 +621,8 @@ func TestE2E_DeleteWorktreeAlreadyRemoved(t *testing.T) {
 	_, worktreeDir := setupGitWorktree(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "wt-removed",
-		WorkDir: worktreeDir,
+		Description: "wt-removed",
+		WorkDir:     worktreeDir,
 	})
 	if err != nil {
 		t.Fatalf("NewWithOptions: %v", err)

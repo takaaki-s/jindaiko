@@ -8,15 +8,14 @@ import (
 	"testing"
 
 	"github.com/takaaki-s/honjin/internal/exitcode"
-	"github.com/takaaki-s/honjin/internal/session"
 )
 
 func TestRenderActionResultJSON(t *testing.T) {
 	t.Run("kill success", func(t *testing.T) {
 		result := actionResult{
-			Success: true,
-			ID:      "abc-123",
-			Name:    "my-session",
+			Success:     true,
+			ID:          "abc-123",
+			Description: "my-session",
 		}
 		var buf bytes.Buffer
 		if err := renderActionResultJSON(&buf, result); err != nil {
@@ -32,16 +31,16 @@ func TestRenderActionResultJSON(t *testing.T) {
 		if parsed["id"] != "abc-123" {
 			t.Errorf("expected id %q, got %v", "abc-123", parsed["id"])
 		}
-		if parsed["name"] != "my-session" {
-			t.Errorf("expected name %q, got %v", "my-session", parsed["name"])
+		if parsed["description"] != "my-session" {
+			t.Errorf("expected name %q, got %v", "my-session", parsed["description"])
 		}
 	})
 
 	t.Run("delete success", func(t *testing.T) {
 		result := actionResult{
-			Success: true,
-			ID:      "def-456",
-			Name:    "other-session",
+			Success:     true,
+			ID:          "def-456",
+			Description: "other-session",
 		}
 		var buf bytes.Buffer
 		if err := renderActionResultJSON(&buf, result); err != nil {
@@ -54,67 +53,10 @@ func TestRenderActionResultJSON(t *testing.T) {
 		if parsed["success"] != true {
 			t.Errorf("expected success=true, got %v", parsed["success"])
 		}
-		if parsed["name"] != "other-session" {
-			t.Errorf("expected name %q, got %v", "other-session", parsed["name"])
+		if parsed["description"] != "other-session" {
+			t.Errorf("expected name %q, got %v", "other-session", parsed["description"])
 		}
 	})
-}
-
-func TestResolveSessionFromList(t *testing.T) {
-	tests := []struct {
-		name     string
-		sessions []session.Info
-		nameOrID string
-		wantID   string
-		wantName string
-		wantErr  bool
-	}{
-		{
-			name: "session by name",
-			sessions: []session.Info{
-				{ID: "aaa", Name: "my-session"},
-			},
-			nameOrID: "my-session",
-			wantID:   "aaa",
-			wantName: "my-session",
-		},
-		{
-			name: "session by ID",
-			sessions: []session.Info{
-				{ID: "ccc-123", Name: "some-session"},
-			},
-			nameOrID: "ccc-123",
-			wantID:   "ccc-123",
-			wantName: "some-session",
-		},
-		{
-			name:     "not found",
-			sessions: []session.Info{},
-			nameOrID: "nonexistent",
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			id, name, err := resolveSessionFromList(tt.sessions, tt.nameOrID)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if id != tt.wantID {
-				t.Errorf("id: got %q, want %q", id, tt.wantID)
-			}
-			if name != tt.wantName {
-				t.Errorf("name: got %q, want %q", name, tt.wantName)
-			}
-		})
-	}
 }
 
 // TestDeleteCmd_FlagsRegistered verifies the worktree removal flags are registered

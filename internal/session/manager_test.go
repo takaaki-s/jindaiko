@@ -46,8 +46,8 @@ func TestManager_CreateWithOptions_Success(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir: "/tmp/project-alpha",
-		Name:    "alpha",
+		WorkDir:     "/tmp/project-alpha",
+		Description: "alpha",
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions failed: %v", err)
@@ -55,8 +55,8 @@ func TestManager_CreateWithOptions_Success(t *testing.T) {
 	if sess.ID == "" {
 		t.Error("expected non-empty ID")
 	}
-	if sess.Name != "alpha" {
-		t.Errorf("Name = %q, want %q", sess.Name, "alpha")
+	if sess.Description != "alpha" {
+		t.Errorf("Name = %q, want %q", sess.Description, "alpha")
 	}
 	if sess.WorkDir != "/tmp/project-alpha" {
 		t.Errorf("WorkDir = %q, want %q", sess.WorkDir, "/tmp/project-alpha")
@@ -72,7 +72,7 @@ func TestManager_CreateWithOptions_Success(t *testing.T) {
 func TestManager_CreateWithOptions_DefaultFleet(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-default", Name: "fd"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-default", Description: "fd"})
 	if err != nil {
 		t.Fatalf("CreateWithOptions failed: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestManager_CreateWithOptions_DefaultFleet(t *testing.T) {
 func TestManager_CreateWithOptions_ExplicitFleet(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-named", Name: "fn", Fleet: "backend"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-named", Description: "fn", Fleet: "backend"})
 	if err != nil {
 		t.Fatalf("CreateWithOptions failed: %v", err)
 	}
@@ -96,12 +96,12 @@ func TestManager_CreateWithOptions_ExplicitFleet(t *testing.T) {
 func TestManager_CreateWithOptions_DuplicateWorkDir(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/dup-dir", Name: "first"})
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/dup-dir", Description: "first"})
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
 	}
 
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/dup-dir", Name: "second"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/dup-dir", Description: "second"})
 	if err == nil {
 		t.Fatal("expected error for duplicate WorkDir, got nil")
 	}
@@ -110,7 +110,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir(t *testing.T) {
 func TestManager_CreateWithOptions_DuplicateWorkDir_SkipWorktreeSession(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "first"})
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_SkipWorktreeSession(t *testi
 	mgr.mu.Unlock()
 
 	// Creating a new session for the same WorkDir should succeed
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "second"})
 	if err != nil {
 		t.Fatalf("expected success when existing session is in worktree, got: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_SkipWorktreeSession(t *testi
 func TestManager_CreateWithOptions_DuplicateWorkDir_BlockNonWorktree(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "first"})
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_BlockNonWorktree(t *testing.
 	s1.CurrentWorkDir = "/tmp/repo"
 	mgr.mu.Unlock()
 
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "second"})
 	if err == nil {
 		t.Fatal("expected error for duplicate WorkDir when session is not in worktree")
 	}
@@ -150,12 +150,12 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_StoppedSession(t *testing.T)
 	mgr, _, _ := newTestManager(t)
 
 	// CurrentWorkDir defaults to "" for a freshly created (stopped) session
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "first"})
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
 	}
 
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "second"})
 	if err == nil {
 		t.Fatal("stopped session (CurrentWorkDir empty) should still block duplicate WorkDir")
 	}
@@ -164,7 +164,7 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_StoppedSession(t *testing.T)
 func TestManager_CreateWithOptions_DuplicateWorkDir_ReturnFromWorktree(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "first"})
+	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "first"})
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
 	}
@@ -180,36 +180,22 @@ func TestManager_CreateWithOptions_DuplicateWorkDir_ReturnFromWorktree(t *testin
 	mgr.mu.Unlock()
 
 	// Duplicate check should block again
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Name: "second"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/repo", Description: "second"})
 	if err == nil {
 		t.Fatal("expected error after session returned from worktree to original WorkDir")
-	}
-}
-
-func TestManager_CreateWithOptions_DuplicateName(t *testing.T) {
-	mgr, _, _ := newTestManager(t)
-
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/dir-a", Name: "samename"})
-	if err != nil {
-		t.Fatalf("first create failed: %v", err)
-	}
-
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/dir-b", Name: "samename"})
-	if err == nil {
-		t.Fatal("expected error for duplicate Name, got nil")
 	}
 }
 
 func TestManager_CreateWithOptions_EmptyWorkDir(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "", Name: "nodir"})
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "", Description: "nodir"})
 	if err == nil {
 		t.Fatal("expected error for empty WorkDir, got nil")
 	}
 }
 
-func TestManager_CreateWithOptions_DefaultName(t *testing.T) {
+func TestManager_CreateWithOptions_DefaultDescription(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/home/user/my-project"})
@@ -217,8 +203,30 @@ func TestManager_CreateWithOptions_DefaultName(t *testing.T) {
 		t.Fatalf("CreateWithOptions failed: %v", err)
 	}
 	want := filepath.Base("/home/user/my-project")
-	if sess.Name != want {
-		t.Errorf("Name = %q, want %q (filepath.Base of WorkDir)", sess.Name, want)
+	if sess.Description != want {
+		t.Errorf("Description = %q, want %q (filepath.Base of WorkDir)", sess.Description, want)
+	}
+	if sess.DescriptionLocked {
+		t.Error("DescriptionLocked = true, want false when auto-generated")
+	}
+}
+
+func TestManager_CreateWithOptions_WhitespaceOnlyDescription_UsesBaseline(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{
+		WorkDir:     "/home/user/whitespace-project",
+		Description: "   \t  ",
+	})
+	if err != nil {
+		t.Fatalf("CreateWithOptions failed: %v", err)
+	}
+	want := filepath.Base("/home/user/whitespace-project")
+	if sess.Description != want {
+		t.Errorf("Description = %q, want %q (whitespace-only should fall back to baseline)", sess.Description, want)
+	}
+	if sess.DescriptionLocked {
+		t.Error("DescriptionLocked = true, want false when input trimmed to empty")
 	}
 }
 
@@ -229,7 +237,7 @@ func TestManager_CreateWithOptions_DefaultName(t *testing.T) {
 func TestManager_Get_Found(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	created, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/get-test", Name: "getme"})
+	created, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/get-test", Description: "getme"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -259,13 +267,13 @@ func TestManager_Get_NotFound(t *testing.T) {
 func TestManager_List(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/list-1", Name: "first"})
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/list-1", Description: "first"})
 	if err != nil {
 		t.Fatalf("create first failed: %v", err)
 	}
 	// Ensure distinct CreatedAt timestamps.
 	time.Sleep(2 * time.Millisecond)
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/list-2", Name: "second"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/list-2", Description: "second"})
 	if err != nil {
 		t.Fatalf("create second failed: %v", err)
 	}
@@ -275,26 +283,26 @@ func TestManager_List(t *testing.T) {
 		t.Fatalf("List returned %d items, want 2", len(infos))
 	}
 	// Sorted by CreatedAt ascending
-	if infos[0].Name != "first" {
-		t.Errorf("first item Name = %q, want %q", infos[0].Name, "first")
+	if infos[0].Description != "first" {
+		t.Errorf("first item Name = %q, want %q", infos[0].Description, "first")
 	}
-	if infos[1].Name != "second" {
-		t.Errorf("second item Name = %q, want %q", infos[1].Name, "second")
+	if infos[1].Description != "second" {
+		t.Errorf("second item Name = %q, want %q", infos[1].Description, "second")
 	}
 }
 
 func TestManager_List_SortedByFleet(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-1", Name: "s1", Fleet: "backend"})
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-1", Description: "s1", Fleet: "backend"})
 	if err != nil {
 		t.Fatalf("create s1 failed: %v", err)
 	}
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-2", Name: "s2"}) // default
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-2", Description: "s2"}) // default
 	if err != nil {
 		t.Fatalf("create s2 failed: %v", err)
 	}
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-3", Name: "s3", Fleet: "alpha"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/fleet-sort-3", Description: "s3", Fleet: "alpha"})
 	if err != nil {
 		t.Fatalf("create s3 failed: %v", err)
 	}
@@ -322,7 +330,7 @@ func TestManager_List_SortedByFleet(t *testing.T) {
 func TestManager_SetStatus(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/status-test", Name: "s1"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/status-test", Description: "s1"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -341,7 +349,7 @@ func TestManager_SetStatus(t *testing.T) {
 func TestManager_SetStatusWithError(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/err-test", Name: "e1"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/err-test", Description: "e1"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -367,7 +375,7 @@ func TestManager_SetStatusWithError(t *testing.T) {
 func TestManager_SetWorkDir(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-old", Name: "wd"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-old", Description: "wd"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -388,11 +396,11 @@ func TestManager_SetWorkDir(t *testing.T) {
 func TestManager_SetWorkDir_DuplicateWorkDir(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-dup", Name: "d1"})
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-dup", Description: "d1"})
 	if err != nil {
 		t.Fatalf("create first failed: %v", err)
 	}
-	s2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-other", Name: "d2"})
+	s2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-other", Description: "d2"})
 	if err != nil {
 		t.Fatalf("create second failed: %v", err)
 	}
@@ -406,11 +414,11 @@ func TestManager_SetWorkDir_DuplicateWorkDir(t *testing.T) {
 func TestManager_SetWorkDir_DuplicateWorkDir_SkipWorktreeSession(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-dup", Name: "d1"})
+	s1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-dup", Description: "d1"})
 	if err != nil {
 		t.Fatalf("create first failed: %v", err)
 	}
-	s2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-other", Name: "d2"})
+	s2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/wd-other", Description: "d2"})
 	if err != nil {
 		t.Fatalf("create second failed: %v", err)
 	}
@@ -433,9 +441,9 @@ func TestManager_SetWorkDir_DuplicateWorkDir_SkipWorktreeSession(t *testing.T) {
 func TestManager_CountActive(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	s1, _, _ := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/ca-1", Name: "ca1"})
-	s2, _, _ := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/ca-2", Name: "ca2"})
-	s3, _, _ := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/ca-3", Name: "ca3"})
+	s1, _, _ := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/ca-1", Description: "ca1"})
+	s2, _, _ := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/ca-2", Description: "ca2"})
+	s3, _, _ := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/ca-3", Description: "ca3"})
 
 	// All start as StatusStopped; set two to active statuses.
 	mgr.SetStatus(s2.ID, StatusThinking)
@@ -457,7 +465,7 @@ func TestManager_CountActive(t *testing.T) {
 func TestManager_HandleHookEvent_UserPromptSubmit(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-ups", Name: "hups"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-ups", Description: "hups"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -476,7 +484,7 @@ func TestManager_HandleHookEvent_UserPromptSubmit(t *testing.T) {
 func TestManager_HandleHookEvent_Stop(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-stop", Name: "hstop"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-stop", Description: "hstop"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -497,7 +505,7 @@ func TestManager_HandleHookEvent_Stop(t *testing.T) {
 func TestManager_HandleHookEvent_Notification_Permission(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-perm", Name: "hperm"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-perm", Description: "hperm"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -523,7 +531,7 @@ func TestManager_HandleHookEvent_UnknownSession(t *testing.T) {
 func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-cwd", Name: "hcwd"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-cwd", Description: "hcwd"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -569,7 +577,7 @@ func TestManager_HandleHookEvent_CwdChanged(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(origDir, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
 	}
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: origDir, Name: "hcwdch"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: origDir, Description: "hcwdch"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -619,7 +627,7 @@ func TestManager_HandleHookEvent_CwdChanged(t *testing.T) {
 func TestManager_HandleHookEvent_StopFailure(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sf", Name: "hsf"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sf", Description: "hsf"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -651,7 +659,7 @@ func TestManager_HandleHookEvent_StopFailure(t *testing.T) {
 func TestManager_HandleHookEvent_StopFailure_ThenStop_ClearsError(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sfclr", Name: "hsfclr"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sfclr", Description: "hsfclr"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -675,7 +683,7 @@ func TestManager_HandleHookEvent_StopFailure_ThenStop_ClearsError(t *testing.T) 
 func TestManager_HandleHookEvent_StopFailure_ThenUserPrompt_ClearsError(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sfclr2", Name: "hsfclr2"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sfclr2", Description: "hsfclr2"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -699,7 +707,7 @@ func TestManager_HandleHookEvent_StopFailure_ThenUserPrompt_ClearsError(t *testi
 func TestManager_HandleHookEvent_StopFailure_EmptyReason(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sf2", Name: "hsf2"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sf2", Description: "hsf2"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -722,7 +730,7 @@ func TestManager_HandleHookEvent_StopFailure_EmptyReason(t *testing.T) {
 func TestManager_HandleHookEvent_SessionStart(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-ss", Name: "hss"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-ss", Description: "hss"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -743,7 +751,7 @@ func TestManager_HandleHookEvent_SessionStart(t *testing.T) {
 func TestManager_HandleHookEvent_SessionEnd(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-se", Name: "hse"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-se", Description: "hse"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -763,7 +771,7 @@ func TestManager_HandleHookEvent_SessionEnd(t *testing.T) {
 func TestManager_HandleHookEvent_SessionEnd_Idempotent(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sei", Name: "hsei"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sei", Description: "hsei"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -816,7 +824,7 @@ func TestEnsureHooksSettingsFile_NewHooks(t *testing.T) {
 func TestManager_Kill(t *testing.T) {
 	mgr, mock, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/kill-test", Name: "killme"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/kill-test", Description: "killme"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -851,7 +859,7 @@ func TestManager_Kill(t *testing.T) {
 func TestManager_Delete(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-test", Name: "delme"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-test", Description: "delme"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -880,7 +888,7 @@ func TestManager_Delete(t *testing.T) {
 func TestManager_RecoverTmuxSessions_Live(t *testing.T) {
 	mgr, mock, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/recover-live", Name: "rlive"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/recover-live", Description: "rlive"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -909,7 +917,7 @@ func TestManager_RecoverTmuxSessions_Live(t *testing.T) {
 func TestManager_RecoverTmuxSessions_DeadPane(t *testing.T) {
 	mgr, mock, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/recover-dead", Name: "rdead"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/recover-dead", Description: "rdead"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -945,7 +953,7 @@ func TestManager_RecoverTmuxSessions_NoTmux(t *testing.T) {
 	// Explicitly set tmuxClient to nil to simulate no tmux available.
 	mgr.SetTmuxClient(nil)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/recover-notmux", Name: "rnotmux"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/recover-notmux", Description: "rnotmux"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -974,7 +982,7 @@ func TestManager_RecoverTmuxSessions_NoTmux(t *testing.T) {
 func TestManager_FindByClaudeSessionID(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/find-cc", Name: "findcc"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/find-cc", Description: "findcc"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1021,7 +1029,7 @@ func TestManager_StartBackground(t *testing.T) {
 	// Use a real temp directory so os.Stat in startSessionTmux passes.
 	workDir := t.TempDir()
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Name: "bg"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Description: "bg"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1064,7 +1072,7 @@ func TestManager_StartBackground_AlreadyRunning(t *testing.T) {
 	mgr, mock, _ := newTestManager(t)
 
 	workDir := t.TempDir()
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Name: "already"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Description: "already"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1117,11 +1125,11 @@ func TestManager_NotificationHistory(t *testing.T) {
 	}
 
 	// Create sessions and trigger hook events that generate notifications
-	sess1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/notify-1", Name: "n1"})
+	sess1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/notify-1", Description: "n1"})
 	if err != nil {
 		t.Fatalf("create sess1 failed: %v", err)
 	}
-	sess2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/notify-2", Name: "n2"})
+	sess2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/notify-2", Description: "n2"})
 	if err != nil {
 		t.Fatalf("create sess2 failed: %v", err)
 	}
@@ -1160,7 +1168,7 @@ func TestManager_NotificationHistory(t *testing.T) {
 func TestManager_SetStatus_Persisted(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/setstatus-persist", Name: "sp"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/setstatus-persist", Description: "sp"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1194,7 +1202,7 @@ func TestManager_EnsureTmuxClient_NotSet(t *testing.T) {
 	// Deliberately do NOT call SetTmuxClient — tmux client remains nil.
 
 	workDir := t.TempDir()
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Name: "notmux"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Description: "notmux"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1231,7 +1239,7 @@ func TestManager_Kill_NotFound(t *testing.T) {
 func TestManager_Kill_WithTmuxWindowOnly(t *testing.T) {
 	mgr, mock, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/kill-win", Name: "killwin"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/kill-win", Description: "killwin"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1265,7 +1273,7 @@ func TestManager_Kill_WithTmuxWindowOnly(t *testing.T) {
 func TestManager_Kill_NoTmux(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/kill-notmux", Name: "killnotmux"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/kill-notmux", Description: "killnotmux"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1308,11 +1316,11 @@ func TestManager_Delete_Success(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
 	// Create two sessions
-	sess1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-s1", Name: "dels1"})
+	sess1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-s1", Description: "dels1"})
 	if err != nil {
 		t.Fatalf("create sess1 failed: %v", err)
 	}
-	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-s2", Name: "dels2"})
+	_, _, err = mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-s2", Description: "dels2"})
 	if err != nil {
 		t.Fatalf("create sess2 failed: %v", err)
 	}
@@ -1333,15 +1341,15 @@ func TestManager_Delete_Success(t *testing.T) {
 	if len(infos) != 1 {
 		t.Fatalf("List returned %d items, want 1", len(infos))
 	}
-	if infos[0].Name != "dels2" {
-		t.Errorf("remaining session Name = %q, want %q", infos[0].Name, "dels2")
+	if infos[0].Description != "dels2" {
+		t.Errorf("remaining session Name = %q, want %q", infos[0].Description, "dels2")
 	}
 }
 
 func TestManager_Delete_WithTmuxSession(t *testing.T) {
 	mgr, mock, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-tmux", Name: "deltmux"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/del-tmux", Description: "deltmux"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1374,7 +1382,8 @@ func TestNewManager_LoadAll_MigratesEmptyFleet(t *testing.T) {
 	dataDir := t.TempDir()
 	configDir := t.TempDir()
 
-	// Write a session JSON without the fleet field (simulates old data)
+	// Write a session JSON without the fleet field (simulates old data).
+	// The same fixture also exercises the name → description migration.
 	oldJSON := `{"id":"old-id","name":"old","work_dir":"/tmp/old","created_at":"2025-01-01T00:00:00Z","status":"idle","claude_session_id":"cid"}`
 	if err := os.WriteFile(filepath.Join(dataDir, "old-id.json"), []byte(oldJSON), 0600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -1396,22 +1405,29 @@ func TestNewManager_LoadAll_MigratesEmptyFleet(t *testing.T) {
 	if infos[0].Fleet != DefaultFleet {
 		t.Errorf("Fleet = %q, want %q", infos[0].Fleet, DefaultFleet)
 	}
+	// Legacy "name" value must be preserved as the new Description.
+	if infos[0].Description != "old" {
+		t.Errorf("Description = %q, want %q (legacy name should migrate into description)", infos[0].Description, "old")
+	}
+	// Migrated descriptions are conservatively locked so Layer C doesn't
+	// overwrite a value the user had already chosen manually.
+	if !infos[0].DescriptionLocked {
+		t.Error("DescriptionLocked = false, want true (migrated name should be locked)")
+	}
 }
 
-func TestNewManager_LoadAll_RestoresIsWorktree(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	_, worktreeDir := setupTestWorktree(t)
-
+// TestNewManager_LoadAll_WritesBackMigratedJSON verifies that the on-disk
+// fixture is rewritten in place after migration: the legacy "name" key is
+// removed and "description" / "description_locked" replace it. This locks in
+// the spec-accepted behaviour that the migration is idempotent and observable
+// on disk (spec receipt criterion 13).
+func TestNewManager_LoadAll_WritesBackMigratedJSON(t *testing.T) {
 	dataDir := t.TempDir()
 	configDir := t.TempDir()
 
-	// Persist a session pointing at the worktree. IsWorktree has json:"-"
-	// so it's absent from the serialized form — mimicking a real restart.
-	sessionJSON := `{"id":"wt-id","name":"wt","work_dir":"` + worktreeDir +
-		`","created_at":"2025-01-01T00:00:00Z","status":"idle","claude_session_id":"cid","fleet":"default"}`
-	if err := os.WriteFile(filepath.Join(dataDir, "wt-id.json"), []byte(sessionJSON), 0600); err != nil {
+	fixturePath := filepath.Join(dataDir, "old-id.json")
+	oldJSON := `{"id":"old-id","name":"old","work_dir":"/tmp/old","created_at":"2025-01-01T00:00:00Z","status":"idle","claude_session_id":"cid"}`
+	if err := os.WriteFile(fixturePath, []byte(oldJSON), 0600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -1419,17 +1435,27 @@ func TestNewManager_LoadAll_RestoresIsWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.NewManager failed: %v", err)
 	}
-	mgr, err := NewManager(dataDir, configDir, configMgr)
-	if err != nil {
+	if _, err := NewManager(dataDir, configDir, configMgr); err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
 
-	sess, ok := mgr.Get("wt-id")
-	if !ok {
-		t.Fatal("session wt-id not found after load")
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read fixture back: %v", err)
 	}
-	if !sess.IsWorktree {
-		t.Errorf("IsWorktree = false, want true after restoring worktree session from disk")
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	if _, hasName := got["name"]; hasName {
+		t.Error(`migrated JSON still contains "name" key`)
+	}
+	if desc, _ := got["description"].(string); desc != "old" {
+		t.Errorf(`"description" = %q, want "old"`, desc)
+	}
+	if locked, _ := got["description_locked"].(bool); !locked {
+		t.Error(`"description_locked" = false, want true`)
 	}
 }
 
@@ -1579,7 +1605,7 @@ func TestManager_EnsureClaudeTrustState_MultipleProjects(t *testing.T) {
 func TestManager_IdleFallback_FreshStart(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/idle-fallback-fresh", Name: "ifb-fresh"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/idle-fallback-fresh", Description: "ifb-fresh"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1627,7 +1653,7 @@ func TestManager_IdleFallback_FreshStart(t *testing.T) {
 func TestManager_IdleFallback_DaemonRecovery(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/idle-fallback-recover", Name: "ifb-recover"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/idle-fallback-recover", Description: "ifb-recover"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1670,7 +1696,7 @@ func TestManager_HandleHookEvent_CWDUpdate_WorktreePathSkipped(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(origDir, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
 	}
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: origDir, Name: "wt-skip"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: origDir, Description: "wt-skip"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1745,7 +1771,7 @@ func TestManager_Delete_RemovesWorktree(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	_, worktreeDir := setupTestWorktree(t)
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: worktreeDir, Name: "wt"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: worktreeDir, Description: "wt"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1767,7 +1793,7 @@ func TestManager_Delete_PrefersCurrentWorkDirForWorktree(t *testing.T) {
 	// fix-worktree-workdir-overwrite guard prevents WorkDir from being
 	// updated to a worktree path), while CurrentWorkDir tracks the actual
 	// worktree the session is in.
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: mainRepo, Name: "wt-current"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: mainRepo, Description: "wt-current"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1793,7 +1819,7 @@ func TestManager_Delete_NonWorktreeReturnsError(t *testing.T) {
 	mainRepo, _ := setupTestWorktree(t)
 
 	// Both WorkDir and CurrentWorkDir point at the main repo (no worktree).
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: mainRepo, Name: "main-only"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: mainRepo, Description: "main-only"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1821,7 +1847,7 @@ func TestManager_Delete_DirtyWorktreeReturnsErrWorktreeDirty(t *testing.T) {
 		t.Fatalf("write dirty file: %v", err)
 	}
 
-	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: worktreeDir, Name: "wt-dirty"})
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: worktreeDir, Description: "wt-dirty"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
@@ -1928,9 +1954,9 @@ func TestManager_CreateWithOptions_Worktree_RejectsNonGitRepo(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
 	_, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  t.TempDir(), // no .git present
-		Name:     "nogit-wt",
-		Worktree: true,
+		WorkDir:     t.TempDir(), // no .git present
+		Description: "nogit-wt",
+		Worktree:    true,
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1959,6 +1985,8 @@ func TestManager_CreateWithOptions_Worktree_HappyPath(t *testing.T) {
 			switch {
 			case joined == "symbolic-ref refs/remotes/origin/HEAD":
 				return []byte("refs/remotes/origin/main\n"), nil
+			case len(args) >= 1 && args[0] == "fetch":
+				return nil, nil
 			case len(args) >= 2 && args[0] == "worktree" && args[1] == "prune":
 				return nil, nil
 			case len(args) >= 1 && args[0] == "rev-parse":
@@ -1973,9 +2001,9 @@ func TestManager_CreateWithOptions_Worktree_HappyPath(t *testing.T) {
 	mgr.gitClient = git.NewClientWithRunner(runner)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "wt-happy",
-		Worktree: true,
+		WorkDir:     workDir,
+		Description: "wt-happy",
+		Worktree:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateWithOptions: %v", err)
@@ -1995,11 +2023,11 @@ func TestManager_CreateWithOptions_Worktree_HappyPath(t *testing.T) {
 		t.Error("expected `git symbolic-ref refs/remotes/origin/HEAD` to be called")
 	}
 
-	// Assert that we did NOT reach out to origin — worktree creation must
-	// run offline so heavy repos aren't taxed on every session. Users who
-	// want a fresh base should fetch via the post-create hook.
-	if fetchCall := runner.findCall("fetch"); fetchCall != nil {
-		t.Errorf("expected no `git fetch` during worktree creation, got %v", fetchCall)
+	// Auto-fetch on worktree creation was removed (feat/worktree-offline-creation);
+	// the local origin/<base> tip is used as-is, and users refresh manually or via
+	// the post-create hook.
+	if runner.findCall("fetch") != nil {
+		t.Error("expected no `git fetch` call (auto-fetch is disabled)")
 	}
 
 	// Assert AddWorktree used the auto-generated branch (jin/<8hex>),
@@ -2029,98 +2057,13 @@ func TestManager_CreateWithOptions_Worktree_HappyPath(t *testing.T) {
 	if addCall[5] != "origin/main" {
 		t.Errorf("worktree add baseRef = %q, want origin/main", addCall[5])
 	}
-
-	// Regression: IsWorktree must be set immediately (was previously only
-	// populated by the 10s captureOutputTmux poll, hiding the TUI's `w`
-	// delete option for the first 10 seconds after creation).
-	if !sess.IsWorktree {
-		t.Error("IsWorktree = false immediately after create, want true")
-	}
 }
 
-func TestManager_CreateWithOptions_Worktree_RollsBackOnFailure(t *testing.T) {
-	mgr, _, _ := newTestManager(t)
-
-	stateDir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", stateDir)
-
-	workDir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(workDir, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-
-	// Pre-create a session with the name the worktree create will re-use,
-	// so the name-uniqueness check fails *after* the worktree/branch exist.
-	if _, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir: t.TempDir(),
-		Name:    "collide",
-	}); err != nil {
-		t.Fatalf("pre-create: %v", err)
-	}
-
-	runner := &scriptedGitRunner{
-		handler: func(dir string, args []string) ([]byte, error) {
-			joined := strings.Join(args, " ")
-			switch {
-			case joined == "symbolic-ref refs/remotes/origin/HEAD":
-				return []byte("refs/remotes/origin/main\n"), nil
-			case len(args) >= 2 && args[0] == "worktree" && args[1] == "prune":
-				return nil, nil
-			case len(args) >= 1 && args[0] == "rev-parse":
-				return nil, errors.New("exit status 1")
-			case len(args) >= 2 && args[0] == "worktree" && args[1] == "add":
-				// Populate the worktree layout so RemoveWorktree can
-				// progress past its structural checks and actually call
-				// the runner during rollback.
-				worktreePath := args[4]
-				mainGitDir := filepath.Join(dir, ".git", "worktrees", filepath.Base(worktreePath))
-				if err := os.MkdirAll(mainGitDir, 0o755); err != nil {
-					return nil, err
-				}
-				if err := os.MkdirAll(worktreePath, 0o755); err != nil {
-					return nil, err
-				}
-				if err := os.WriteFile(
-					filepath.Join(worktreePath, ".git"),
-					[]byte("gitdir: "+mainGitDir+"\n"),
-					0o644,
-				); err != nil {
-					return nil, err
-				}
-				return nil, nil
-			case len(args) >= 2 && args[0] == "worktree" && args[1] == "remove":
-				_ = os.RemoveAll(args[len(args)-1])
-				return nil, nil
-			case len(args) >= 2 && args[0] == "branch" && args[1] == "-D":
-				return nil, nil
-			}
-			return nil, fmt.Errorf("unexpected git call: %s", joined)
-		},
-	}
-	mgr.gitClient = git.NewClientWithRunner(runner)
-
-	_, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "collide", // trips name-uniqueness after worktree exists
-		Worktree: true,
-	})
-	if err == nil {
-		t.Fatal("expected error from name collision, got nil")
-	}
-
-	if !runner.hadCall("worktree", "remove") {
-		t.Error("expected RemoveWorktree runner call during rollback")
-	}
-	if !runner.hadCall("branch", "-D") {
-		t.Error("expected DeleteBranch runner call during rollback")
-	}
-}
-
-// TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision covers a
-// different failure path from the name-uniqueness test above: the WorkDir
-// uniqueness check re-runs under the re-acquired lock after AddWorktree
-// succeeds. Using --worktree-name gives us a predictable worktree path so we
-// can pre-register a session at that exact location.
+// TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision verifies
+// that the worktree/branch created before the sessions map re-lock are cleaned
+// up when the post-lock WorkDir uniqueness check fails. Using --worktree-name
+// gives us a predictable worktree path so we can pre-register a session at
+// that exact location.
 func TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
@@ -2138,8 +2081,8 @@ func TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision(t *testi
 	// Pre-create a session whose WorkDir is exactly the worktree path we'll
 	// try to create below, so the re-lock WorkDir uniqueness check trips.
 	if _, _, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir: predictablePath,
-		Name:    "pre-existing",
+		WorkDir:     predictablePath,
+		Description: "pre-existing",
 	}); err != nil {
 		t.Fatalf("pre-create: %v", err)
 	}
@@ -2150,6 +2093,8 @@ func TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision(t *testi
 			switch {
 			case joined == "symbolic-ref refs/remotes/origin/HEAD":
 				return []byte("refs/remotes/origin/main\n"), nil
+			case len(args) >= 1 && args[0] == "fetch":
+				return nil, nil
 			case len(args) >= 2 && args[0] == "worktree" && args[1] == "prune":
 				return nil, nil
 			case len(args) >= 1 && args[0] == "rev-parse":
@@ -2185,7 +2130,7 @@ func TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision(t *testi
 
 	_, _, err := mgr.CreateWithOptions(CreateOptions{
 		WorkDir:      workDir,
-		Name:         "wt-collide",
+		Description:  "wt-collide",
 		Worktree:     true,
 		WorktreeName: "collide-wt",
 	})
@@ -2201,5 +2146,311 @@ func TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision(t *testi
 	}
 	if !runner.hadCall("branch", "-D") {
 		t.Error("expected DeleteBranch runner call during rollback")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TryUpgradeDescription tests
+// ---------------------------------------------------------------------------
+
+// stubEnhancer is a minimal DescriptionEnhancer whose response can be scripted
+// per test case. It also records how many times TryGenerate was called so the
+// "no-op" cases can assert the enhancer was never consulted.
+type stubEnhancer struct {
+	response string
+	ok       bool
+	calls    int
+}
+
+func (s *stubEnhancer) TryGenerate(sess *Session) (string, bool) {
+	s.calls++
+	return s.response, s.ok
+}
+
+func TestManager_TryUpgradeDescription_Locked_NoOp(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{
+		WorkDir:     "/tmp/upgrade-locked",
+		Description: "manual label",
+	})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	if !sess.DescriptionLocked {
+		t.Fatal("precondition: session created with Description should be locked")
+	}
+
+	enh := &stubEnhancer{response: "candidate", ok: true}
+	mgr.TryUpgradeDescription(sess.ID, enh)
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "manual label" {
+		t.Errorf("Description = %q, want %q (locked → no upgrade)", got.Description, "manual label")
+	}
+	if enh.calls != 0 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 0", enh.calls)
+	}
+}
+
+func TestManager_TryUpgradeDescription_DescriptionDrift_NoOp(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/upgrade-drift"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	// Simulate a prior Layer C upgrade or manual out-of-band edit that moved the
+	// description off the baseline while leaving Locked=false.
+	mgr.mu.Lock()
+	sess.Description = "already upgraded"
+	mgr.mu.Unlock()
+
+	enh := &stubEnhancer{response: "should not apply", ok: true}
+	mgr.TryUpgradeDescription(sess.ID, enh)
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "already upgraded" {
+		t.Errorf("Description = %q, want %q (baseline mismatch → no upgrade)", got.Description, "already upgraded")
+	}
+	if enh.calls != 0 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 0", enh.calls)
+	}
+}
+
+func TestManager_TryUpgradeDescription_Success_ApplyCandidate(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/upgrade-ok"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	if sess.DescriptionLocked {
+		t.Fatal("precondition: auto-generated description should be unlocked")
+	}
+	baseline := GenerateBaselineDescription(sess.WorkDir, "", false, "")
+	if sess.Description != baseline {
+		t.Fatalf("precondition: Description=%q should match baseline %q", sess.Description, baseline)
+	}
+
+	enh := &stubEnhancer{response: "auth refactor", ok: true}
+	mgr.TryUpgradeDescription(sess.ID, enh)
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "auth refactor" {
+		t.Errorf("Description = %q, want %q", got.Description, "auth refactor")
+	}
+	if got.DescriptionLocked {
+		t.Error("DescriptionLocked = true, want false (Layer C must not lock)")
+	}
+	if enh.calls != 1 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 1", enh.calls)
+	}
+
+	// The store must reflect the new description so a daemon restart preserves it.
+	reloaded, err := mgr.store.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("store.Load failed: %v", err)
+	}
+	if reloaded.Description != "auth refactor" {
+		t.Errorf("persisted Description = %q, want %q", reloaded.Description, "auth refactor")
+	}
+}
+
+func TestManager_TryUpgradeDescription_EnhancerPending_NoOp(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/upgrade-pending"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	before := sess.Description
+
+	enh := &stubEnhancer{response: "", ok: false}
+	mgr.TryUpgradeDescription(sess.ID, enh)
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != before {
+		t.Errorf("Description = %q, want %q (enhancer pending → keep baseline)", got.Description, before)
+	}
+	if enh.calls != 1 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 1", enh.calls)
+	}
+}
+
+func TestManager_TryUpgradeDescription_NilEnhancer_NoPanic(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/upgrade-nil"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	before := sess.Description
+
+	// Must not panic even when Manager has no enhancer wired.
+	mgr.TryUpgradeDescription(sess.ID, nil)
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != before {
+		t.Errorf("Description = %q, want %q (nil enhancer → no-op)", got.Description, before)
+	}
+}
+
+func TestManager_TryUpgradeDescription_UnknownSession_NoPanic(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	enh := &stubEnhancer{response: "x", ok: true}
+	mgr.TryUpgradeDescription("does-not-exist", enh)
+
+	if enh.calls != 0 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 0 (unknown session should short-circuit)", enh.calls)
+	}
+}
+
+// TestManager_HandleHookEvent_UserPromptSubmit_UpgradesDescription verifies that
+// the hook path calls the installed enhancer for the UserPromptSubmit event.
+func TestManager_HandleHookEvent_UserPromptSubmit_UpgradesDescription(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	enh := &stubEnhancer{response: "hook-derived", ok: true}
+	mgr.SetDescriptionEnhancer(enh)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-upgrade"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "hook-derived" {
+		t.Errorf("Description = %q, want %q (UserPromptSubmit should trigger Layer C)", got.Description, "hook-derived")
+	}
+	if enh.calls != 1 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 1", enh.calls)
+	}
+}
+
+// TestManager_HandleHookEvent_Stop_UpgradesDescription verifies that the Stop
+// hook path also invokes Layer C. Stop is our reliable fallback when
+// UserPromptSubmit races the transcript flush and finds an empty file — see
+// the comment in HandleHookEvent for the ~10ms skew observed in practice.
+func TestManager_HandleHookEvent_Stop_UpgradesDescription(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	enh := &stubEnhancer{response: "stop-derived", ok: true}
+	mgr.SetDescriptionEnhancer(enh)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-stop-upgrade"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	// Stop only fires after a UserPromptSubmit transitioned status away from
+	// stopped, so mirror that ordering to keep the setup realistic.
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "stop-derived" {
+		t.Errorf("Description = %q, want %q (Stop should trigger Layer C as a flush-safe fallback)", got.Description, "stop-derived")
+	}
+	if enh.calls != 1 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 1", enh.calls)
+	}
+}
+
+// TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade guards against wiring
+// Layer C to hook events that don't imply a completed transcript write.
+func TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade(t *testing.T) {
+	events := []string{"SessionStart", "SessionEnd", "CwdChanged", "PostToolUse"}
+	for _, ev := range events {
+		t.Run(ev, func(t *testing.T) {
+			mgr, _, _ := newTestManager(t)
+			enh := &stubEnhancer{response: "should-not-apply", ok: true}
+			mgr.SetDescriptionEnhancer(enh)
+
+			sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-" + ev})
+			if err != nil {
+				t.Fatalf("create failed: %v", err)
+			}
+			before := sess.Description
+
+			mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, ev, "", "", "")
+
+			got, _ := mgr.Get(sess.ID)
+			if got.Description != before {
+				t.Errorf("%s: Description = %q, want %q (Layer C should only fire on UserPromptSubmit/Stop)", ev, got.Description, before)
+			}
+			if enh.calls != 0 {
+				t.Errorf("%s: enhancer.TryGenerate calls = %d, want 0", ev, enh.calls)
+			}
+		})
+	}
+}
+
+// TestManager_TryUpgradeDescription_BranchPopulated_StillFires locks in the
+// F001 fix: once captureOutputTmux populates CurrentBranch / IsWorktree, the
+// baseline used for the equality guard must still match the value stored at
+// create time (which knew nothing about branch/worktree). If the two baselines
+// diverge, Layer C is silently disabled for every real Claude session.
+func TestManager_TryUpgradeDescription_BranchPopulated_StillFires(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/upgrade-branch-populated"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	if sess.DescriptionLocked {
+		t.Fatal("precondition: auto-generated description should be unlocked")
+	}
+
+	// Simulate the poller having filled in git/worktree metadata. Prior to the
+	// F001 fix these would flip the guard's baseline to a value the stored
+	// Description no longer matched, aborting the upgrade.
+	mgr.mu.Lock()
+	sess.CurrentBranch = "main"
+	sess.IsWorktree = true
+	sess.TmuxWindowName = "jin-abc"
+	mgr.mu.Unlock()
+
+	enh := &stubEnhancer{response: "post-poll upgrade", ok: true}
+	mgr.TryUpgradeDescription(sess.ID, enh)
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "post-poll upgrade" {
+		t.Errorf("Description = %q, want %q (baseline guard must ignore runtime branch/worktree fields)", got.Description, "post-poll upgrade")
+	}
+	if enh.calls != 1 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 1", enh.calls)
+	}
+}
+
+// TestManager_SetDescription_WhitespaceOnly_Unlocks confirms F006: a value
+// consisting only of whitespace behaves like the empty-string unlock path
+// rather than being persisted verbatim.
+func TestManager_SetDescription_WhitespaceOnly_Unlocks(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{
+		WorkDir:     "/tmp/set-description-whitespace",
+		Description: "manual label",
+	})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	if !sess.DescriptionLocked {
+		t.Fatal("precondition: session with explicit Description should be locked")
+	}
+
+	if err := mgr.SetDescription(sess.ID, "   \t \n "); err != nil {
+		t.Fatalf("SetDescription: %v", err)
+	}
+
+	got, _ := mgr.Get(sess.ID)
+	baseline := GenerateBaselineDescription(sess.WorkDir, "", false, "")
+	if got.Description != baseline {
+		t.Errorf("Description = %q, want baseline %q (whitespace-only value should reset to baseline)", got.Description, baseline)
+	}
+	if got.DescriptionLocked {
+		t.Error("DescriptionLocked = true, want false (whitespace-only value should unlock)")
 	}
 }

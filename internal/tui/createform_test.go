@@ -28,12 +28,8 @@ func newWorktreeStepModel(t *testing.T, dir string) CreateFormModel {
 	fleet.SetValue("default")
 	fleet.Focus()
 
-	name := textinput.New()
-	name.SetValue(filepath.Base(dir))
-
 	return CreateFormModel{
 		dirPicker:  dp,
-		nameInput:  name,
 		fleetInput: fleet,
 		step:       stepFleet,
 	}
@@ -131,6 +127,63 @@ func TestCreateForm_StepWorktree_EscReturnsToFleet(t *testing.T) {
 	gotEsc := afterEsc.(CreateFormModel)
 	if gotEsc.step != stepFleet {
 		t.Errorf("after Esc: step = %v, want stepFleet", gotEsc.step)
+	}
+}
+
+// --- stepFleet (skip-description flow) ---
+
+// newFleetStepModel drives updateWorkDirStep with a directory already selected
+// so the model lands in stepFleet — the manual-description step was removed
+// (Layer A + Layer C cover it), so stepWorkDir now jumps straight to fleet.
+func newFleetStepModel(t *testing.T, dir string) CreateFormModel {
+	t.Helper()
+
+	dp := NewDirPickerModel(dir)
+	dp.result = dir
+	dp.selected = true
+
+	m := CreateFormModel{
+		step:       stepWorkDir,
+		dirPicker:  dp,
+		fleetInput: textinput.New(),
+	}
+
+	updated, _ := m.updateWorkDirStep(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return updated.(CreateFormModel)
+}
+
+func TestCreateForm_WorkDirTransitionsDirectlyToFleet(t *testing.T) {
+	// Confirms the flow skips the removed stepDescription and focuses the
+	// fleet input, so the user's first typed character after picking a
+	// directory reaches fleetInput, not a dead description field.
+	dir := t.TempDir()
+	got := newFleetStepModel(t, dir)
+
+	if got.step != stepFleet {
+		t.Fatalf("step = %v, want stepFleet", got.step)
+	}
+	if !got.fleetInput.Focused() {
+		t.Error("fleetInput should be focused after entering stepFleet")
+	}
+}
+
+func TestCreateForm_StepFleet_EscReturnsToWorkDir(t *testing.T) {
+	// Fleet used to Esc back into stepDescription; with that step gone, Esc
+	// must clear dirPicker.selected so the user can pick a different dir.
+	dir := t.TempDir()
+	m := newFleetStepModel(t, dir)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(CreateFormModel)
+
+	if got.step != stepWorkDir {
+		t.Errorf("after Esc: step = %v, want stepWorkDir", got.step)
+	}
+	if got.dirPicker.selected {
+		t.Error("dirPicker.selected should be reset to false so the user can re-pick a dir")
+	}
+	if got.fleetInput.Focused() {
+		t.Error("fleetInput should be blurred after Esc")
 	}
 }
 

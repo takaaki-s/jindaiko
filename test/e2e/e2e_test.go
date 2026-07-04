@@ -83,9 +83,9 @@ func TestE2E_SessionLifecycle(t *testing.T) {
 
 	// Create session
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "e2e-test",
-		WorkDir: t.TempDir(), // Use a real directory
-		Start:   false,       // Don't start (tmux jin session may not exist)
+		Description: "e2e-test",
+		WorkDir:     t.TempDir(), // Use a real directory
+		Start:       false,       // Don't start (tmux jin session may not exist)
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -93,8 +93,8 @@ func TestE2E_SessionLifecycle(t *testing.T) {
 	if info.ID == "" {
 		t.Fatal("session ID is empty")
 	}
-	if info.Name != "e2e-test" {
-		t.Errorf("Name: got %q, want %q", info.Name, "e2e-test")
+	if info.Description != "e2e-test" {
+		t.Errorf("Description: got %q, want %q", info.Description, "e2e-test")
 	}
 	if info.Status != session.StatusStopped {
 		t.Errorf("Status: got %q, want %q", info.Status, session.StatusStopped)
@@ -127,9 +127,9 @@ func TestE2E_HookEventFlow(t *testing.T) {
 	client := setupE2E(t)
 
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "hook-e2e",
-		WorkDir: t.TempDir(),
-		Start:   false,
+		Description: "hook-e2e",
+		WorkDir:     t.TempDir(),
+		Start:       false,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -199,9 +199,9 @@ func TestE2E_NotificationHistory(t *testing.T) {
 
 	// Create session and trigger a Stop hook (generates task_complete notification)
 	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Name:    "notify-e2e",
-		WorkDir: t.TempDir(),
-		Start:   false,
+		Description: "notify-e2e",
+		WorkDir:     t.TempDir(),
+		Start:       false,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -235,9 +235,9 @@ func TestE2E_MultipleSessionsConcurrent(t *testing.T) {
 	ids := make([]string, 5)
 	for i := range 5 {
 		info, _, err := client.NewWithOptions(daemon.NewOptions{
-			Name:    filepath.Base(t.TempDir()), // unique name
-			WorkDir: t.TempDir(),
-			Start:   false,
+			Description: filepath.Base(t.TempDir()), // unique name
+			WorkDir:     t.TempDir(),
+			Start:       false,
 		})
 		if err != nil {
 			t.Fatalf("New(%d): %v", i, err)

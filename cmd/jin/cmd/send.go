@@ -16,12 +16,13 @@ type sendResult struct {
 }
 
 var sendCmd = &cobra.Command{
-	Use:     "send <session-name> <prompt>",
+	Use:     "send <selector> <prompt>",
 	Aliases: []string{"prompt"},
 	Short:   "Send a prompt to a session",
 	Long: `Send a prompt to a Claude Code session. The session must be in idle status.
+The selector may be an ID prefix or a description substring (case-insensitive).
 
-Multiple arguments after the session name are joined with spaces:
+Multiple arguments after the selector are joined with spaces:
   jin session send my-session Fix the bug
   jin session send my-session "Fix the bug"   # equivalent
 

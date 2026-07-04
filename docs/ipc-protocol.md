@@ -38,22 +38,34 @@ type Response struct {
 | `hook` | `HookRequest` | Claude Code hook event |
 | `notification-history` | (none) | Get notification history |
 | `result` | `ResultRequest` | Fetch structured transcript entries (orchestration) |
+| `set-description` | `SetDescriptionRequest` | Update session description (empty resets to auto-generated) |
 
 ## Request Types
 
 ```go
 type NewRequest struct {
-    Name        string `json:"name"`
+    Description string `json:"description"`
     WorkDir     string `json:"work_dir"`
     Start       bool   `json:"start"`
-    SSHAuthSock string `json:"ssh_auth_sock,omitempty"` // SSH_AUTH_SOCK (for git operations)
-    Fleet       string `json:"fleet"`                   // Fleet name for session grouping
+    Fleet       string `json:"fleet"`                     // Fleet name for session grouping
 
     Worktree       bool   `json:"worktree,omitempty"`        // Create a git worktree for this session
     WorktreeName   string `json:"worktree_name,omitempty"`   // Override auto-generated worktree name
     WorktreeBranch string `json:"worktree_branch,omitempty"` // Override auto-generated branch name
     WorktreeBase   string `json:"worktree_base,omitempty"`   // Override auto-detected base branch
     NoHook         bool   `json:"no_hook,omitempty"`         // Skip .jin/worktree-post-create.sh hook
+}
+
+// SetDescriptionRequest updates a session's description. An empty Description
+// unlocks the session and regenerates the Layer A baseline; a non-empty value
+// locks the description against Layer C auto-upgrade.
+type SetDescriptionRequest struct {
+    ID          string `json:"id"`
+    Description string `json:"description"` // no omitempty: empty string means "unlock"
+}
+
+type SetDescriptionResponse struct {
+    Session session.Info `json:"session"`
 }
 
 type IDRequest struct {

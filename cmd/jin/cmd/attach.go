@@ -11,29 +11,17 @@ import (
 )
 
 var attachCmd = &cobra.Command{
-	Use:               "attach <session-name>",
+	Use:               "attach <selector>",
 	Short:             "Attach to a session",
-	Long:              `Attach to a Claude Code session. Stopped sessions are automatically resumed. You can specify either session name or ID.`,
+	Long:              `Attach to a Claude Code session. Stopped sessions are automatically resumed. The selector may be an ID prefix or a description substring (case-insensitive).`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		nameOrID := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessions, err := client.List()
+		sess, err := resolveSelector(client, args[0])
 		if err != nil {
 			return err
-		}
-
-		var sess *session.Info
-		for i := range sessions {
-			if sessions[i].Name == nameOrID || sessions[i].ID == nameOrID {
-				sess = &sessions[i]
-				break
-			}
-		}
-		if sess == nil {
-			return fmt.Errorf("session not found: %s", nameOrID)
 		}
 
 		if sess.Status == session.StatusCreating {
@@ -45,7 +33,7 @@ var attachCmd = &cobra.Command{
 			if err := client.Start(sess.ID); err != nil {
 				return fmt.Errorf("failed to start session: %w", err)
 			}
-			fmt.Printf("Resuming session: %s\n", sess.Name)
+			fmt.Printf("Resuming session: %s\n", sess.Description)
 		}
 
 		// Determine tmux window name

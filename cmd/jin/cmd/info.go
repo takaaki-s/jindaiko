@@ -12,9 +12,9 @@ import (
 )
 
 var infoCmd = &cobra.Command{
-	Use:               "info <session-name>",
+	Use:               "info <selector>",
 	Short:             "Show detailed information about a session",
-	Long:              `Show detailed information about a Claude Code session. You can specify either session name or ID.`,
+	Long:              `Show detailed information about a Claude Code session. The selector may be an ID prefix or a description substring (case-insensitive).`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,7 +46,7 @@ func renderSessionInfoJSON(w io.Writer, info *session.Info) error {
 
 func renderSessionInfoText(w io.Writer, info *session.Info) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "Name:\t%s\n", info.Name)
+	fmt.Fprintf(tw, "Description:\t%s\n", info.Description)
 	fmt.Fprintf(tw, "ID:\t%s\n", info.ID)
 	fmt.Fprintf(tw, "Status:\t%s\n", info.Status)
 	fmt.Fprintf(tw, "WorkDir:\t%s\n", info.WorkDir)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/takaaki-s/honjin/internal/config"
@@ -56,10 +55,10 @@ func (c *Client) send(req Request) (*Response, error) {
 
 // NewOptions contains options for creating a new session
 type NewOptions struct {
-	Name    string
-	WorkDir string
-	Start   bool
-	Fleet   string // Fleet name for session grouping
+	Description string
+	WorkDir     string
+	Start       bool
+	Fleet       string // Fleet name for session grouping
 
 	Worktree       bool   // Create a git worktree for this session
 	WorktreeName   string // Override auto-generated worktree name
@@ -70,11 +69,11 @@ type NewOptions struct {
 
 // New creates a new session. Any non-fatal creation warning is discarded;
 // callers that want to surface it should use NewWithOptions instead.
-func (c *Client) New(name, workDir string, start bool) (*session.Info, error) {
+func (c *Client) New(description, workDir string, start bool) (*session.Info, error) {
 	info, _, err := c.NewWithOptions(NewOptions{
-		Name:    name,
-		WorkDir: workDir,
-		Start:   start,
+		Description: description,
+		WorkDir:     workDir,
+		Start:       start,
 	})
 	return info, err
 }
@@ -84,18 +83,10 @@ func (c *Client) New(name, workDir string, start bool) (*session.Info, error) {
 // surface) — see NewResponse. It is only attached to the create response,
 // never to subsequent Get/List calls.
 func (c *Client) NewWithOptions(opts NewOptions) (*session.Info, string, error) {
-	data, _ := json.Marshal(NewRequest{
-		Name:           opts.Name,
-		WorkDir:        opts.WorkDir,
-		Start:          opts.Start,
-		SSHAuthSock:    os.Getenv("SSH_AUTH_SOCK"),
-		Fleet:          opts.Fleet,
-		Worktree:       opts.Worktree,
-		WorktreeName:   opts.WorktreeName,
-		WorktreeBranch: opts.WorktreeBranch,
-		WorktreeBase:   opts.WorktreeBase,
-		NoHook:         opts.NoHook,
-	})
+	// NewRequest and NewOptions share a field layout by design (see server.go).
+	// The conversion keeps them in lockstep without an error-prone field-by-field
+	// copy; NewRequest's JSON tags apply on Marshal regardless.
+	data, _ := json.Marshal(NewRequest(opts))
 
 	resp, err := c.send(Request{Action: "new", Data: data})
 	if err != nil {
@@ -223,6 +214,21 @@ func (c *Client) Delete(id string, removeWorktree, forceRemoveWorktree bool) err
 		if strings.Contains(resp.Error, session.ErrNotWorktree.Error()) {
 			return session.ErrNotWorktree
 		}
+		return errors.New(resp.Error)
+	}
+	return nil
+}
+
+// SetDescription updates a session's description. An empty description unlocks
+// the session and regenerates the Layer A baseline; a non-empty description
+// locks it (Layer B manual override).
+func (c *Client) SetDescription(id, description string) error {
+	data, _ := json.Marshal(SetDescriptionRequest{ID: id, Description: description})
+	resp, err := c.send(Request{Action: "set-description", Data: data})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
 		return errors.New(resp.Error)
 	}
 	return nil

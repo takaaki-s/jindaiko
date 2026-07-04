@@ -11,11 +11,11 @@ import (
 )
 
 var editCmd = &cobra.Command{
-	Use:   "edit <session-name>",
+	Use:   "edit <selector>",
 	Short: "Open editor in session's working directory",
 	Long: `Open the editor (specified by EDITOR environment variable) in the session's working directory.
 
-If EDITOR is not set, defaults to 'vim'.
+If EDITOR is not set, defaults to 'vim'. The selector may be an ID prefix or a description substring (case-insensitive).
 
 Examples:
   jin session edit my-session
@@ -23,25 +23,16 @@ Examples:
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		nameOrID := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessions, err := client.List()
+		sess, err := resolveSelector(client, args[0])
 		if err != nil {
-			return fmt.Errorf("failed to list sessions: %w", err)
+			return err
 		}
-
-		var workDir string
-		for _, s := range sessions {
-			if s.Name == nameOrID || s.ID == nameOrID {
-				workDir = s.WorkDir
-				break
-			}
+		if sess.WorkDir == "" {
+			return fmt.Errorf("session %s has no working directory", sess.Description)
 		}
-
-		if workDir == "" {
-			return fmt.Errorf("session not found or has no working directory: %s", nameOrID)
-		}
+		workDir := sess.WorkDir
 
 		editor := os.Getenv("EDITOR")
 		if editor == "" {

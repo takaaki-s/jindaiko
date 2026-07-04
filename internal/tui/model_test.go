@@ -156,7 +156,7 @@ func TestTimeAgo(t *testing.T) {
 
 func TestMatchesSearch(t *testing.T) {
 	sess := session.Info{
-		Name:           "MyProject",
+		Description:    "MyProject",
 		WorkDir:        "/home/user/projects/webapp",
 		CurrentWorkDir: "/home/user/projects/webapp/src",
 		CurrentBranch:  "feature-auth",
@@ -204,8 +204,8 @@ func TestMatchesSearch(t *testing.T) {
 
 	t.Run("match by Fleet", func(t *testing.T) {
 		fleetSess := session.Info{
-			Name:  "session1",
-			Fleet: "backend",
+			Description: "session1",
+			Fleet:       "backend",
 		}
 		if !matchesSearch(fleetSess, "backend") {
 			t.Error("matchesSearch should match by Fleet name")
@@ -796,7 +796,7 @@ func TestGetTotalPages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sessions := make([]session.Info, tt.numSessions)
 			for i := range sessions {
-				sessions[i] = session.Info{ID: string(rune('a' + i)), Name: "s"}
+				sessions[i] = session.Info{ID: string(rune('a' + i)), Description: "s"}
 			}
 			m := Model{
 				sessions: sessions,
@@ -816,7 +816,7 @@ func TestGetPageSessions(t *testing.T) {
 	// Create 10 sessions named s0..s9
 	sessions := make([]session.Info, 10)
 	for i := range sessions {
-		sessions[i] = session.Info{ID: string(rune('0' + i)), Name: "s" + string(rune('0'+i))}
+		sessions[i] = session.Info{ID: string(rune('0' + i)), Description: "s" + string(rune('0'+i))}
 	}
 
 	t.Run("first page", func(t *testing.T) {
@@ -829,11 +829,11 @@ func TestGetPageSessions(t *testing.T) {
 		if len(got) != 7 {
 			t.Fatalf("getPageSessions() page 0 len = %d, want 7", len(got))
 		}
-		if got[0].Name != "s0" {
-			t.Errorf("first item Name = %q, want %q", got[0].Name, "s0")
+		if got[0].Description != "s0" {
+			t.Errorf("first item Name = %q, want %q", got[0].Description, "s0")
 		}
-		if got[6].Name != "s6" {
-			t.Errorf("last item Name = %q, want %q", got[6].Name, "s6")
+		if got[6].Description != "s6" {
+			t.Errorf("last item Name = %q, want %q", got[6].Description, "s6")
 		}
 	})
 
@@ -847,11 +847,11 @@ func TestGetPageSessions(t *testing.T) {
 		if len(got) != 3 {
 			t.Fatalf("getPageSessions() page 1 len = %d, want 3", len(got))
 		}
-		if got[0].Name != "s7" {
-			t.Errorf("first item Name = %q, want %q", got[0].Name, "s7")
+		if got[0].Description != "s7" {
+			t.Errorf("first item Name = %q, want %q", got[0].Description, "s7")
 		}
-		if got[2].Name != "s9" {
-			t.Errorf("last item Name = %q, want %q", got[2].Name, "s9")
+		if got[2].Description != "s9" {
+			t.Errorf("last item Name = %q, want %q", got[2].Description, "s9")
 		}
 	})
 
@@ -865,8 +865,8 @@ func TestGetPageSessions(t *testing.T) {
 		if len(got) != 7 {
 			t.Fatalf("getPageSessions() beyond range len = %d, want 7", len(got))
 		}
-		if got[0].Name != "s0" {
-			t.Errorf("first item Name = %q, want %q", got[0].Name, "s0")
+		if got[0].Description != "s0" {
+			t.Errorf("first item Name = %q, want %q", got[0].Description, "s0")
 		}
 	})
 
@@ -887,9 +887,9 @@ func TestGetPageSessions(t *testing.T) {
 
 func TestApplySearchFilter(t *testing.T) {
 	sessions := []session.Info{
-		{Name: "frontend", WorkDir: "/home/user/webapp"},
-		{Name: "backend", WorkDir: "/home/user/api"},
-		{Name: "docs", WorkDir: "/home/user/documentation"},
+		{Description: "frontend", WorkDir: "/home/user/webapp"},
+		{Description: "backend", WorkDir: "/home/user/api"},
+		{Description: "docs", WorkDir: "/home/user/documentation"},
 	}
 
 	t.Run("empty query returns all sessions", func(t *testing.T) {
@@ -919,8 +919,8 @@ func TestApplySearchFilter(t *testing.T) {
 		if len(m.filteredSessions) != 1 {
 			t.Fatalf("applySearchFilter('front'): got %d sessions, want 1", len(m.filteredSessions))
 		}
-		if m.filteredSessions[0].Name != "frontend" {
-			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Name, "frontend")
+		if m.filteredSessions[0].Description != "frontend" {
+			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Description, "frontend")
 		}
 	})
 
@@ -936,8 +936,8 @@ func TestApplySearchFilter(t *testing.T) {
 		if len(m.filteredSessions) != 1 {
 			t.Fatalf("applySearchFilter('api'): got %d sessions, want 1", len(m.filteredSessions))
 		}
-		if m.filteredSessions[0].Name != "backend" {
-			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Name, "backend")
+		if m.filteredSessions[0].Description != "backend" {
+			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Description, "backend")
 		}
 	})
 
@@ -968,8 +968,8 @@ func TestApplySearchFilter(t *testing.T) {
 		if len(m.filteredSessions) != 1 {
 			t.Fatalf("applySearchFilter('DOCS'): got %d sessions, want 1", len(m.filteredSessions))
 		}
-		if m.filteredSessions[0].Name != "docs" {
-			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Name, "docs")
+		if m.filteredSessions[0].Description != "docs" {
+			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Description, "docs")
 		}
 	})
 }
@@ -1027,9 +1027,9 @@ func TestGroupSessionsByFleet(t *testing.T) {
 
 	t.Run("groups by fleet name", func(t *testing.T) {
 		sessions := []session.Info{
-			{ID: "1", Name: "s1", Fleet: "backend", CreatedAt: now},
-			{ID: "2", Name: "s2", Fleet: "frontend", CreatedAt: now},
-			{ID: "3", Name: "s3", Fleet: "backend", CreatedAt: now.Add(time.Minute)},
+			{ID: "1", Description: "s1", Fleet: "backend", CreatedAt: now},
+			{ID: "2", Description: "s2", Fleet: "frontend", CreatedAt: now},
+			{ID: "3", Description: "s3", Fleet: "backend", CreatedAt: now.Add(time.Minute)},
 		}
 
 		groups := groupSessionsByFleet(sessions)
@@ -1049,9 +1049,9 @@ func TestGroupSessionsByFleet(t *testing.T) {
 
 	t.Run("default fleet is last", func(t *testing.T) {
 		sessions := []session.Info{
-			{ID: "1", Name: "s1", Fleet: session.DefaultFleet, CreatedAt: now},
-			{ID: "2", Name: "s2", Fleet: "alpha", CreatedAt: now},
-			{ID: "3", Name: "s3", Fleet: "beta", CreatedAt: now},
+			{ID: "1", Description: "s1", Fleet: session.DefaultFleet, CreatedAt: now},
+			{ID: "2", Description: "s2", Fleet: "alpha", CreatedAt: now},
+			{ID: "3", Description: "s3", Fleet: "beta", CreatedAt: now},
 		}
 
 		groups := groupSessionsByFleet(sessions)
@@ -1071,8 +1071,8 @@ func TestGroupSessionsByFleet(t *testing.T) {
 
 	t.Run("sessions with default fleet group correctly", func(t *testing.T) {
 		sessions := []session.Info{
-			{ID: "1", Name: "s1", Fleet: session.DefaultFleet, CreatedAt: now},
-			{ID: "2", Name: "s2", Fleet: session.DefaultFleet, CreatedAt: now},
+			{ID: "1", Description: "s1", Fleet: session.DefaultFleet, CreatedAt: now},
+			{ID: "2", Description: "s2", Fleet: session.DefaultFleet, CreatedAt: now},
 		}
 
 		groups := groupSessionsByFleet(sessions)
@@ -1089,7 +1089,7 @@ func TestGroupSessionsByFleet(t *testing.T) {
 
 	t.Run("single fleet still returns one group", func(t *testing.T) {
 		sessions := []session.Info{
-			{ID: "1", Name: "s1", Fleet: "only", CreatedAt: now},
+			{ID: "1", Description: "s1", Fleet: "only", CreatedAt: now},
 		}
 
 		groups := groupSessionsByFleet(sessions)
@@ -1112,7 +1112,7 @@ func TestSkipDeletingSessions(t *testing.T) {
 	makeSessions := func(ids ...string) []session.Info {
 		var ss []session.Info
 		for _, id := range ids {
-			ss = append(ss, session.Info{ID: id, Name: id})
+			ss = append(ss, session.Info{ID: id, Description: id})
 		}
 		return ss
 	}
@@ -1216,7 +1216,7 @@ func TestDeleteConfirmMoveCursorToNextSession(t *testing.T) {
 	makeSessions := func(ids ...string) []session.Info {
 		var ss []session.Info
 		for _, id := range ids {
-			ss = append(ss, session.Info{ID: id, Name: id})
+			ss = append(ss, session.Info{ID: id, Description: id})
 		}
 		return ss
 	}
@@ -1263,9 +1263,9 @@ func TestDeleteConfirmMoveCursorToNextSession(t *testing.T) {
 
 func TestRenderSession_ViewedState(t *testing.T) {
 	sess := session.Info{
-		ID:     "test-id",
-		Name:   "test-session",
-		Status: session.StatusIdle,
+		ID:          "test-id",
+		Description: "test-session",
+		Status:      session.StatusIdle,
 	}
 	m := Model{}
 	width := 40

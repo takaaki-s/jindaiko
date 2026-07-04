@@ -149,7 +149,7 @@ type Model struct {
 	// Delete confirmation
 	confirmDelete          bool   // Whether delete confirmation is active
 	deleteTargetID         string // Session ID to delete
-	deleteTargetName       string // Session name to delete (for display)
+	deleteTargetDesc       string // Session description to delete (for display)
 	deleteTargetIsWorktree bool   // Whether the session is in a git worktree
 	confirmWorktreeForce   bool   // Whether force-delete worktree confirmation is active
 
@@ -159,7 +159,7 @@ type Model struct {
 	// Kill confirmation
 	confirmKill    bool   // Whether kill confirmation is active
 	killTargetID   string // Session ID to kill
-	killTargetName string // Session name to kill (for display)
+	killTargetDesc string // Session description to kill (for display)
 
 	// Focus tracking (for visual focus indicator)
 	focused bool // true when TUI pane has focus (changes border/title color)
@@ -181,6 +181,11 @@ type Model struct {
 	// Processing indicator
 	processingMsg    string // Processing message (overlay displayed when non-empty)
 	waitingForResize bool   // Waiting for WindowSizeMsg (resize completion after ZoomPane)
+
+	// Last Description pushed to the display pane's `@session_name` tmux
+	// variable. Used to detect Layer C description upgrades between polls so
+	// the tmux status bar template picks them up without a manual switch.
+	lastDisplayedDesc string
 
 	// Search/Filter mode
 	searching        bool            // true when search mode is active
@@ -304,7 +309,7 @@ func (m *Model) getDisplaySessions() []session.Info {
 // across any of the target fields (Name, WorkDir, CurrentWorkDir, CurrentBranch).
 func matchesSearch(sess session.Info, query string) bool {
 	fields := []string{
-		sess.Name,
+		sess.Description,
 		sess.WorkDir,
 		sess.CurrentWorkDir,
 		sess.CurrentBranch,
@@ -408,18 +413,18 @@ func (m *Model) switchToSession(sessionID string) {
 		if sess.ErrorMessage != "" {
 			placeholderCmd = fmt.Sprintf(
 				"printf '\\n  Session: %s\\n  Status:  %s\\n\\n  Error:\\n%s\\n'; tail -f /dev/null",
-				sess.Name, sess.Status, sess.ErrorMessage,
+				sess.Description, sess.Status, sess.ErrorMessage,
 			)
 		} else {
 			placeholderCmd = fmt.Sprintf(
 				"printf '\\n  Session: %s\\n  Status:  %s\\n\\n  Press Enter to restart\\n'; tail -f /dev/null",
-				sess.Name, sess.Status,
+				sess.Description, sess.Status,
 			)
 		}
 		_ = m.tmuxClient.RespawnPane(m.displayPaneID, placeholderCmd)
 		m.currentSessionID = sessionID
 		_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
-		_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
+		m.pushDisplayedDescription(sess.Description)
 		return
 	}
 
@@ -435,7 +440,7 @@ func (m *Model) switchToSession(sessionID string) {
 			if m.innerTmuxClient.SwitchClient(paneTTY, sess.TmuxWindowName) == nil {
 				m.currentSessionID = sessionID
 				_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
-				_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
+				m.pushDisplayedDescription(sess.Description)
 				return
 			}
 		}
@@ -454,7 +459,7 @@ func (m *Model) switchToSession(sessionID string) {
 
 	m.currentSessionID = sessionID
 	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
-	_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
+	m.pushDisplayedDescription(sess.Description)
 }
 
 // detachInnerClient detaches the inner tmux client running in the display pane.
@@ -468,6 +473,42 @@ func (m *Model) detachInnerClient() {
 		return
 	}
 	_ = m.innerTmuxClient.DetachClientByTTY(paneTTY)
+}
+
+// pushDisplayedDescription sets the display pane's `@session_name` tmux
+// variable and records the value locally so refreshDisplayedDescription can
+// detect drift without re-issuing set-option every poll.
+func (m *Model) pushDisplayedDescription(desc string) {
+	if m.tmuxClient == nil || m.displayPaneID == "" {
+		return
+	}
+	_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", desc)
+	m.lastDisplayedDesc = desc
+}
+
+// refreshDisplayedDescription re-pushes `@session_name` when the currently
+// displayed session's Description has changed since the last poll (e.g.
+// Layer C promoted the baseline to a transcript-derived label). Cheap: it
+// walks m.sessions once and calls set-option at most once per drift.
+func (m *Model) refreshDisplayedDescription() {
+	if m.tmuxClient == nil || m.displayPaneID == "" || m.currentSessionID == "" {
+		return
+	}
+	// Skip synthetic placeholders (e.g. "_empty" from respawnPlaceholder).
+	if strings.HasPrefix(m.currentSessionID, "_") {
+		return
+	}
+	for i := range m.sessions {
+		if m.sessions[i].ID != m.currentSessionID {
+			continue
+		}
+		desc := m.sessions[i].Description
+		if desc == m.lastDisplayedDesc {
+			return
+		}
+		m.pushDisplayedDescription(desc)
+		return
+	}
 }
 
 // respawnPlaceholder replaces the display pane with a placeholder command.
@@ -671,7 +712,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil // ignore if not a worktree
 				}
 				deleteID := m.deleteTargetID
-				deleteName := m.deleteTargetName
+				deleteName := m.deleteTargetDesc
 				m.deletingIDs[deleteID] = true
 				m.resetDeleteState()
 				m.skipDeletingSessions(1)
@@ -713,7 +754,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				killID := m.killTargetID
 				m.killTargetID = ""
-				m.killTargetName = ""
+				m.killTargetDesc = ""
 
 				client := m.client
 
@@ -730,7 +771,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "n", "N", "esc":
 				m.confirmKill = false
 				m.killTargetID = ""
-				m.killTargetName = ""
+				m.killTargetDesc = ""
 				return m, nil
 			}
 			return m, nil
@@ -848,7 +889,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Enter confirmation mode
 				m.confirmKill = true
 				m.killTargetID = sess.ID
-				m.killTargetName = sess.Name
+				m.killTargetDesc = sess.Description
 				return m, nil
 			}
 
@@ -862,7 +903,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Enter confirmation mode
 				m.confirmDelete = true
 				m.deleteTargetID = sess.ID
-				m.deleteTargetName = sess.Name
+				m.deleteTargetDesc = sess.Description
 				m.deleteTargetIsWorktree = sess.IsWorktree
 				return m, nil
 			}
@@ -1026,6 +1067,11 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.switchToSession(pageSessions[m.cursor].ID)
 			}
 		}
+		// Refresh @session_name for the currently displayed session so the
+		// tmux status bar picks up Layer C description upgrades without a
+		// manual switch. Idempotent: only pushes when the Description changed
+		// since the last poll.
+		m.refreshDisplayedDescription()
 		m.processingMsg = ""
 		return m, nil
 
@@ -1044,7 +1090,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirmDelete = true
 		m.confirmWorktreeForce = true
 		m.deleteTargetID = msg.sessionID
-		m.deleteTargetName = msg.name
+		m.deleteTargetDesc = msg.name
 		m.deleteTargetIsWorktree = true
 
 	case deleteErrMsg:
@@ -1113,7 +1159,7 @@ func (m *Model) resetDeleteState() {
 	m.confirmDelete = false
 	m.confirmWorktreeForce = false
 	m.deleteTargetID = ""
-	m.deleteTargetName = ""
+	m.deleteTargetDesc = ""
 	m.deleteTargetIsWorktree = false
 }
 
@@ -1170,7 +1216,7 @@ func (m Model) renderDeleteConfirm() string {
 		)
 	} else if m.deleteTargetIsWorktree {
 		// Worktree session
-		name := truncateString(m.deleteTargetName, contentWidth-10)
+		name := truncateString(m.deleteTargetDesc, contentWidth-10)
 		lines = append(lines,
 			warnStyle.Render(fmt.Sprintf("Delete '%s'?", name)),
 			dimStyle.Render("Session is in a git worktree"),
@@ -1181,7 +1227,7 @@ func (m Model) renderDeleteConfirm() string {
 		)
 	} else {
 		// Normal session
-		name := truncateString(m.deleteTargetName, contentWidth-10)
+		name := truncateString(m.deleteTargetDesc, contentWidth-10)
 		lines = append(lines,
 			warnStyle.Render(fmt.Sprintf("Delete '%s'?", name)),
 			"",
@@ -1306,7 +1352,7 @@ func (m Model) renderListContent(contentWidth int) string {
 // renderHelpLine renders the help line at the bottom
 func (m Model) renderHelpLine() string {
 	if m.confirmKill {
-		name := truncateString(m.killTargetName, 20)
+		name := truncateString(m.killTargetDesc, 20)
 		confirmMsg := fmt.Sprintf(" Kill '%s'? y:yes n:no", name)
 		return lipgloss.NewStyle().Foreground(warningColor).Bold(true).Render(confirmMsg)
 	}
@@ -1324,7 +1370,10 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 	// Deleting sessions: dim rendering, not selectable
 	if m.deletingIDs[sess.ID] {
 		var b strings.Builder
-		name := truncateString(sess.Name, width-2)
+		name := truncateString(sess.Description, width-2)
+		if sess.DescriptionLocked && sess.Description != "" {
+			name += "*"
+		}
 		b.WriteString("  ")
 		b.WriteString(deletingStyle.Render(name))
 		b.WriteString("\n")
@@ -1353,7 +1402,10 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 
 	// --- Line 1: cursor + session name ---
 	availableForName := width - 2 // cursor(2)
-	name := truncateString(sess.Name, availableForName)
+	name := truncateString(sess.Description, availableForName)
+	if sess.DescriptionLocked && sess.Description != "" {
+		name += "*"
+	}
 
 	// renderLine renders a line with selected or viewed style (full-width background).
 	// Must only be called when selected || viewed is true.
@@ -1378,25 +1430,25 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 		b.WriteString("\n")
 	}
 
-	// Build metadata: workdir (branch)
-	var metaParts []string
-	// Use CurrentWorkDir if available, fall back to WorkDir
-	displayDir := sess.CurrentWorkDir
-	if displayDir == "" {
-		displayDir = sess.WorkDir
-	}
-	if displayDir != "" {
-		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
-			displayDir = "~" + displayDir[len(home):]
+	// Meta line: prefer the current git branch — Description already carries
+	// the repo/worktree identity, so the workdir path is redundant when we
+	// have a branch. For non-git sessions the branch is empty and we fall
+	// back to the short workdir so the user still sees where they are.
+	metaStr := sess.CurrentBranch
+	if metaStr == "" {
+		displayDir := sess.CurrentWorkDir
+		if displayDir == "" {
+			displayDir = sess.WorkDir
 		}
-		metaParts = append(metaParts, displayDir)
-	}
-	if sess.CurrentBranch != "" {
-		metaParts = append(metaParts, "("+sess.CurrentBranch+")")
+		if displayDir != "" {
+			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
+				displayDir = "~" + displayDir[len(home):]
+			}
+			metaStr = displayDir
+		}
 	}
 
 	statusStr := statusIcon + " " + statusLabel
-	metaStr := strings.Join(metaParts, " ")
 	indent := "  ├─ "
 	indentWidth := 5
 
@@ -1415,7 +1467,7 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 		b.WriteString("\n")
 	}
 
-	// --- Line 3: metadata ([host] repo (branch)) ---
+	// --- Line 3: git branch (falls back to short workdir for non-git dirs) ---
 	if metaStr != "" {
 		if selected || viewed {
 			renderLine(indent + metaStr)

@@ -29,21 +29,40 @@ func (s *Store) Save(session *Session) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// Load loads a session by ID
+// Load loads a session by ID. Legacy schema (top-level "name") is migrated
+// in-place to the current schema; the migrated JSON is written back to disk
+// so we only pay the cost once per session file.
 func (s *Store) Load(id string) (*Session, error) {
 	path := filepath.Join(s.dataDir, id+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var session Session
-	if err := json.Unmarshal(data, &session); err != nil {
+
+	migrated, changed, err := migrateSessionJSON(data)
+	if err != nil {
 		return nil, err
+	}
+
+	var session Session
+	if err := json.Unmarshal(migrated, &session); err != nil {
+		return nil, err
+	}
+
+	if changed {
+		if err := s.Save(&session); err != nil {
+			return nil, err
+		}
 	}
 	return &session, nil
 }
 
-// LoadAll loads all sessions
+// LoadAll loads all sessions.
+//
+// Files that fail Load (unparseable JSON, migration write-back failure, missing
+// permissions, ...) are skipped instead of aborting so a single corrupt file
+// doesn't strand every session. The individual failure is emitted via
+// debugLog so it still surfaces under JIN_DEBUG=1.
 func (s *Store) LoadAll() ([]*Session, error) {
 	entries, err := os.ReadDir(s.dataDir)
 	if err != nil {
@@ -61,7 +80,8 @@ func (s *Store) LoadAll() ([]*Session, error) {
 		id := entry.Name()[:len(entry.Name())-5] // Remove .json
 		session, err := s.Load(id)
 		if err != nil {
-			continue // Skip invalid sessions
+			debugLog("[LOAD] skip %s: %v", id, err)
+			continue
 		}
 		sessions = append(sessions, session)
 	}

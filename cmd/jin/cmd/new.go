@@ -18,14 +18,14 @@ var newCmd = &cobra.Command{
 
 Examples:
   jin session new --workdir ~/projects/myapp
-  jin session new --workdir . --name myapp
+  jin session new --workdir . --description myapp
   jin session new --workdir . --fleet backend
 
 For interactive session creation, use 'jin ui' (TUI).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		workDir, _ := cmd.Flags().GetString("workdir")
-		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
 		fleet, _ := cmd.Flags().GetString("fleet")
 		noStart, _ := cmd.Flags().GetBool("no-start")
 		worktree, _ := cmd.Flags().GetBool("worktree")
@@ -51,7 +51,7 @@ For interactive session creation, use 'jin ui' (TUI).`,
 
 		client := daemon.NewClient(getSocketPath())
 		s, warning, err := client.NewWithOptions(daemon.NewOptions{
-			Name:           name,
+			Description:    description,
 			WorkDir:        workDir,
 			Start:          !noStart,
 			Fleet:          fleet,
@@ -76,7 +76,7 @@ For interactive session creation, use 'jin ui' (TUI).`,
 			fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
 		}
 
-		fmt.Printf("Created session: %s (%s)\n", s.Name, s.ID)
+		fmt.Printf("Created session: %s (%s)\n", s.Description, s.ID)
 		fmt.Printf("Working directory: %s\n", s.WorkDir)
 		fmt.Printf("Status: %s\n", s.Status)
 		fmt.Printf("\nTo attach: jin session attach %s\n", s.ID)
@@ -87,8 +87,8 @@ For interactive session creation, use 'jin ui' (TUI).`,
 func init() {
 	sessionCmd.AddCommand(newCmd)
 
-	newCmd.Flags().StringP("workdir", "d", "", "Working directory (default: current directory)")
-	newCmd.Flags().StringP("name", "n", "", "Session name (default: directory basename)")
+	newCmd.Flags().String("workdir", "", "Working directory (default: current directory)")
+	newCmd.Flags().StringP("description", "d", "", "Human-readable session description (default: directory basename)")
 	newCmd.Flags().StringP("fleet", "f", "", "Fleet name for session grouping (default: \"default\")")
 	newCmd.Flags().Bool("no-start", false, "Don't start the session immediately")
 	newCmd.Flags().Bool("worktree", false, "Create a git worktree for this session (from the repo's default branch)")

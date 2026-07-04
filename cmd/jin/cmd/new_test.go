@@ -12,11 +12,11 @@ import (
 func TestRenderNewSessionJSON(t *testing.T) {
 	t.Run("outputs session info as JSON", func(t *testing.T) {
 		info := &session.Info{
-			ID:        "abc-123",
-			Name:      "my-session",
-			WorkDir:   "/home/user/project",
-			Status:    session.StatusCreating,
-			CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			ID:          "abc-123",
+			Description: "my-session",
+			WorkDir:     "/home/user/project",
+			Status:      session.StatusCreating,
+			CreatedAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		}
 		var buf bytes.Buffer
 		if err := renderNewSessionJSON(&buf, info); err != nil {
@@ -29,13 +29,47 @@ func TestRenderNewSessionJSON(t *testing.T) {
 		if parsed.ID != "abc-123" {
 			t.Errorf("expected id %q, got %q", "abc-123", parsed.ID)
 		}
-		if parsed.Name != "my-session" {
-			t.Errorf("expected name %q, got %q", "my-session", parsed.Name)
+		if parsed.Description != "my-session" {
+			t.Errorf("expected name %q, got %q", "my-session", parsed.Description)
 		}
 		if parsed.Status != session.StatusCreating {
 			t.Errorf("expected status %q, got %q", session.StatusCreating, parsed.Status)
 		}
 	})
+}
+
+// TestNewCmd_DescriptionFlagParse verifies the --description / -d flag is
+// registered on newCmd and both the long and short forms parse to the same
+// string value, without going through a daemon. Guarding the short form here
+// prevents an accidental collision with another sibling command's -d alias.
+func TestNewCmd_DescriptionFlagParse(t *testing.T) {
+	flags := newCmd.Flags()
+	t.Cleanup(func() { _ = flags.Set("description", "") })
+
+	if err := flags.Set("description", "long-form"); err != nil {
+		t.Fatalf("Set(description) via long form: %v", err)
+	}
+	got, err := flags.GetString("description")
+	if err != nil || got != "long-form" {
+		t.Errorf("long-form description: got (%q, %v), want (%q, nil)", got, err, "long-form")
+	}
+
+	short := flags.ShorthandLookup("d")
+	if short == nil {
+		t.Fatal("expected -d short flag to be registered")
+		return
+	}
+	if short.Name != "description" {
+		t.Errorf("-d resolves to flag %q, want %q", short.Name, "description")
+	}
+
+	if err := short.Value.Set("short-form"); err != nil {
+		t.Fatalf("Set(-d): %v", err)
+	}
+	got, err = flags.GetString("description")
+	if err != nil || got != "short-form" {
+		t.Errorf("short-form description: got (%q, %v), want (%q, nil)", got, err, "short-form")
+	}
 }
 
 // TestNewCmd_WorktreeFlagsParse verifies the --worktree* flags are registered

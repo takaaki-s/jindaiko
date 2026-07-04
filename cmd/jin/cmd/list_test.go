@@ -129,11 +129,11 @@ func TestRenderSessionListJSON(t *testing.T) {
 	t.Run("with sessions", func(t *testing.T) {
 		sessions := []session.Info{
 			{
-				ID:        "abc-123",
-				Name:      "my-session",
-				WorkDir:   "/home/user/project",
-				Status:    session.StatusIdle,
-				CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+				ID:          "abc-123",
+				Description: "my-session",
+				WorkDir:     "/home/user/project",
+				Status:      session.StatusIdle,
+				CreatedAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 			},
 		}
 		var buf bytes.Buffer
@@ -147,8 +147,8 @@ func TestRenderSessionListJSON(t *testing.T) {
 		if len(parsed) != 1 {
 			t.Errorf("expected 1 session, got %d", len(parsed))
 		}
-		if parsed[0].Name != "my-session" {
-			t.Errorf("expected name %q, got %q", "my-session", parsed[0].Name)
+		if parsed[0].Description != "my-session" {
+			t.Errorf("expected name %q, got %q", "my-session", parsed[0].Description)
 		}
 		if parsed[0].Status != session.StatusIdle {
 			t.Errorf("expected status %q, got %q", session.StatusIdle, parsed[0].Status)

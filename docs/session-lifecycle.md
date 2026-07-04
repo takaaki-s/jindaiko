@@ -39,17 +39,18 @@ Status constants (session/session.go):
 
 ```go
 Session (persisted)
-├─ ID              string    // UUID (compatible with Claude Code --session-id)
-├─ Name            string    // Display name (default: basename of WorkDir)
-├─ WorkDir         string    // Working directory (dynamically updated via hook cwd)
-├─ CreatedAt       time.Time // Creation timestamp
-├─ Status          Status
-├─ LastActiveAt    time.Time
-├─ ErrorMessage    string    // Error message (e.g., on startup failure)
-├─ ClaudeSessionID string    // Claude Code session ID
-├─ ClaudeSessionStarted bool // Used to determine --resume vs --session-id
-├─ TmuxWindowName  string    // Inner tmux session name
-└─ TmuxPaneID      string    // CC pane ID (e.g., "%42")
+├─ ID                  string    // UUID (compatible with Claude Code --session-id)
+├─ Description         string    // Human-readable label (see Description Model below)
+├─ DescriptionLocked   bool      // true = manual override, blocks Layer C auto-upgrade
+├─ WorkDir             string    // Working directory (dynamically updated via hook cwd)
+├─ CreatedAt           time.Time // Creation timestamp
+├─ Status              Status
+├─ LastActiveAt        time.Time
+├─ ErrorMessage        string    // Error message (e.g., on startup failure)
+├─ ClaudeSessionID     string    // Claude Code session ID
+├─ ClaudeSessionStarted bool     // Used to determine --resume vs --session-id
+├─ TmuxWindowName      string    // Inner tmux session name
+└─ TmuxPaneID          string    // CC pane ID (e.g., "%42")
 
 Session (runtime only, json:"-")
 ├─ LastOutputTime  time.Time // For idle stability detection
@@ -59,6 +60,27 @@ Session (runtime only, json:"-")
 ├─ CurrentBranch  string    // git branch
 └─ IsGitRepo      bool
 ```
+
+## Description Model
+
+Sessions carry a `Description` (human-readable label) that is separate from the technical `ID`. It is generated in three layers:
+
+- **Layer A (baseline)** — `GenerateBaselineDescription(workDir, branch, isWorktree, tmuxHint)` produces `<repo>[:<branch>][:<subpath>]` (e.g. `honjin:main`). Always populated at session creation, never empty. Agent-independent.
+- **Layer B (manual override)** — Set via `--description` on `session new`, the `set-description` subcommand, or the TUI description step. Sets `DescriptionLocked = true`, blocking Layer C.
+- **Layer C (agent-specific enhancer)** — On `UserPromptSubmit` hooks, if `DescriptionLocked = false` **and** the current Description still equals the Layer A baseline, the registered `DescriptionEnhancer` (currently `internal/agent/claude/CCDescriptionEnhancer`) inspects the first meaningful user prompt and upgrades the Description. Slash commands (`/init …`) without substantial args are treated as pending and skipped.
+
+### DescriptionLocked Lifecycle
+
+| Trigger | Description | DescriptionLocked |
+|---|---|---|
+| Session created (no `--description`) | Layer A output | `false` |
+| Session created with `--description "<v>"` | `<v>` | `true` |
+| `set-description <sel> "<v>"` (non-empty) | `<v>` | `true` |
+| `set-description <sel> ""` | Layer A regenerated | `false` (unlock) |
+| Layer C hook fires (locked = false, Description == baseline) | Enhancer output | `false` (unchanged) |
+| Layer C hook fires (locked = true) | unchanged | `true` |
+
+Legacy `Name` field is migrated on daemon startup: `store.Load()` reads the raw JSON, applies `migrateSessionJSON` (see `internal/session/migration.go`), and writes back the new schema. Migrated sessions are conservatively marked `DescriptionLocked = true` because a persisted Name is assumed to be a manual choice.
 
 ## Creation Flow
 

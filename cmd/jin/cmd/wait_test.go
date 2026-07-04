@@ -12,11 +12,11 @@ import (
 func TestRenderWaitResultJSON(t *testing.T) {
 	t.Run("outputs session info on wait completion", func(t *testing.T) {
 		info := &session.Info{
-			ID:        "abc-123",
-			Name:      "my-session",
-			Status:    session.StatusIdle,
-			WorkDir:   "/home/user/project",
-			CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			ID:          "abc-123",
+			Description: "my-session",
+			Status:      session.StatusIdle,
+			WorkDir:     "/home/user/project",
+			CreatedAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		}
 		var buf bytes.Buffer
 		if err := renderWaitResultJSON(&buf, info); err != nil {

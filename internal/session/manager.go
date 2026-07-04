@@ -43,6 +43,7 @@ type Manager struct {
 	tmuxClient tmux.Runner // tmux client for session management
 	hookRunner worktreehook.Runner
 	gitClient  *git.Client
+	ccEnhancer DescriptionEnhancer // Layer C description upgrader; nil disables Layer C
 	mu         sync.RWMutex
 	stateDir   string
 }
@@ -58,6 +59,13 @@ func (m *Manager) SetHookRunner(r worktreehook.Runner) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hookRunner = r
+}
+
+// SetDescriptionEnhancer installs the Layer C DescriptionEnhancer. Called once
+// at daemon startup; a nil enhancer keeps Layer C disabled without altering
+// any other behaviour.
+func (m *Manager) SetDescriptionEnhancer(e DescriptionEnhancer) {
+	m.ccEnhancer = e
 }
 
 // RecoverTmuxSessions checks for sessions with existing tmux windows after daemon restart
@@ -86,7 +94,7 @@ func (m *Manager) recoverTmuxSessionsLocked() {
 			if session.Status != StatusStopped && session.Status != StatusCreating {
 				session.Status = StatusStopped
 				_ = m.store.Save(session)
-				debugLog("[RECOVER] Session %s has active status but no tmux session, marked stopped", session.Name)
+				debugLog("[RECOVER] Session %s has active status but no tmux session, marked stopped", session.Description)
 			}
 			continue
 		}
@@ -96,7 +104,7 @@ func (m *Manager) recoverTmuxSessionsLocked() {
 			session.TmuxWindowName = ""
 			session.Status = StatusStopped
 			_ = m.store.Save(session)
-			debugLog("[RECOVER] Session %s inner tmux session gone, marked stopped", session.Name)
+			debugLog("[RECOVER] Session %s inner tmux session gone, marked stopped", session.Description)
 			continue
 		}
 
@@ -106,7 +114,7 @@ func (m *Manager) recoverTmuxSessionsLocked() {
 		if m.tmuxClient.IsPaneDead(target) {
 			session.Status = StatusStopped
 			_ = m.store.Save(session)
-			debugLog("[RECOVER] Session %s tmux pane dead, kept TmuxWindowName (session preserved)", session.Name)
+			debugLog("[RECOVER] Session %s tmux pane dead, kept TmuxWindowName (session preserved)", session.Description)
 			continue
 		}
 
@@ -114,7 +122,7 @@ func (m *Manager) recoverTmuxSessionsLocked() {
 		session.Status = StatusRunning
 		session.LastOutputTime = time.Now()
 		_ = m.store.Save(session)
-		debugLog("[RECOVER] Session %s has live inner tmux session, resuming monitoring", session.Name)
+		debugLog("[RECOVER] Session %s has live inner tmux session, resuming monitoring", session.Description)
 
 		go m.captureOutputTmux(session)
 	}
@@ -197,9 +205,9 @@ func NewManager(sessionsDir, stateDir string, configMgr *config.Manager) (*Manag
 
 // CreateOptions contains options for creating a new session
 type CreateOptions struct {
-	WorkDir string // Working directory path
-	Name    string // Session name (defaults to directory basename)
-	Fleet   string // Fleet name for session grouping; defaults to DefaultFleet if empty
+	WorkDir     string // Working directory path
+	Description string // Human-readable session description (empty = auto-generated)
+	Fleet       string // Fleet name for session grouping; defaults to DefaultFleet if empty
 
 	Worktree       bool   // Create a git worktree for this session
 	NoHook         bool   // Skip the worktree post-create hook (worktree path only)
@@ -235,11 +243,6 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 	// Pre-generate the session ID so the auto-derived worktree name can key
 	// off it. Also becomes Session.ID below so we only ever mint one UUID.
 	sessionID := uuid.New().String()
-
-	// Captured BEFORE the worktree block overwrites opts.WorkDir, so the
-	// default session name reflects the ORIGINAL repository basename rather
-	// than the auto-generated worktree directory name (e.g. "jin-abcd1234").
-	defaultName := filepath.Base(opts.WorkDir)
 
 	var (
 		worktreeCreated bool
@@ -366,7 +369,7 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 						Branch:       branch,
 						Base:         base,
 						SessionID:    sessionID,
-						SessionName:  opts.Name,
+						SessionName:  opts.Description,
 						LogPath:      logPath,
 						Timeout:      timeout,
 					})
@@ -396,36 +399,37 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 	// sessions for that directory.
 	for _, s := range m.sessions {
 		if s.WorkDir == opts.WorkDir && !git.IsClaudeWorktreePath(s.CurrentWorkDir) {
-			return nil, "", fmt.Errorf("session already exists for directory: %s (session: %s)", opts.WorkDir, s.Name)
+			return nil, "", fmt.Errorf("session already exists for directory: %s (session: %s)", opts.WorkDir, s.Description)
 		}
 	}
 
 	id := sessionID
 
-	// Determine session name (default: original repository basename)
-	name := opts.Name
-	if name == "" {
-		name = defaultName
-	}
-
-	// Check session name uniqueness
-	for _, s := range m.sessions {
-		if s.Name == name {
-			return nil, "", fmt.Errorf("session with name '%s' already exists. Use --name to specify a different name", name)
-		}
+	// Layer A: derive a repo-based baseline label when the caller did not
+	// supply a manual description. opts.WorkDir here is the *final* path (a
+	// worktree path in the worktree branch, otherwise the caller's request),
+	// which is the invariant GenerateBaselineDescription documents. The
+	// original repo name is intentionally *not* threaded into worktree
+	// sessions at this layer — Layer C is expected to enrich those later.
+	description := strings.TrimSpace(opts.Description)
+	locked := true
+	if description == "" {
+		description = GenerateBaselineDescription(opts.WorkDir, "", false, "")
+		locked = false
 	}
 
 	// Generate Claude session ID for session persistence
 	claudeSessionID := uuid.New().String()
 
 	session := &Session{
-		ID:              id,
-		Name:            name,
-		WorkDir:         opts.WorkDir,
-		CreatedAt:       time.Now(),
-		Status:          StatusStopped,
-		ClaudeSessionID: claudeSessionID,
-		Fleet:           opts.Fleet,
+		ID:                id,
+		Description:       description,
+		DescriptionLocked: locked,
+		WorkDir:           opts.WorkDir,
+		CreatedAt:         time.Now(),
+		Status:            StatusStopped,
+		ClaudeSessionID:   claudeSessionID,
+		Fleet:             opts.Fleet,
 		// Set IsWorktree immediately so the TUI delete modal offers the
 		// worktree removal option without waiting for the 10s
 		// captureOutputTmux poll cycle. `opts.Worktree` reflects "did we
@@ -543,7 +547,7 @@ func (m *Manager) SetWorkDir(id string, workDir string) error {
 	if workDir != "" {
 		for _, s := range m.sessions {
 			if s.ID != id && s.WorkDir == workDir && !git.IsClaudeWorktreePath(s.CurrentWorkDir) {
-				return fmt.Errorf("WorkDir already in use by session %s", s.Name)
+				return fmt.Errorf("WorkDir already in use by session %s", s.Description)
 			}
 		}
 	}
@@ -554,6 +558,78 @@ func (m *Manager) SetWorkDir(id string, workDir string) error {
 		_ = m.store.Save(session)
 	}
 	return nil
+}
+
+// SetDescription updates a session's description. Passing an empty value
+// (or a whitespace-only value) clears the manual lock and regenerates the
+// Layer A baseline from the session's WorkDir, so subsequent Layer C upgrades
+// can take over again.
+//
+// The baseline is regenerated with the same (WorkDir, "", false, "") arguments
+// that CreateWithOptions and TryUpgradeDescription use, keeping all three
+// call sites' notion of "the baseline" byte-identical. Any drift here would
+// silently block Layer C from firing after unlock (see F001/F004).
+func (m *Manager) SetDescription(id string, desc string) error {
+	desc = strings.TrimSpace(desc)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("session %s not found", id)
+	}
+
+	if desc == "" {
+		session.Description = GenerateBaselineDescription(session.WorkDir, "", false, "")
+		session.DescriptionLocked = false
+	} else {
+		session.Description = desc
+		session.DescriptionLocked = true
+	}
+	return m.store.Save(session)
+}
+
+// TryUpgradeDescription asks the given enhancer for a Layer C description and
+// applies it when three conditions hold: the session is not manually locked,
+// its current description still matches the Layer A baseline (i.e. Layer C has
+// not already fired), and the enhancer returns ok=true.
+//
+// The baseline-equality guard doubles as an "already upgraded" check without
+// needing a persisted attempt counter. Once Layer C mutates the description
+// off-baseline, every subsequent call short-circuits — even if the enhancer
+// runs on every UserPromptSubmit hook.
+//
+// A nil enhancer (or an unknown session id) is a silent no-op so callers do
+// not need to guard hook wiring.
+func (m *Manager) TryUpgradeDescription(id string, enhancer DescriptionEnhancer) {
+	if enhancer == nil {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	session, ok := m.sessions[id]
+	if !ok || session.DescriptionLocked {
+		return
+	}
+
+	// Baseline must be computed with the same arguments CreateWithOptions and
+	// SetDescription use. Threading CurrentBranch / IsWorktree / TmuxWindowName
+	// here would make the comparison miss as soon as captureOutputTmux populates
+	// those runtime fields, silently disabling Layer C on the very first poll.
+	baseline := GenerateBaselineDescription(session.WorkDir, "", false, "")
+	if session.Description != baseline {
+		return
+	}
+
+	candidate, ok := enhancer.TryGenerate(session)
+	if !ok || candidate == "" {
+		return
+	}
+	session.Description = candidate
+	_ = m.store.Save(session)
 }
 
 // CountActive returns the number of active sessions (creating, running, thinking, permission)
@@ -718,7 +794,7 @@ func (m *Manager) startSessionTmux(session *Session) error {
 			session.LastOutputTime = time.Now()
 			session.StartedAt = time.Now()
 			_ = m.store.Save(session)
-			debugLog("[TMUX] Session %s CC revived via RespawnPane in inner session", session.Name)
+			debugLog("[TMUX] Session %s CC revived via RespawnPane in inner session", session.Description)
 			go m.captureOutputTmux(session)
 			return nil
 		}
@@ -816,7 +892,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 			m.mu.RUnlock()
 			return
 		}
-		sessionName := session.Name
+		sessionName := session.Description
 		m.mu.RUnlock()
 
 		// Check if pane process has exited
@@ -832,7 +908,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 			// If claude --resume fails immediately (within 10 seconds of startup),
 			// auto-restart with a fresh session ID using plain claude
 			if session.ClaudeSessionStarted && time.Since(session.StartedAt) < 10*time.Second {
-				debugLog("[TMUX] Session %s pane died quickly (resume likely failed), retrying with fresh claude", session.Name)
+				debugLog("[TMUX] Session %s pane died quickly (resume likely failed), retrying with fresh claude", session.Description)
 				newSessionID := uuid.New().String()
 				session.ClaudeSessionStarted = false
 				session.ClaudeSessionID = newSessionID
@@ -856,10 +932,10 @@ func (m *Manager) captureOutputTmux(session *Session) {
 					session.LastOutputTime = time.Now()
 					m.mu.Unlock()
 					_ = m.store.Save(session)
-					debugLog("[TMUX] Session %s restarted with fresh claude (session-id: %s)", session.Name, newSessionID)
+					debugLog("[TMUX] Session %s restarted with fresh claude (session-id: %s)", session.Description, newSessionID)
 					continue
 				}
-				debugLog("[TMUX] Session %s respawn failed after quick death", session.Name)
+				debugLog("[TMUX] Session %s respawn failed after quick death", session.Description)
 				m.mu.Lock()
 				if _, exists := m.sessions[session.ID]; !exists {
 					m.mu.Unlock()
@@ -923,7 +999,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 			if _, exists := m.sessions[session.ID]; exists && session.Status == StatusRunning {
 				session.Status = StatusIdle
 				session.LastOutputTime = time.Now()
-				debugLog("[POLL] Session %s: running -> idle (no hook received for %s, fallback)", session.Name, hookIdleTimeout)
+				debugLog("[POLL] Session %s: running -> idle (no hook received for %s, fallback)", session.Description, hookIdleTimeout)
 			}
 			m.mu.Unlock()
 			_ = m.store.Save(session)
@@ -968,7 +1044,7 @@ func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notifica
 	m.mu.Lock()
 	oldStatus := session.Status
 	sessionID := session.ID
-	sessionName := session.Name
+	sessionName := session.Description
 
 	// Update ClaudeSessionID if it changed (Claude Code may assign its own)
 	if ccSessionID != "" && session.ClaudeSessionID != ccSessionID {
@@ -1067,6 +1143,23 @@ func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notifica
 		if notificationType == "permission_prompt" || notificationType == "elicitation_dialog" {
 			m.notifier.NotifyPermission(sessionID, sessionName)
 		}
+	}
+
+	// Layer C: opportunistically upgrade the description from the transcript's
+	// first user turn. Runs on both UserPromptSubmit and Stop:
+	//
+	//   - UserPromptSubmit is the earliest signal but races Claude Code's own
+	//     transcript flush; observed skew is only ~10ms but that is enough for
+	//     ReadEntries to see an empty jsonl on some sessions.
+	//   - Stop fires after the assistant response completes, by which point
+	//     the transcript is guaranteed to be flushed. It is our reliable
+	//     upgrade path; UserPromptSubmit just gives us a faster win when the
+	//     transcript happens to already be visible.
+	//
+	// TryUpgradeDescription self-limits via the baseline-equality guard, so
+	// calling it on both events at most produces one write per session.
+	if eventName == "UserPromptSubmit" || eventName == "Stop" {
+		m.TryUpgradeDescription(sessionID, m.ccEnhancer)
 	}
 }
 
