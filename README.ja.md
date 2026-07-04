@@ -228,26 +228,6 @@ $XDG_RUNTIME_DIR/honjin/      （未設定時のフォールバック: $TMPDIR/h
 └── daemon.sock                # デーモンソケット
 ```
 
-### `~/.ccvalet/` からの移行（旧バージョンからのアップグレード）
-
-XDG レイアウト導入前のバージョンはすべて `~/.ccvalet/` 配下に保存していました。一度きりの移行スクリプトを同梱しています:
-
-```bash
-# 何が動くか先に確認
-bash scripts/migrate-to-xdg.sh --dry-run
-
-# 適用
-bash scripts/migrate-to-xdg.sh
-```
-
-スクリプトの挙動:
-
-- `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME` を尊重します。
-- 移動先に既にファイルがある場合は中断します（上書きしない／再実行安全）。
-- 旧ディレクトリは空になったときのみ削除します。
-- **`~/.ccvalet/run/daemon.sock` を握ったままの旧デーモンプロセスを SIGTERM で停止します（3秒待って終了しなければ SIGKILL）。** 新バイナリの `jin daemon stop` はソケットパス移動の影響で旧デーモンに到達できないため、スクリプト側で直接終了します。
-- `~/.ccvalet/run/` 配下の旧ソケットは破棄します。新ソケットは次回 `jin daemon start` 時に再生成されます。
-
 ### 設定例 (`~/.config/honjin/config.yaml`)
 
 ```yaml

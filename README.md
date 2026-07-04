@@ -259,26 +259,6 @@ $XDG_RUNTIME_DIR/honjin/      (fallback: $TMPDIR/honjin-<uid>)
 └── daemon.sock                # Daemon socket
 ```
 
-### Migrating from `~/.ccvalet/` (older versions)
-
-Versions prior to the XDG layout stored everything under `~/.ccvalet/`. A one-shot migration script is provided:
-
-```bash
-# Preview what will move
-bash scripts/migrate-to-xdg.sh --dry-run
-
-# Apply
-bash scripts/migrate-to-xdg.sh
-```
-
-The script:
-
-- Honors `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME`.
-- Refuses to overwrite anything that already exists at the target (re-run safe).
-- Removes the legacy directory only when it ends up empty.
-- **Stops any legacy daemon process still holding `~/.ccvalet/run/daemon.sock` (SIGTERM, then SIGKILL after 3s)**. The post-XDG `jin daemon stop` cannot reach a legacy daemon because the socket path moved, so the script handles termination directly.
-- Drops the legacy socket under `~/.ccvalet/run/`; the new socket is regenerated on the next `jin daemon start`.
-
 ### Example configuration (`~/.config/honjin/config.yaml`)
 
 ```yaml

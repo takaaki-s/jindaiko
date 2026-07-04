@@ -510,7 +510,7 @@ func TestManager_HandleHookEvent_UnknownSession(t *testing.T) {
 	mgr, _ := newTestManager(t)
 
 	// Should not panic when both IDs are unknown.
-	mgr.HandleHookEvent("unknown-cc-id", "unknown-valet-id", "Stop", "", "", "")
+	mgr.HandleHookEvent("unknown-cc-id", "unknown-jin-id", "Stop", "", "", "")
 }
 
 func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
