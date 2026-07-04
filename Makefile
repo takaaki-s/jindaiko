@@ -1,9 +1,8 @@
-.PHONY: build install clean test fmt lint lint-install deploy-ec2
+.PHONY: build install clean test fmt lint lint-install
 
 VERSION := 0.1.0
 BINARY := jin
 BUILD_DIR := bin
-EC2_HOST ?= ec2-dev
 
 # Pinned tooling versions. Bump deliberately; both local and CI use the same value.
 # Note: golangci-lint-action@v6 in CI requires v1.x. Upgrading to v2.x requires
@@ -63,10 +62,3 @@ lint-install:
 		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
 		go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 	fi
-
-# Deploy to EC2 (Ubuntu)
-deploy-ec2:
-	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/jin
-	scp $(BUILD_DIR)/$(BINARY)-linux-amd64 $(EC2_HOST):/tmp/$(BINARY)
-	ssh $(EC2_HOST) 'sudo mv /tmp/$(BINARY) ~/.local/bin/$(BINARY) && sudo chmod +x ~/.local/bin/$(BINARY)'
-	@echo "Deployed $(BINARY) to $(EC2_HOST):~/.local/bin/$(BINARY)"
