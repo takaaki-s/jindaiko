@@ -1,11 +1,11 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 
-project_name: ccvalet
+project_name: honjin
 
 builds:
-  - main: ./cmd/ccvalet
-    binary: ccvalet
+  - main: ./cmd/jin
+    binary: jin
     env:
       - CGO_ENABLED=0
     goos:
@@ -16,9 +16,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/takaaki-s/claude-code-valet/internal/version.Version={{.Version}}
-      - -X github.com/takaaki-s/claude-code-valet/internal/version.Commit={{.ShortCommit}}
-      - -X github.com/takaaki-s/claude-code-valet/internal/version.Date={{.Date}}
+      - -X github.com/takaaki-s/honjin/internal/version.Version={{.Version}}
+      - -X github.com/takaaki-s/honjin/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/takaaki-s/honjin/internal/version.Date={{.Date}}
 
 archives:
   - formats: [tar.gz]
@@ -50,6 +50,6 @@ changelog:
 release:
   github:
     owner: takaaki-s
-    name: claude-code-valet
+    name: honjin
   draft: false
   prerelease: auto

@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
+	"github.com/takaaki-s/honjin/internal/notify"
 )
 
 // NotifyModel is a standalone Bubble Tea model for displaying notification history.

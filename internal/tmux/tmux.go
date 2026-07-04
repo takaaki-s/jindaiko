@@ -7,14 +7,14 @@ import (
 )
 
 const (
-	// SocketName is the dedicated tmux socket name for ccvalet (inner tmux for CC sessions)
-	SocketName = "ccvalet"
+	// SocketName is the dedicated tmux socket name for jin (inner tmux for CC sessions)
+	SocketName = "jin"
 
 	// MgrSocketName is the tmux socket name for the outer layout manager
-	MgrSocketName = "ccvalet-mgr"
+	MgrSocketName = "jin-mgr"
 
 	// SessionName is the tmux session name (used for the outer tmux session)
-	SessionName = "ccvalet"
+	SessionName = "jin"
 
 	// UIWindowName is the name of the window that contains the TUI + display pane
 	UIWindowName = "ui"
@@ -30,7 +30,7 @@ const (
 
 	// PaneKeepTag is a custom pane option that marks managed panes (CC, TUI).
 	// Panes with this tag are preserved on exit; untagged panes are auto-killed.
-	PaneKeepTag = "@ccvalet-keep"
+	PaneKeepTag = "@jin-keep"
 )
 
 // Client wraps tmux CLI commands, always using the dedicated socket.
@@ -450,7 +450,7 @@ func (c *Client) GetSocketName() string {
 }
 
 // WindowTarget returns the full target for a window pane.
-// e.g., "ccvalet:sess-abc123.0"
+// e.g., "jin:sess-abc123.0"
 func WindowTarget(windowName string, pane int) string {
 	return fmt.Sprintf("%s:%s.%d", SessionName, windowName, pane)
 }

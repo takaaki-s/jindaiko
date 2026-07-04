@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/honjin/internal/config"
 )
 
 func TestNewManager(t *testing.T) {
@@ -33,7 +33,7 @@ func TestManager_LocalSocket_NotFound(t *testing.T) {
 
 func TestManager_LocalSocket_Found(t *testing.T) {
 	m := NewManager()
-	expectedPath := "/tmp/ccvalet-tunnels/test-host/daemon.sock"
+	expectedPath := "/tmp/jin-tunnels/test-host/daemon.sock"
 	m.tunnels["test-host"] = &Tunnel{
 		HostID:      "test-host",
 		HostType:    "ssh",

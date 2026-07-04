@@ -1,13 +1,13 @@
-// Package paths resolves ccvalet's data directories according to the
+// Package paths resolves honjin's data directories according to the
 // XDG Base Directory Specification.
 //
 // Defaults (when the corresponding XDG_* env var is not set):
 //
-//	config:  $HOME/.config/ccvalet
-//	state:   $HOME/.local/state/ccvalet
-//	runtime: os.TempDir()/ccvalet-<uid>
+//	config:  $HOME/.config/honjin
+//	state:   $HOME/.local/state/honjin
+//	runtime: os.TempDir()/honjin-<uid>
 //
-// The remote-host default socket path is fixed at ~/.local/state/ccvalet/daemon.sock
+// The remote-host default socket path is fixed at ~/.local/state/honjin/daemon.sock
 // because $XDG_RUNTIME_DIR cannot be reliably resolved across SSH.
 //
 // If the user's home directory cannot be resolved (and no relevant XDG_* env var
@@ -27,10 +27,10 @@ import (
 	"path/filepath"
 )
 
-const appName = "ccvalet"
+const appName = "honjin"
 
 // Config returns the directory for user configuration files
-// ($XDG_CONFIG_HOME/ccvalet, default ~/.config/ccvalet).
+// ($XDG_CONFIG_HOME/honjin, default ~/.config/honjin).
 func Config() string {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		return filepath.Join(d, appName)
@@ -39,11 +39,11 @@ func Config() string {
 }
 
 // State returns the directory for persistent state files
-// ($XDG_STATE_HOME/ccvalet, default ~/.local/state/ccvalet).
+// ($XDG_STATE_HOME/honjin, default ~/.local/state/honjin).
 func State() string {
 	dir, ok := stateOrEmpty()
 	if !ok {
-		panic("ccvalet/paths: cannot resolve state dir: $XDG_STATE_HOME unset and $HOME unresolvable")
+		panic("honjin/paths: cannot resolve state dir: $XDG_STATE_HOME unset and $HOME unresolvable")
 	}
 	return dir
 }
@@ -73,7 +73,7 @@ func Sessions() string {
 }
 
 // runtime returns the directory for ephemeral runtime files
-// ($XDG_RUNTIME_DIR/ccvalet, fallback os.TempDir()/ccvalet-<uid>).
+// ($XDG_RUNTIME_DIR/honjin, fallback os.TempDir()/honjin-<uid>).
 //
 // Not exported: callers should obtain Socket() instead. XDG_RUNTIME_DIR
 // requires 0700 access — sealing this behind Socket avoids accidental
@@ -116,7 +116,7 @@ func RemoteDefaultSocketRel() string {
 func mustHome() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		panic(fmt.Sprintf("ccvalet/paths: cannot resolve home directory: %v", err))
+		panic(fmt.Sprintf("honjin/paths: cannot resolve home directory: %v", err))
 	}
 	return home
 }

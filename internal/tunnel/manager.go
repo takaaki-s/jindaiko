@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/paths"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/paths"
 )
 
 // localSocketDir is the directory for tunnel local sockets.
-const localSocketDir = "/tmp/ccvalet-tunnels"
+const localSocketDir = "/tmp/jin-tunnels"
 
 // Tunnel represents a tunnel connection to a remote host
 type Tunnel struct {
@@ -36,7 +36,7 @@ type TunnelOptions struct {
 
 // PeerSocketDir is the directory for reverse tunnel peer sockets on the remote side.
 // Located in /tmp which is assumed to be single-user (e.g., EC2 instances).
-const PeerSocketDir = "/tmp/ccvalet-peers"
+const PeerSocketDir = "/tmp/jin-peers"
 
 // Manager manages tunnel connections
 type Manager struct {
@@ -181,8 +181,8 @@ func (m *Manager) OpenDocker(hostConfig config.HostConfig) (string, error) {
 
 	// For Docker, the socket path is assumed to be directly accessible via volume mount.
 	// The local socket path is auto-calculated from host ID using the same convention as SSH.
-	// Example: docker run -v /tmp/ccvalet-tunnels/docker-dev:/root/.local/state/ccvalet container
-	//          -> accessible at /tmp/ccvalet-tunnels/docker-dev/daemon.sock
+	// Example: docker run -v /tmp/jin-tunnels/docker-dev:/root/.local/state/honjin container
+	//          -> accessible at /tmp/jin-tunnels/docker-dev/daemon.sock
 	localSocket := filepath.Join(localSocketDir, hostConfig.ID, "daemon.sock")
 	_ = os.MkdirAll(filepath.Dir(localSocket), 0700)
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/honjin/internal/config"
 )
 
 // newTestManager creates a Manager backed by temporary directories and a mock tmux runner.
@@ -779,7 +779,7 @@ func TestManager_HandleHookEvent_SessionEnd_Idempotent(t *testing.T) {
 
 func TestEnsureHooksSettingsFile_NewHooks(t *testing.T) {
 	dir := t.TempDir()
-	path, err := ensureHooksSettingsFile(dir, "/usr/local/bin/ccvalet")
+	path, err := ensureHooksSettingsFile(dir, "/usr/local/bin/jin")
 	if err != nil {
 		t.Fatalf("ensureHooksSettingsFile failed: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestManager_Kill(t *testing.T) {
 
 	// Simulate a running session with tmux integration.
 	mgr.mu.Lock()
-	sess.TmuxWindowName = "ccvalet_" + sess.ID
+	sess.TmuxWindowName = "jin_" + sess.ID
 	sess.TmuxPaneID = "%42"
 	sess.Status = StatusRunning
 	mgr.mu.Unlock()
@@ -878,7 +878,7 @@ func TestManager_RecoverTmuxSessions_Live(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	innerName := "ccvalet_" + sess.ID
+	innerName := "jin_" + sess.ID
 	mgr.mu.Lock()
 	sess.TmuxWindowName = innerName
 	sess.TmuxPaneID = "%10"
@@ -907,7 +907,7 @@ func TestManager_RecoverTmuxSessions_DeadPane(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	innerName := "ccvalet_" + sess.ID
+	innerName := "jin_" + sess.ID
 	mgr.mu.Lock()
 	sess.TmuxWindowName = innerName
 	sess.TmuxPaneID = "%11"
@@ -944,7 +944,7 @@ func TestManager_RecoverTmuxSessions_NoTmux(t *testing.T) {
 	}
 
 	mgr.mu.Lock()
-	sess.TmuxWindowName = "ccvalet_" + sess.ID
+	sess.TmuxWindowName = "jin_" + sess.ID
 	mgr.mu.Unlock()
 
 	// Should be a no-op and not panic.
@@ -1231,7 +1231,7 @@ func TestManager_Kill_WithTmuxWindowOnly(t *testing.T) {
 
 	// Simulate session with TmuxWindowName but no TmuxPaneID (fallback path)
 	mgr.mu.Lock()
-	sess.TmuxWindowName = "ccvalet_" + sess.ID
+	sess.TmuxWindowName = "jin_" + sess.ID
 	sess.TmuxPaneID = "" // no pane ID
 	sess.Status = StatusRunning
 	mgr.mu.Unlock()
@@ -1250,7 +1250,7 @@ func TestManager_Kill_WithTmuxWindowOnly(t *testing.T) {
 		t.Errorf("Status = %q, want %q", got.Status, StatusStopped)
 	}
 	// Should have called KillSession (fallback when no pane ID)
-	if !mock.hasCalledWith("KillSession", "ccvalet_"+sess.ID) {
+	if !mock.hasCalledWith("KillSession", "jin_"+sess.ID) {
 		t.Error("expected KillSession to be called with inner session name")
 	}
 }
@@ -1341,7 +1341,7 @@ func TestManager_Delete_WithTmuxSession(t *testing.T) {
 
 	// Simulate session with active tmux
 	mgr.mu.Lock()
-	sess.TmuxWindowName = "ccvalet_" + sess.ID
+	sess.TmuxWindowName = "jin_" + sess.ID
 	sess.Status = StatusRunning
 	mgr.mu.Unlock()
 
@@ -1352,7 +1352,7 @@ func TestManager_Delete_WithTmuxSession(t *testing.T) {
 	}
 
 	// Should have called KillSession on the inner tmux session
-	if !mock.hasCalledWith("KillSession", "ccvalet_"+sess.ID) {
+	if !mock.hasCalledWith("KillSession", "jin_"+sess.ID) {
 		t.Error("expected KillSession to be called when deleting a session with tmux")
 	}
 

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/host"
+	"github.com/takaaki-s/honjin/internal/host"
 )
 
 func TestRequest_VisitedJSON_RoundTrip(t *testing.T) {

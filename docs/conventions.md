@@ -18,7 +18,7 @@
 debugEnabled / debugLog() are duplicated in the daemon and session packages (not shared).
 
 ```go
-var debugEnabled = os.Getenv("CCVALET_DEBUG") == "1"
+var debugEnabled = os.Getenv("JIN_DEBUG") == "1"
 
 func debugLog(format string, args ...interface{}) {
     // Append to file: [HH:MM:SS] message

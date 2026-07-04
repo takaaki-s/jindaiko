@@ -14,12 +14,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/daemon"
-	"github.com/takaaki-s/claude-code-valet/internal/host"
-	"github.com/takaaki-s/claude-code-valet/internal/paths"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
-	"github.com/takaaki-s/claude-code-valet/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/daemon"
+	"github.com/takaaki-s/honjin/internal/host"
+	"github.com/takaaki-s/honjin/internal/paths"
+	"github.com/takaaki-s/honjin/internal/session"
+	"github.com/takaaki-s/honjin/internal/tmux"
 )
 
 // maxTUIWidth is the maximum width (columns) for the TUI pane.
@@ -167,8 +167,8 @@ type Model struct {
 	focused bool // true when TUI pane has focus (changes border/title color)
 
 	// tmux integration
-	tmuxClient         *tmux.Client // outer tmux client (-L ccvalet-mgr, nil in legacy mode)
-	innerTmuxClient    *tmux.Client // inner tmux client (-L ccvalet, for switch-client)
+	tmuxClient         *tmux.Client // outer tmux client (-L jin-mgr, nil in legacy mode)
+	innerTmuxClient    *tmux.Client // inner tmux client (-L jin, for switch-client)
 	tuiPaneID          string       // TUI pane unique ID (e.g. "%42") in outer tmux
 	displayPaneID      string       // Right pane unique ID (for session display) in outer tmux
 	currentSessionID   string       // Session ID currently displayed in right pane
@@ -220,7 +220,7 @@ func NewModel(client *daemon.Client) Model {
 }
 
 // NewModelWithTmux creates a new TUI model with tmux integration.
-// The outer tmux (-L ccvalet-mgr) has a fixed 2-pane layout:
+// The outer tmux (-L jin-mgr) has a fixed 2-pane layout:
 // left pane (TUI) + right pane (session display via RespawnPane).
 func NewModelWithTmux(client *daemon.Client, tc, innerTC *tmux.Client, tuiPaneID, displayPaneID string) Model {
 	m := NewModel(client)
@@ -229,7 +229,7 @@ func NewModelWithTmux(client *daemon.Client, tc, innerTC *tmux.Client, tuiPaneID
 	m.tuiPaneID = tuiPaneID
 	m.displayPaneID = displayPaneID
 	// Restore which session was displayed (for reattach)
-	m.currentSessionID = tc.GetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION")
+	m.currentSessionID = tc.GetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION")
 	return m
 }
 
@@ -370,7 +370,7 @@ func tickCmd() tea.Cmd {
 type resizeSettledMsg struct{}
 
 // switchToSession displays the given session in the right pane via RespawnPane.
-// For local sessions, attaches to the inner tmux session (-L ccvalet).
+// For local sessions, attaches to the inner tmux session (-L jin).
 // For remote sessions, runs SSH attach command.
 // For stopped/error sessions, shows a placeholder with session info.
 func (m *Model) switchToSession(sessionID string) {
@@ -422,7 +422,7 @@ func (m *Model) switchToSession(sessionID string) {
 		}
 		_ = m.tmuxClient.RespawnPane(m.displayPaneID, placeholderCmd)
 		m.currentSessionID = sessionID
-		_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
+		_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
 		_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 		return
 	}
@@ -445,7 +445,7 @@ func (m *Model) switchToSession(sessionID string) {
 		if err == nil && paneTTY != "" {
 			if m.innerTmuxClient.SwitchClient(paneTTY, sess.TmuxWindowName) == nil {
 				m.currentSessionID = sessionID
-				_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
+				_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
 				_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 				return
 			}
@@ -455,8 +455,8 @@ func (m *Model) switchToSession(sessionID string) {
 
 	// Local: respawn right pane with inner tmux attach.
 	// Unset $TMUX so tmux does not refuse with "sessions should be nested with care":
-	// the display pane runs inside the outer tmux (ccvalet-mgr), so $TMUX points to
-	// the outer session. Without env -u TMUX, attaching to the inner tmux (ccvalet)
+	// the display pane runs inside the outer tmux (jin-mgr), so $TMUX points to
+	// the outer session. Without env -u TMUX, attaching to the inner tmux (jin)
 	// on the same host is rejected as nesting. This mirrors the env -u TMUX pattern
 	// used in session/manager.go when launching CC processes.
 	attachCmd := fmt.Sprintf("env -u TMUX tmux -L %s attach -t %s", tmux.SocketName, sess.TmuxWindowName)
@@ -464,7 +464,7 @@ func (m *Model) switchToSession(sessionID string) {
 	m.displayLocalAttach = true
 
 	m.currentSessionID = sessionID
-	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sessionID)
+	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
 	_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 }
 
@@ -525,7 +525,7 @@ func (m *Model) switchToRemoteSession(sess *session.Info) {
 	_ = m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
 
 	m.currentSessionID = sess.ID
-	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "CCVALET_CURRENT_SESSION", sess.ID)
+	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sess.ID)
 }
 
 // openVSCode opens VS Code for the given session's working directory.
@@ -1117,13 +1117,13 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Poll for session created via tmux popup
 		if m.tmuxClient != nil {
-			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION"); id != "" {
-				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION")
+			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "JIN_CREATED_SESSION"); id != "" {
+				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_CREATED_SESSION")
 				m.focusSessionID = id
 			}
 			// Poll for session selected from notification history popup
-			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION"); id != "" {
-				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "CCVALET_NOTIFY_SESSION")
+			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "JIN_NOTIFY_SESSION"); id != "" {
+				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_NOTIFY_SESSION")
 				m.focusSessionID = id
 			}
 		}
@@ -1259,7 +1259,7 @@ func (m Model) renderListContent(contentWidth int) string {
 	if !m.focused {
 		ts = ts.Foreground(secondaryColor)
 	}
-	title := ts.Render("ccvalet")
+	title := ts.Render("honjin")
 	currentTime := time.Now().Format("15:04:05")
 	timeDisplay := fmt.Sprintf("[ %s ]", currentTime)
 

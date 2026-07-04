@@ -20,7 +20,7 @@ func withStateHome(t *testing.T, dir string) string {
 			os.Unsetenv("XDG_STATE_HOME")
 		}
 	})
-	stateDir := filepath.Join(dir, "ccvalet")
+	stateDir := filepath.Join(dir, "honjin")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		t.Fatalf("failed to create state dir: %v", err)
 	}
@@ -28,10 +28,10 @@ func withStateHome(t *testing.T, dir string) string {
 }
 
 func TestNewLogger_Disabled(t *testing.T) {
-	// When CCVALET_DEBUG is not "1", the logger should be a no-op.
-	origDebug := os.Getenv("CCVALET_DEBUG")
-	os.Setenv("CCVALET_DEBUG", "0")
-	defer os.Setenv("CCVALET_DEBUG", origDebug)
+	// When JIN_DEBUG is not "1", the logger should be a no-op.
+	origDebug := os.Getenv("JIN_DEBUG")
+	os.Setenv("JIN_DEBUG", "0")
+	defer os.Setenv("JIN_DEBUG", origDebug)
 
 	// Reset enabled for this test
 	origEnabled := enabled

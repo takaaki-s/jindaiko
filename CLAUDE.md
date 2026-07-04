@@ -1,29 +1,29 @@
-# ccvalet
+# honjin
 
 CLI tool for managing multiple Claude Code sessions via tmux TUI.
 
 ## Build & Test
 
 ```
-make build          # → bin/ccvalet
+make build          # → bin/jin
 make test           # go test -v ./...
 make test-race      # go test -race ./...
 make test-coverage  # Generate coverage report
 make fmt            # go fmt ./...
 make lint           # golangci-lint run ./...
-make install        # go install ./cmd/ccvalet
+make install        # go install ./cmd/jin
 ```
 
 ## Project Layout
 
 ```
-cmd/ccvalet/cmd/     Cobra CLI commands (root, daemon, session, tui, hook, ...)
+cmd/jin/cmd/         Cobra CLI commands (root, daemon, session, tui, hook, ...)
 internal/
-  config/            Viper config management (~/.config/ccvalet/config.yaml)
+  config/            Viper config management (~/.config/honjin/config.yaml)
   daemon/            Unix socket IPC server/client
   session/           Session management (core domain, largest module)
   tui/               BubbleTea TUI (largest codebase)
-  tmux/              tmux -L ccvalet session control
+  tmux/              tmux -L jin session control
   host/              Multi-host management (SSH/Docker)
   tunnel/            SSH tunnel lifecycle
   notify/            Desktop notifications (macOS/Linux)
@@ -45,10 +45,10 @@ See each file for details:
 ## Debug
 
 ```
-CCVALET_DEBUG=1 ccvalet daemon start
+JIN_DEBUG=1 jin daemon start
 ```
 
-Logs: `~/.local/state/ccvalet/daemon-debug.log`, `~/.local/state/ccvalet/hook-debug.log`
+Logs: `~/.local/state/honjin/daemon-debug.log`, `~/.local/state/honjin/hook-debug.log`
 
 ## Key Dependencies
 
@@ -59,13 +59,13 @@ Go 1.24.5 / cobra (CLI) / bubbletea (TUI) / viper (config) / lipgloss (styling)
 XDG Base Directory compliant. Defaults shown; override with `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_RUNTIME_DIR`.
 
 ```
-~/.config/ccvalet/
+~/.config/honjin/
   config.yaml                  User settings
-~/.local/state/ccvalet/
+~/.local/state/honjin/
   state.yaml                   Persistent state
   sessions/{uuid}.json         Session data
   hooks-settings.json          Generated Claude Code hooks settings
-$XDG_RUNTIME_DIR/ccvalet/      (fallback $TMPDIR/ccvalet-<uid>/)
+$XDG_RUNTIME_DIR/honjin/      (fallback $TMPDIR/honjin-<uid>/)
   daemon.sock                  IPC Unix socket
 ```
 

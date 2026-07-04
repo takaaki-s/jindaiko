@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/honjin/internal/config"
 )
 
 func TestSSHControlPath(t *testing.T) {
 	got := SSHControlPath("ec2")
-	want := "/tmp/ccvalet-ssh-ctrl-ec2"
+	want := "/tmp/jin-ssh-ctrl-ec2"
 	if got != want {
 		t.Errorf("SSHControlPath(%q) = %q, want %q", "ec2", got, want)
 	}
@@ -17,7 +17,7 @@ func TestSSHControlPath(t *testing.T) {
 
 func TestSSHControlPath_DifferentHost(t *testing.T) {
 	got := SSHControlPath("docker-dev")
-	want := "/tmp/ccvalet-ssh-ctrl-docker-dev"
+	want := "/tmp/jin-ssh-ctrl-docker-dev"
 	if got != want {
 		t.Errorf("SSHControlPath(%q) = %q, want %q", "docker-dev", got, want)
 	}
@@ -65,7 +65,7 @@ func TestAttachCommandString_SSH(t *testing.T) {
 	}
 
 	// Verify remote tmux command is quoted
-	expectedRemote := "tmux -L ccvalet attach -t my-session"
+	expectedRemote := "tmux -L jin attach -t my-session"
 	if !strings.Contains(got, "'"+expectedRemote+"'") {
 		t.Errorf("SSH command should contain quoted remote command '%s', got %q", expectedRemote, got)
 	}
@@ -80,7 +80,7 @@ func TestAttachCommandString_Docker(t *testing.T) {
 	target := "my-session"
 	got := AttachCommandString(cfg, target)
 
-	want := "docker exec -it my-container tmux -L ccvalet attach -t my-session"
+	want := "docker exec -it my-container tmux -L jin attach -t my-session"
 	if got != want {
 		t.Errorf("AttachCommandString(docker) = %q, want %q", got, want)
 	}
@@ -94,7 +94,7 @@ func TestAttachCommandString_Local(t *testing.T) {
 	target := "my-session"
 	got := AttachCommandString(cfg, target)
 
-	want := "tmux -L ccvalet attach -t my-session"
+	want := "tmux -L jin attach -t my-session"
 	if got != want {
 		t.Errorf("AttachCommandString(local) = %q, want %q", got, want)
 	}
@@ -114,7 +114,7 @@ func TestAttachCommandString_SSHNoOpts(t *testing.T) {
 		t.Errorf("SSH command without opts should have '-t simple-host', got %q", got)
 	}
 
-	expectedRemote := "tmux -L ccvalet attach -t sess1"
+	expectedRemote := "tmux -L jin attach -t sess1"
 	if !strings.Contains(got, "'"+expectedRemote+"'") {
 		t.Errorf("SSH command should contain quoted remote command, got %q", got)
 	}
@@ -129,7 +129,7 @@ func TestSSHAttachCommand(t *testing.T) {
 			Type: "ssh",
 			Host: "ec2-host",
 		}
-		cmd := sshAttachCommand(cfg, "ccvalet:my-session")
+		cmd := sshAttachCommand(cfg, "jin:my-session")
 
 		// cmd.Path should end with "ssh"
 		if !strings.HasSuffix(cmd.Path, "ssh") {
@@ -166,7 +166,7 @@ func TestSSHAttachCommand(t *testing.T) {
 		}
 
 		// Verify remote tmux command
-		if !strings.Contains(joined, "tmux -L ccvalet attach -t ccvalet:my-session") {
+		if !strings.Contains(joined, "tmux -L jin attach -t jin:my-session") {
 			t.Errorf("args should contain remote tmux attach command, got %v", args)
 		}
 	})
@@ -178,7 +178,7 @@ func TestSSHAttachCommand(t *testing.T) {
 			Host:    "dev-host",
 			SSHOpts: []string{"-p", "2222", "-i", "/path/to/key"},
 		}
-		cmd := sshAttachCommand(cfg, "ccvalet:sess1")
+		cmd := sshAttachCommand(cfg, "jin:sess1")
 		joined := strings.Join(cmd.Args, " ")
 
 		if !strings.Contains(joined, "-p 2222") {
@@ -199,15 +199,15 @@ func TestDockerAttachCommand(t *testing.T) {
 			Type:      "docker",
 			Container: "my-container",
 		}
-		cmd := dockerAttachCommand(cfg, "ccvalet:my-session")
+		cmd := dockerAttachCommand(cfg, "jin:my-session")
 
 		// cmd.Path should end with "docker"
 		if !strings.HasSuffix(cmd.Path, "docker") {
 			t.Errorf("cmd.Path should end with 'docker', got %q", cmd.Path)
 		}
 
-		// Verify args: docker exec -it <container> tmux -L ccvalet attach -t <target>
-		expectedArgs := []string{"exec", "-it", "my-container", "tmux", "-L", "ccvalet", "attach", "-t", "ccvalet:my-session"}
+		// Verify args: docker exec -it <container> tmux -L jin attach -t <target>
+		expectedArgs := []string{"exec", "-it", "my-container", "tmux", "-L", "jin", "attach", "-t", "jin:my-session"}
 		args := cmd.Args[1:] // skip cmd.Args[0] which is the program path
 
 		if len(args) != len(expectedArgs) {
@@ -226,14 +226,14 @@ func TestDockerAttachCommand(t *testing.T) {
 			Type:      "docker",
 			Container: "staging-claude",
 		}
-		cmd := dockerAttachCommand(cfg, "ccvalet:sess-abc")
+		cmd := dockerAttachCommand(cfg, "jin:sess-abc")
 		joined := strings.Join(cmd.Args, " ")
 
 		if !strings.Contains(joined, "staging-claude") {
 			t.Errorf("args should contain container name 'staging-claude', got %v", cmd.Args)
 		}
-		if !strings.Contains(joined, "ccvalet:sess-abc") {
-			t.Errorf("args should contain tmux target 'ccvalet:sess-abc', got %v", cmd.Args)
+		if !strings.Contains(joined, "jin:sess-abc") {
+			t.Errorf("args should contain tmux target 'jin:sess-abc', got %v", cmd.Args)
 		}
 	})
 }
@@ -246,7 +246,7 @@ func TestAttachCommand_SSH(t *testing.T) {
 		Type: "ssh",
 		Host: "ec2-host",
 	}
-	cmd := AttachCommand(cfg, "ccvalet:my-session")
+	cmd := AttachCommand(cfg, "jin:my-session")
 
 	// Should produce an SSH command
 	if !strings.HasSuffix(cmd.Path, "ssh") {
@@ -256,7 +256,7 @@ func TestAttachCommand_SSH(t *testing.T) {
 	if !strings.Contains(joined, "ec2-host") {
 		t.Errorf("SSH attach command should reference host, got %v", cmd.Args)
 	}
-	if !strings.Contains(joined, "tmux -L ccvalet attach -t ccvalet:my-session") {
+	if !strings.Contains(joined, "tmux -L jin attach -t jin:my-session") {
 		t.Errorf("SSH attach command should contain remote tmux attach, got %v", cmd.Args)
 	}
 }
@@ -267,7 +267,7 @@ func TestAttachCommand_Docker(t *testing.T) {
 		Type:      "docker",
 		Container: "my-container",
 	}
-	cmd := AttachCommand(cfg, "ccvalet:my-session")
+	cmd := AttachCommand(cfg, "jin:my-session")
 
 	// Should produce a Docker command
 	if !strings.HasSuffix(cmd.Path, "docker") {
@@ -284,7 +284,7 @@ func TestAttachCommand_UnknownType(t *testing.T) {
 		ID:   "unknown",
 		Type: "unknown-type",
 	}
-	cmd := AttachCommand(cfg, "ccvalet:my-session")
+	cmd := AttachCommand(cfg, "jin:my-session")
 
 	// Unknown type falls back to local tmux command
 	if !strings.HasSuffix(cmd.Path, "tmux") {
@@ -294,10 +294,10 @@ func TestAttachCommand_UnknownType(t *testing.T) {
 	if !strings.Contains(joined, "select-window") {
 		t.Errorf("local fallback should use select-window, got %v", cmd.Args)
 	}
-	if !strings.Contains(joined, "-L ccvalet") {
-		t.Errorf("local fallback should use -L ccvalet, got %v", cmd.Args)
+	if !strings.Contains(joined, "-L jin") {
+		t.Errorf("local fallback should use -L jin, got %v", cmd.Args)
 	}
-	if !strings.Contains(joined, "-t ccvalet:my-session") {
+	if !strings.Contains(joined, "-t jin:my-session") {
 		t.Errorf("local fallback should contain target, got %v", cmd.Args)
 	}
 }

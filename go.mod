@@ -1,4 +1,4 @@
-module github.com/takaaki-s/claude-code-valet
+module github.com/takaaki-s/honjin
 
 go 1.24.5
 

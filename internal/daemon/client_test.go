@@ -3,8 +3,8 @@ package daemon
 import (
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
+	"github.com/takaaki-s/honjin/internal/notify"
+	"github.com/takaaki-s/honjin/internal/session"
 )
 
 func TestNewClient(t *testing.T) {
@@ -28,7 +28,7 @@ func TestNewRemoteClient(t *testing.T) {
 	}{
 		{
 			name:       "ec2 host",
-			socketPath: "/run/ccvalet/ec2.sock",
+			socketPath: "/run/jin/ec2.sock",
 			hostID:     "ec2",
 		},
 		{
@@ -218,15 +218,15 @@ func TestClient_NotificationHistoryWithHostID_Integration(t *testing.T) {
 
 	// First make it "thinking" so "Stop" can transition to "idle" and trigger task_complete notification
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	}); err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit): %v", err)
 	}
 
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	}); err != nil {
 		t.Fatalf("SendHook(Stop): %v", err)
 	}

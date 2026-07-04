@@ -16,14 +16,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/debug"
-	"github.com/takaaki-s/claude-code-valet/internal/host"
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
-	"github.com/takaaki-s/claude-code-valet/internal/tmux"
-	"github.com/takaaki-s/claude-code-valet/internal/transcript"
-	"github.com/takaaki-s/claude-code-valet/internal/tunnel"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/debug"
+	"github.com/takaaki-s/honjin/internal/host"
+	"github.com/takaaki-s/honjin/internal/notify"
+	"github.com/takaaki-s/honjin/internal/session"
+	"github.com/takaaki-s/honjin/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/transcript"
+	"github.com/takaaki-s/honjin/internal/tunnel"
 )
 
 var debugLog = debug.NewLogger("daemon-debug.log")
@@ -83,7 +83,7 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir, hostID string) (*Se
 		return nil, err
 	}
 
-	// Set up tmux client if tmux is available and ccvalet tmux session exists
+	// Set up tmux client if tmux is available and jin tmux session exists
 	if tc, err := tmux.NewClient(); err == nil {
 		if tc.HasSession(tmux.SessionName) {
 			mgr.SetTmuxClient(tc)
@@ -232,7 +232,7 @@ func (s *Server) handleRequest(req *Request) Response {
 // HookRequest represents a Claude Code hook event
 type HookRequest struct {
 	SessionID        string `json:"session_id"`
-	CcvaletSessionID string `json:"ccvalet_session_id,omitempty"`
+	JinSessionID     string `json:"jin_session_id,omitempty"`
 	HookEventName    string `json:"hook_event_name"`
 	NotificationType string `json:"notification_type,omitempty"`
 	CWD              string `json:"cwd,omitempty"`
@@ -244,7 +244,7 @@ func (s *Server) handleHook(data json.RawMessage) Response {
 	if err := json.Unmarshal(data, &req); err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}
-	s.manager.HandleHookEvent(req.SessionID, req.CcvaletSessionID, req.HookEventName, req.NotificationType, req.CWD, req.StopReason)
+	s.manager.HandleHookEvent(req.SessionID, req.JinSessionID, req.HookEventName, req.NotificationType, req.CWD, req.StopReason)
 	return Response{Success: true}
 }
 
