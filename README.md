@@ -9,6 +9,8 @@ https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 ## Features
 
 - **Multi-session management**: Run multiple Claude Code sessions in the background simultaneously
+- **tmux-native**: Each session runs in its own tmux pane, so your existing `~/.tmux.conf`, custom keybindings, status bar, and copy-mode setup work as-is
+- **Decoupled UI / logic architecture**: All session management, state transitions, hook handling, and remote coordination live in the daemon. The TUI is a thin client that talks to the daemon over a Unix socket and holds no session-management logic. In principle any alternate UI (web, editor extension, ...) can drive the same IPC (see [docs/architecture.md](docs/architecture.md) / [docs/ipc-protocol.md](docs/ipc-protocol.md))
 - **TUI**: Interactive terminal UI for listing, monitoring, and operating sessions
 - **Attach/Detach**: Quickly switch between sessions (`Ctrl+]` to detach)
 - **Real-time status tracking**: Live display of working directory, branch, and latest message

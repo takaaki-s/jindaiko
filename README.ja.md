@@ -9,6 +9,8 @@ https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 ## 特長
 
 - **複数セッション管理**: 複数の Claude Code セッションをバックグラウンドで同時実行
+- **tmux ネイティブ**: セッションの実体は tmux 上で動く独立ペイン。普段お使いの `~/.tmux.conf` やカスタムキーバインド、ステータスバー、コピーモード等がそのまま使える
+- **UI / ロジック分離アーキテクチャ**: セッション管理・状態遷移・hook 処理・リモート連携などのロジックは全て daemon に集約。TUI は Unix socket 経由で daemon を叩く薄いクライアントで、セッション管理ロジックを持たない。同じ IPC を叩けば TUI を別実装（Web UI・エディタ拡張等）に差し替えることも理論上可能（詳細は [docs/architecture.md](docs/architecture.md) / [docs/ipc-protocol.md](docs/ipc-protocol.md)）
 - **TUI**: セッション一覧・状態確認・操作を対話的に行えるターミナル UI
 - **アタッチ/デタッチ**: セッション間を素早く切り替え（`Ctrl+]` でデタッチ）
 - **リアルタイム状態追跡**: 作業ディレクトリ・ブランチ・最新メッセージをリアルタイム表示
