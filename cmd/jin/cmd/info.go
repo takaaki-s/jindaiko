@@ -21,12 +21,12 @@ var infoCmd = &cobra.Command{
 		nameOrID := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, _, hostID, err := resolveSession(client, nameOrID)
+		sessionID, _, err := resolveSession(client, nameOrID)
 		if err != nil {
 			return err
 		}
 
-		info, err := client.Get(sessionID, hostID)
+		info, err := client.Get(sessionID)
 		if err != nil {
 			return err
 		}
@@ -56,9 +56,6 @@ func renderSessionInfoText(w io.Writer, info *session.Info) {
 	}
 	if info.CurrentBranch != "" {
 		fmt.Fprintf(tw, "Branch:\t%s\n", info.CurrentBranch)
-	}
-	if info.HostID != "" {
-		fmt.Fprintf(tw, "Host:\t%s\n", info.HostID)
 	}
 
 	fmt.Fprintf(tw, "Created:\t%s\n", info.CreatedAt.Format("2006-01-02 15:04:05"))

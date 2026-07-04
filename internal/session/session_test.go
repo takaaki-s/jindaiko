@@ -20,7 +20,6 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 		ClaudeSessionID:      "claude-sess-456",
 		ClaudeSessionStarted: true,
 		Fleet:                "backend",
-		HostID:               "ec2-instance",
 		TmuxWindowName:       "jin_test-id-123",
 		TmuxPaneID:           "%42",
 
@@ -65,9 +64,6 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 	}
 	if info.Fleet != s.Fleet {
 		t.Errorf("Fleet: got %q, want %q", info.Fleet, s.Fleet)
-	}
-	if info.HostID != s.HostID {
-		t.Errorf("HostID: got %q, want %q", info.HostID, s.HostID)
 	}
 	if info.CurrentWorkDir != s.CurrentWorkDir {
 		t.Errorf("CurrentWorkDir: got %q, want %q", info.CurrentWorkDir, s.CurrentWorkDir)
@@ -118,7 +114,6 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 		ClaudeSessionID:      "claude-rt-789",
 		ClaudeSessionStarted: true,
 		Fleet:                "frontend",
-		HostID:               "docker-dev",
 		TmuxWindowName:       "jin_round-trip-id",
 		TmuxPaneID:           "%99",
 	}
@@ -163,9 +158,6 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	}
 	if restored.Fleet != original.Fleet {
 		t.Errorf("Fleet: got %q, want %q", restored.Fleet, original.Fleet)
-	}
-	if restored.HostID != original.HostID {
-		t.Errorf("HostID: got %q, want %q", restored.HostID, original.HostID)
 	}
 	if restored.TmuxWindowName != original.TmuxWindowName {
 		t.Errorf("TmuxWindowName: got %q, want %q", restored.TmuxWindowName, original.TmuxWindowName)

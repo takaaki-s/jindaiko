@@ -46,19 +46,16 @@ Hook Events:
 ## Package Dependency
 
 ```
-cmd/jin/cmd/       → daemon (client), config, session (types only), tui, tmux, host
+cmd/jin/cmd/       → daemon (client), config, session (types only), tui, tmux
                       │
-daemon/            → session, config, host, notify, tmux, tunnel
+daemon/            → session, config, notify, tmux
                       │
 session/           → config, tmux, notify, transcript
                       │
-host/              → config, notify, session
-                      │
-tui/               → daemon (client), config, session (Info type), host
+tui/               → daemon (client), config, session (Info type)
                       │
 config/            → (external: viper)
 tmux/              → (external: tmux CLI)
-tunnel/            → (external: ssh, docker CLI)
 notify/            → (external: OS notification)
 transcript/        → (file I/O: ~/.claude/projects/)
 ```
@@ -66,31 +63,13 @@ transcript/        → (file I/O: ~/.claude/projects/)
 config is a foundational package referenced by many others.
 The session package is the core domain with the most business logic.
 
-## Remote Architecture
-
-The local daemon (Master) controls daemons on remote hosts (Slave) via SSH tunnels.
-
-```
-Master daemon (local)
-  ├─ host.Registry     ... Host list management
-  ├─ tunnel.Manager    ... SSH/Docker tunnel lifecycle
-  └─ RemoteClient      ... IPC forwarding to Slave daemon
-       │ (SSH tunnel / Docker exec)
-       ▼
-Slave daemon (remote)
-  ├─ session.Manager
-  └─ tmux.Client
-```
-
-Requests destined for remote hosts are forwarded via `forwardToSlave()`, which strips the host_id before forwarding.
-
 ## File Storage
 
 honjin follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/):
 
 ```
 $XDG_CONFIG_HOME/honjin/        (default: ~/.config/honjin)
-  └─ config.yaml                 ... User settings (keybindings, hosts)
+  └─ config.yaml                 ... User settings (keybindings)
 
 $XDG_STATE_HOME/honjin/         (default: ~/.local/state/honjin)
   ├─ state.yaml                  ... Persistent state (StateManager)

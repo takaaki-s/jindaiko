@@ -48,7 +48,6 @@ Session (persisted)
 ├─ ErrorMessage    string    // Error message (e.g., on startup failure)
 ├─ ClaudeSessionID string    // Claude Code session ID
 ├─ ClaudeSessionStarted bool // Used to determine --resume vs --session-id
-├─ HostID          string    // "local" or remote host name
 ├─ TmuxWindowName  string    // Inner tmux session name
 └─ TmuxPaneID      string    // CC pane ID (e.g., "%42")
 

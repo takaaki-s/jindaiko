@@ -16,7 +16,6 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/takaaki-s/honjin/internal/config"
 	"github.com/takaaki-s/honjin/internal/daemon"
-	"github.com/takaaki-s/honjin/internal/host"
 	"github.com/takaaki-s/honjin/internal/paths"
 	"github.com/takaaki-s/honjin/internal/session"
 	"github.com/takaaki-s/honjin/internal/tmux"
@@ -150,7 +149,6 @@ type Model struct {
 	confirmDelete          bool   // Whether delete confirmation is active
 	deleteTargetID         string // Session ID to delete
 	deleteTargetName       string // Session name to delete (for display)
-	deleteTargetHostID     string // Host ID of session to delete
 	deleteTargetIsWorktree bool   // Whether the session is in a git worktree
 	confirmWorktreeForce   bool   // Whether force-delete worktree confirmation is active
 
@@ -158,10 +156,9 @@ type Model struct {
 	deletingIDs map[string]bool // Session IDs currently being deleted
 
 	// Kill confirmation
-	confirmKill      bool   // Whether kill confirmation is active
-	killTargetID     string // Session ID to kill
-	killTargetName   string // Session name to kill (for display)
-	killTargetHostID string // Host ID of session to kill
+	confirmKill    bool   // Whether kill confirmation is active
+	killTargetID   string // Session ID to kill
+	killTargetName string // Session name to kill (for display)
 
 	// Focus tracking (for visual focus indicator)
 	focused bool // true when TUI pane has focus (changes border/title color)
@@ -346,7 +343,6 @@ type deleteErrMsg struct {
 }
 type worktreeDirtyMsg struct {
 	sessionID string
-	hostID    string
 	name      string
 }
 
@@ -396,8 +392,7 @@ func (m *Model) switchToSession(sessionID string) {
 	}
 
 	// Determine if the target is a local alive session
-	isLocalAlive := isSessionAlive(sess.Status) && sess.TmuxWindowName != "" &&
-		(sess.HostID == "" || sess.HostID == "local")
+	isLocalAlive := isSessionAlive(sess.Status) && sess.TmuxWindowName != ""
 
 	// When switching away from a local attach, detach the inner tmux client first
 	// so that "tmux attach" exits cleanly and avoids "pane is dead".
@@ -429,13 +424,6 @@ func (m *Model) switchToSession(sessionID string) {
 
 	// Running sessions require TmuxWindowName for inner tmux attach
 	if sess.TmuxWindowName == "" {
-		return
-	}
-
-	// Remote session: use SSH attach command
-	if sess.HostID != "" && sess.HostID != "local" {
-		m.switchToRemoteSession(sess)
-		_ = m.tmuxClient.SetPaneOption(m.displayPaneID, "@session_name", sess.Name)
 		return
 	}
 
@@ -504,33 +492,7 @@ func isSessionAlive(status session.Status) bool {
 	return false
 }
 
-// switchToRemoteSession displays a remote session in the right pane via RespawnPane.
-func (m *Model) switchToRemoteSession(sess *session.Info) {
-	if m.configMgr == nil {
-		return
-	}
-
-	hostConfig := m.configMgr.GetHost(sess.HostID)
-	if hostConfig == nil {
-		return
-	}
-
-	// Ensure a background ControlMaster SSH connection exists for this host.
-	// This is separate from the tmux pane process, so RespawnPane won't kill it.
-	// Subsequent SSH connections (slaves) reuse the master for near-instant connection.
-	_ = host.EnsureSSHMaster(*hostConfig)
-
-	// Generate SSH attach command string (slave connection via ControlMaster)
-	attachCmd := host.AttachCommandString(*hostConfig, sess.TmuxWindowName)
-	_ = m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
-
-	m.currentSessionID = sess.ID
-	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sess.ID)
-}
-
 // openVSCode opens VS Code for the given session's working directory.
-// For local sessions: code <path>
-// For SSH remote sessions: code --remote ssh-remote+<host> <path>
 func (m *Model) openVSCode(sess *session.Info) {
 	workDir := sess.CurrentWorkDir
 	if workDir == "" {
@@ -539,21 +501,6 @@ func (m *Model) openVSCode(sess *session.Info) {
 	if workDir == "" {
 		return
 	}
-
-	// Remote session (SSH)
-	if sess.HostID != "" && sess.HostID != "local" {
-		if m.configMgr == nil {
-			return
-		}
-		hostConfig := m.configMgr.GetHost(sess.HostID)
-		if hostConfig == nil || hostConfig.Type != "ssh" {
-			return
-		}
-		_ = exec.Command("code", "--remote", "ssh-remote+"+hostConfig.Host, workDir).Start()
-		return
-	}
-
-	// Local session
 	_ = exec.Command("code", workDir).Start()
 }
 
@@ -576,7 +523,7 @@ func (m Model) handleSelectSession() (tea.Model, tea.Cmd) {
 	if m.tmuxClient != nil {
 		needsStart := sess.Status == session.StatusStopped
 		if needsStart {
-			if err := m.client.Start(sess.ID, sess.HostID); err != nil {
+			if err := m.client.Start(sess.ID); err != nil {
 				m.err = err
 				return m, nil
 			}
@@ -662,13 +609,12 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch msg.String() {
 				case "y", "Y":
 					deleteID := m.deleteTargetID
-					deleteHostID := m.deleteTargetHostID
 					m.deletingIDs[deleteID] = true
 					m.resetDeleteState()
 					m.skipDeletingSessions(1)
 					client := m.client
 					return m, func() tea.Msg {
-						if err := client.Delete(deleteID, deleteHostID, true, true); err != nil {
+						if err := client.Delete(deleteID, true, true); err != nil {
 							return deleteErrMsg{sessionID: deleteID, err: fmt.Errorf("delete failed: %w", err)}
 						}
 						sessions, err := client.List()
@@ -680,13 +626,12 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "n", "N", "esc":
 					// Fall back: delete session only
 					deleteID := m.deleteTargetID
-					deleteHostID := m.deleteTargetHostID
 					m.deletingIDs[deleteID] = true
 					m.resetDeleteState()
 					m.skipDeletingSessions(1)
 					client := m.client
 					return m, func() tea.Msg {
-						if err := client.Delete(deleteID, deleteHostID, false, false); err != nil {
+						if err := client.Delete(deleteID, false, false); err != nil {
 							return deleteErrMsg{sessionID: deleteID, err: fmt.Errorf("delete failed: %w", err)}
 						}
 						sessions, err := client.List()
@@ -703,13 +648,12 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y", "Y", "enter":
 				deleteID := m.deleteTargetID
-				deleteHostID := m.deleteTargetHostID
 				m.deletingIDs[deleteID] = true
 				m.resetDeleteState()
 				m.skipDeletingSessions(1)
 				client := m.client
 				return m, func() tea.Msg {
-					if err := client.Delete(deleteID, deleteHostID, false, false); err != nil {
+					if err := client.Delete(deleteID, false, false); err != nil {
 						return deleteErrMsg{sessionID: deleteID, err: fmt.Errorf("delete failed: %w", err)}
 					}
 					sessions, err := client.List()
@@ -723,17 +667,16 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil // ignore if not a worktree
 				}
 				deleteID := m.deleteTargetID
-				deleteHostID := m.deleteTargetHostID
 				deleteName := m.deleteTargetName
 				m.deletingIDs[deleteID] = true
 				m.resetDeleteState()
 				m.skipDeletingSessions(1)
 				client := m.client
 				return m, func() tea.Msg {
-					err := client.Delete(deleteID, deleteHostID, true, false)
+					err := client.Delete(deleteID, true, false)
 					if err != nil {
 						if errors.Is(err, session.ErrWorktreeDirty) {
-							return worktreeDirtyMsg{sessionID: deleteID, hostID: deleteHostID, name: deleteName}
+							return worktreeDirtyMsg{sessionID: deleteID, name: deleteName}
 						}
 						if errors.Is(err, session.ErrNotWorktree) {
 							return deleteErrMsg{
@@ -765,15 +708,13 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.needsReswitch = true
 
 				killID := m.killTargetID
-				killHostID := m.killTargetHostID
 				m.killTargetID = ""
 				m.killTargetName = ""
-				m.killTargetHostID = ""
 
 				client := m.client
 
 				return m, func() tea.Msg {
-					if err := client.Kill(killID, killHostID); err != nil {
+					if err := client.Kill(killID); err != nil {
 						return errMsg(fmt.Errorf("kill failed: %w", err))
 					}
 					sessions, err := client.List()
@@ -786,7 +727,6 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmKill = false
 				m.killTargetID = ""
 				m.killTargetName = ""
-				m.killTargetHostID = ""
 				return m, nil
 			}
 			return m, nil
@@ -905,7 +845,6 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmKill = true
 				m.killTargetID = sess.ID
 				m.killTargetName = sess.Name
-				m.killTargetHostID = sess.HostID
 				return m, nil
 			}
 
@@ -920,7 +859,6 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmDelete = true
 				m.deleteTargetID = sess.ID
 				m.deleteTargetName = sess.Name
-				m.deleteTargetHostID = sess.HostID
 				m.deleteTargetIsWorktree = sess.IsWorktree
 				return m, nil
 			}
@@ -1102,7 +1040,6 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirmDelete = true
 		m.confirmWorktreeForce = true
 		m.deleteTargetID = msg.sessionID
-		m.deleteTargetHostID = msg.hostID
 		m.deleteTargetName = msg.name
 		m.deleteTargetIsWorktree = true
 
@@ -1166,7 +1103,6 @@ func (m *Model) resetDeleteState() {
 	m.confirmWorktreeForce = false
 	m.deleteTargetID = ""
 	m.deleteTargetName = ""
-	m.deleteTargetHostID = ""
 	m.deleteTargetIsWorktree = false
 }
 
@@ -1425,11 +1361,8 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 		b.WriteString("\n")
 	}
 
-	// Build metadata: [host] workdir (branch)
+	// Build metadata: workdir (branch)
 	var metaParts []string
-	if sess.HostID != "" && sess.HostID != "local" {
-		metaParts = append(metaParts, "["+sess.HostID+"]")
-	}
 	// Use CurrentWorkDir if available, fall back to WorkDir
 	displayDir := sess.CurrentWorkDir
 	if displayDir == "" {

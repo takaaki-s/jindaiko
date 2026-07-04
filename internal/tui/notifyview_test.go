@@ -47,45 +47,6 @@ func TestEntryTypeLabel(t *testing.T) {
 	}
 }
 
-// --- hostIndicator ---
-
-func TestHostIndicator(t *testing.T) {
-	tests := []struct {
-		name   string
-		hostID string
-		want   string
-	}{
-		{
-			name:   "empty hostID returns empty",
-			hostID: "",
-			want:   "",
-		},
-		{
-			name:   "local hostID returns empty",
-			hostID: "local",
-			want:   "",
-		},
-		{
-			name:   "remote hostID returns bracket indicator",
-			hostID: "ec2-prod",
-			want:   " [ec2-prod]",
-		},
-		{
-			name:   "another remote hostID",
-			hostID: "docker-dev",
-			want:   " [docker-dev]",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := hostIndicator(tt.hostID)
-			if got != tt.want {
-				t.Errorf("hostIndicator(%q) = %q, want %q", tt.hostID, got, tt.want)
-			}
-		})
-	}
-}
-
 // --- NewNotifyModel ---
 
 func TestNewNotifyModel(t *testing.T) {
@@ -97,7 +58,6 @@ func TestNewNotifyModel(t *testing.T) {
 				Type:        "permission",
 				Message:     "Needs approval",
 				Timestamp:   time.Now(),
-				HostID:      "local",
 			},
 			{
 				SessionID:   "sess-2",
@@ -105,7 +65,6 @@ func TestNewNotifyModel(t *testing.T) {
 				Type:        "task_complete",
 				Message:     "Done",
 				Timestamp:   time.Now(),
-				HostID:      "ec2",
 			},
 		}
 		m := NewNotifyModel(entries)

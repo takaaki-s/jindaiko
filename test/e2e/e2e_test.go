@@ -34,7 +34,7 @@ func setupE2E(t *testing.T) *daemon.Client {
 	configDir := filepath.Join(tmpDir, "config")
 	stateDir := filepath.Join(tmpDir, "state")
 
-	server, err := daemon.NewServer(socketPath, sessionsDir, configDir, stateDir, "local")
+	server, err := daemon.NewServer(socketPath, sessionsDir, configDir, stateDir)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestE2E_SessionLifecycle(t *testing.T) {
 	}
 
 	// Delete
-	if err := client.Delete(info.ID, "", false, false); err != nil {
+	if err := client.Delete(info.ID, false, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestE2E_MultipleSessionsConcurrent(t *testing.T) {
 
 	// Delete all
 	for _, id := range ids {
-		if err := client.Delete(id, "", false, false); err != nil {
+		if err := client.Delete(id, false, false); err != nil {
 			t.Fatalf("Delete(%s): %v", id, err)
 		}
 	}

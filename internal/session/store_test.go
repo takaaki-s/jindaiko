@@ -42,7 +42,6 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 		LastActiveAt:    now,
 		ErrorMessage:    "some error",
 		ClaudeSessionID: "claude-456",
-		HostID:          "local",
 		TmuxWindowName:  "sess-test-123",
 		TmuxPaneID:      "%42",
 		CurrentWorkDir:  "/runtime/dir", // persisted

@@ -24,8 +24,6 @@ internal/
   session/           Session management (core domain, largest module)
   tui/               BubbleTea TUI (largest codebase)
   tmux/              tmux -L jin session control
-  host/              Multi-host management (SSH/Docker)
-  tunnel/            SSH tunnel lifecycle
   notify/            Desktop notifications (macOS/Linux)
   transcript/        Claude Code transcript reader (~/.claude/projects/)
 ```

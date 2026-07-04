@@ -60,58 +60,32 @@ func TestRenderActionResultJSON(t *testing.T) {
 	})
 }
 
-func TestResolveSession_ReturnsHostID(t *testing.T) {
-	// resolveSession should return hostID from the session info.
-	// We test the logic by calling resolveSessionFromList directly.
-
+func TestResolveSessionFromList(t *testing.T) {
 	tests := []struct {
-		name       string
-		sessions   []session.Info
-		nameOrID   string
-		wantID     string
-		wantName   string
-		wantHostID string
-		wantErr    bool
+		name     string
+		sessions []session.Info
+		nameOrID string
+		wantID   string
+		wantName string
+		wantErr  bool
 	}{
 		{
-			name: "local session by name",
+			name: "session by name",
 			sessions: []session.Info{
-				{ID: "aaa", Name: "my-session", HostID: "local"},
+				{ID: "aaa", Name: "my-session"},
 			},
-			nameOrID:   "my-session",
-			wantID:     "aaa",
-			wantName:   "my-session",
-			wantHostID: "local",
-		},
-		{
-			name: "remote session by name",
-			sessions: []session.Info{
-				{ID: "bbb", Name: "remote-sess", HostID: "ec2-prod"},
-			},
-			nameOrID:   "remote-sess",
-			wantID:     "bbb",
-			wantName:   "remote-sess",
-			wantHostID: "ec2-prod",
+			nameOrID: "my-session",
+			wantID:   "aaa",
+			wantName: "my-session",
 		},
 		{
 			name: "session by ID",
 			sessions: []session.Info{
-				{ID: "ccc-123", Name: "some-session", HostID: "docker-dev"},
+				{ID: "ccc-123", Name: "some-session"},
 			},
-			nameOrID:   "ccc-123",
-			wantID:     "ccc-123",
-			wantName:   "some-session",
-			wantHostID: "docker-dev",
-		},
-		{
-			name: "session with empty hostID",
-			sessions: []session.Info{
-				{ID: "ddd", Name: "no-host", HostID: ""},
-			},
-			nameOrID:   "no-host",
-			wantID:     "ddd",
-			wantName:   "no-host",
-			wantHostID: "",
+			nameOrID: "ccc-123",
+			wantID:   "ccc-123",
+			wantName: "some-session",
 		},
 		{
 			name:     "not found",
@@ -123,7 +97,7 @@ func TestResolveSession_ReturnsHostID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, name, hostID, err := resolveSessionFromList(tt.sessions, tt.nameOrID)
+			id, name, err := resolveSessionFromList(tt.sessions, tt.nameOrID)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -138,9 +112,6 @@ func TestResolveSession_ReturnsHostID(t *testing.T) {
 			}
 			if name != tt.wantName {
 				t.Errorf("name: got %q, want %q", name, tt.wantName)
-			}
-			if hostID != tt.wantHostID {
-				t.Errorf("hostID: got %q, want %q", hostID, tt.wantHostID)
 			}
 		})
 	}

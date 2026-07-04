@@ -1367,56 +1367,6 @@ func TestManager_Delete_WithTmuxSession(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// List with HostID tests
-// ---------------------------------------------------------------------------
-
-func TestManager_List_WithHostFilter(t *testing.T) {
-	mgr, _ := newTestManager(t)
-
-	// Create sessions with different HostIDs
-	sess1, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/host-1", Name: "host1"})
-	if err != nil {
-		t.Fatalf("create sess1 failed: %v", err)
-	}
-	sess2, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/host-2", Name: "host2"})
-	if err != nil {
-		t.Fatalf("create sess2 failed: %v", err)
-	}
-	sess3, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/host-3", Name: "host3"})
-	if err != nil {
-		t.Fatalf("create sess3 failed: %v", err)
-	}
-
-	// Set different HostIDs
-	mgr.mu.Lock()
-	sess1.HostID = "local"
-	sess2.HostID = "ec2"
-	sess3.HostID = "local"
-	mgr.mu.Unlock()
-
-	// List returns all sessions (no built-in host filter)
-	infos := mgr.List()
-	if len(infos) != 3 {
-		t.Fatalf("List returned %d items, want 3", len(infos))
-	}
-
-	// Verify HostIDs are passed through in Info
-	hostIDs := map[string]string{}
-	for _, info := range infos {
-		hostIDs[info.Name] = info.HostID
-	}
-	if hostIDs["host1"] != "local" {
-		t.Errorf("host1 HostID = %q, want %q", hostIDs["host1"], "local")
-	}
-	if hostIDs["host2"] != "ec2" {
-		t.Errorf("host2 HostID = %q, want %q", hostIDs["host2"], "ec2")
-	}
-	if hostIDs["host3"] != "local" {
-		t.Errorf("host3 HostID = %q, want %q", hostIDs["host3"], "local")
-	}
-}
-
 func TestNewManager_LoadAll_MigratesEmptyFleet(t *testing.T) {
 	dataDir := t.TempDir()
 	configDir := t.TempDir()
@@ -1934,28 +1884,6 @@ func (r *scriptedGitRunner) findCall(prefix ...string) []string {
 		}
 	}
 	return nil
-}
-
-func TestManager_CreateWithOptions_Worktree_RejectsRemoteHost(t *testing.T) {
-	mgr, _ := newTestManager(t)
-
-	workDir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(workDir, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-
-	_, err := mgr.CreateWithOptions(CreateOptions{
-		WorkDir:  workDir,
-		Name:     "remote-wt",
-		Worktree: true,
-		HostID:   "ec2",
-	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "remote") {
-		t.Errorf("error %q should mention remote", err.Error())
-	}
 }
 
 func TestManager_CreateWithOptions_Worktree_RejectsNonGitRepo(t *testing.T) {

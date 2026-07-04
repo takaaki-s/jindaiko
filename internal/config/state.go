@@ -16,7 +16,6 @@ const maxDirHistory = 20
 // DirHistoryEntry represents a single directory usage history entry
 type DirHistoryEntry struct {
 	Path       string    `yaml:"path"`
-	HostID     string    `yaml:"host_id"`
 	LastUsedAt time.Time `yaml:"last_used_at"`
 }
 
@@ -89,16 +88,16 @@ func (m *StateManager) saveLocked() error {
 }
 
 // RecordDirUsage records directory usage history.
-// Updates LastUsedAt if the same (hostID, path) already exists, otherwise adds a new entry.
+// Updates LastUsedAt if the same path already exists, otherwise adds a new entry.
 // Removes oldest entries if the total exceeds maxDirHistory.
-func (m *StateManager) RecordDirUsage(hostID, path string) error {
+func (m *StateManager) RecordDirUsage(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
 	found := false
 	for i := range m.state.DirHistory {
-		if m.state.DirHistory[i].HostID == hostID && m.state.DirHistory[i].Path == path {
+		if m.state.DirHistory[i].Path == path {
 			m.state.DirHistory[i].LastUsedAt = now
 			found = true
 			break
@@ -107,7 +106,6 @@ func (m *StateManager) RecordDirUsage(hostID, path string) error {
 	if !found {
 		m.state.DirHistory = append(m.state.DirHistory, DirHistoryEntry{
 			Path:       path,
-			HostID:     hostID,
 			LastUsedAt: now,
 		})
 	}
@@ -125,32 +123,30 @@ func (m *StateManager) RecordDirUsage(hostID, path string) error {
 	return m.saveLocked()
 }
 
-// GetDirHistory returns directory usage history for the specified host.
-// Sorted by LastUsedAt descending, up to maxEntries.
-func (m *StateManager) GetDirHistory(hostID string, maxEntries int) []DirHistoryEntry {
+// GetDirHistory returns directory usage history sorted by LastUsedAt descending,
+// up to maxEntries.
+func (m *StateManager) GetDirHistory(maxEntries int) []DirHistoryEntry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var result []DirHistoryEntry
-	for _, e := range m.state.DirHistory {
-		if e.HostID == hostID {
-			result = append(result, e)
-			if len(result) >= maxEntries {
-				break
-			}
-		}
+	if maxEntries <= 0 || len(m.state.DirHistory) <= maxEntries {
+		result := make([]DirHistoryEntry, len(m.state.DirHistory))
+		copy(result, m.state.DirHistory)
+		return result
 	}
+	result := make([]DirHistoryEntry, maxEntries)
+	copy(result, m.state.DirHistory[:maxEntries])
 	return result
 }
 
 // RemoveDirHistory removes the specified directory history entry.
-func (m *StateManager) RemoveDirHistory(hostID, path string) error {
+func (m *StateManager) RemoveDirHistory(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	filtered := m.state.DirHistory[:0]
 	for _, e := range m.state.DirHistory {
-		if !(e.HostID == hostID && e.Path == path) {
+		if e.Path != path {
 			filtered = append(filtered, e)
 		}
 	}

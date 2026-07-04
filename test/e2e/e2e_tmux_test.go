@@ -28,7 +28,7 @@ func setupE2EWithDataDir(t *testing.T, sessionsDir, configDir string) (*daemon.C
 
 	socketPath := filepath.Join(t.TempDir(), "e2e-tmux.sock")
 
-	server, err := daemon.NewServer(socketPath, sessionsDir, configDir, configDir, "local")
+	server, err := daemon.NewServer(socketPath, sessionsDir, configDir, configDir)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestE2E_KillWithTmuxCleanup(t *testing.T) {
 	}
 
 	// Kill
-	if err := client.Kill(info.ID, ""); err != nil {
+	if err := client.Kill(info.ID); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestE2E_DeleteWithTmuxCleanup(t *testing.T) {
 	}
 
 	// Delete
-	if err := client.Delete(info.ID, "", false, false); err != nil {
+	if err := client.Delete(info.ID, false, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestE2E_SessionDataPersistence(t *testing.T) {
 	}
 
 	// Delete should remove the file
-	if err := client.Delete(info.ID, "", false, false); err != nil {
+	if err := client.Delete(info.ID, false, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := os.Stat(jsonPath); err == nil {
@@ -363,7 +363,7 @@ func TestE2E_MultipleSessionsTmux(t *testing.T) {
 	}
 
 	// Kill the middle one
-	if err := client.Kill(sessions[1].id, ""); err != nil {
+	if err := client.Kill(sessions[1].id); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -381,7 +381,7 @@ func TestE2E_MultipleSessionsTmux(t *testing.T) {
 
 	// Delete the rest
 	for _, i := range []int{0, 2} {
-		if err := client.Delete(sessions[i].id, "", false, false); err != nil {
+		if err := client.Delete(sessions[i].id, false, false); err != nil {
 			t.Fatalf("Delete(%d): %v", i, err)
 		}
 	}
@@ -492,7 +492,7 @@ func TestE2E_DeleteWithWorktreeCleanup(t *testing.T) {
 	}
 
 	// Delete with worktree removal
-	if err := client.Delete(info.ID, "", true, false); err != nil {
+	if err := client.Delete(info.ID, true, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -526,7 +526,7 @@ func TestE2E_DeleteWithoutWorktreeCleanup(t *testing.T) {
 	}
 
 	// Delete without worktree removal
-	if err := client.Delete(info.ID, "", false, false); err != nil {
+	if err := client.Delete(info.ID, false, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -566,7 +566,7 @@ func TestE2E_DeleteWorktreeDirty(t *testing.T) {
 	}
 
 	// Delete with worktree removal — should fail with ErrWorktreeDirty
-	err = client.Delete(info.ID, "", true, false)
+	err = client.Delete(info.ID, true, false)
 	if err == nil {
 		t.Fatal("expected ErrWorktreeDirty, got nil")
 	}
@@ -589,7 +589,7 @@ func TestE2E_DeleteWorktreeDirty(t *testing.T) {
 	}
 
 	// Force delete
-	if err := client.Delete(info.ID, "", true, true); err != nil {
+	if err := client.Delete(info.ID, true, true); err != nil {
 		t.Fatalf("force Delete: %v", err)
 	}
 
@@ -628,7 +628,7 @@ func TestE2E_DeleteWorktreeAlreadyRemoved(t *testing.T) {
 	}
 
 	// Delete with worktree removal — should succeed even though dir is gone
-	if err := client.Delete(info.ID, "", true, false); err != nil {
+	if err := client.Delete(info.ID, true, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

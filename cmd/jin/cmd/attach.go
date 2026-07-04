@@ -5,9 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/takaaki-s/honjin/internal/config"
 	"github.com/takaaki-s/honjin/internal/daemon"
-	"github.com/takaaki-s/honjin/internal/host"
 	"github.com/takaaki-s/honjin/internal/session"
 	"github.com/takaaki-s/honjin/internal/tmux"
 )
@@ -44,7 +42,7 @@ var attachCmd = &cobra.Command{
 
 		// Start stopped sessions (resume)
 		if sess.Status == session.StatusStopped {
-			if err := client.Start(sess.ID, sess.HostID); err != nil {
+			if err := client.Start(sess.ID); err != nil {
 				return fmt.Errorf("failed to start session: %w", err)
 			}
 			fmt.Printf("Resuming session: %s\n", sess.Name)
@@ -56,26 +54,6 @@ var attachCmd = &cobra.Command{
 			windowName = tmux.InnerSessionName(sess.ID)
 		}
 
-		// Remote session: SSH or Docker attach
-		if sess.HostID != "" && sess.HostID != "local" {
-			configMgr, _ := config.NewManager(getConfigDir())
-			if configMgr == nil {
-				return fmt.Errorf("config not available")
-			}
-			hostConfig := configMgr.GetHost(sess.HostID)
-			if hostConfig == nil {
-				return fmt.Errorf("host not found: %s", sess.HostID)
-			}
-
-			_ = host.EnsureSSHMaster(*hostConfig)
-			attachExec := host.AttachCommand(*hostConfig, windowName)
-			attachExec.Stdin = os.Stdin
-			attachExec.Stdout = os.Stdout
-			attachExec.Stderr = os.Stderr
-			return attachExec.Run()
-		}
-
-		// Local session: attach to inner tmux
 		tc, err := tmux.NewClient()
 		if err != nil {
 			return fmt.Errorf("tmux not available: %w", err)

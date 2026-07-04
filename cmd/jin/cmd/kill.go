@@ -28,12 +28,12 @@ var killCmd = &cobra.Command{
 		nameOrID := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, sessionName, hostID, err := resolveSession(client, nameOrID)
+		sessionID, sessionName, err := resolveSession(client, nameOrID)
 		if err != nil {
 			return err
 		}
 
-		if err := client.Kill(sessionID, hostID); err != nil {
+		if err := client.Kill(sessionID); err != nil {
 			return err
 		}
 		if jsonOutput {
@@ -62,12 +62,12 @@ var deleteCmd = &cobra.Command{
 		nameOrID := args[0]
 		client := daemon.NewClient(getSocketPath())
 
-		sessionID, sessionName, hostID, err := resolveSession(client, nameOrID)
+		sessionID, sessionName, err := resolveSession(client, nameOrID)
 		if err != nil {
 			return err
 		}
 
-		if err := client.Delete(sessionID, hostID, removeWorktree, forceWorktree); err != nil {
+		if err := client.Delete(sessionID, removeWorktree, forceWorktree); err != nil {
 			if errors.Is(err, session.ErrWorktreeDirty) {
 				return exitcode.Wrap(err, exitcode.WorktreeDirty,
 					"worktree has uncommitted changes (use --force-worktree to override)")
@@ -82,25 +82,25 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
-// resolveSession resolves a session name or ID to the actual session ID, name, and host ID
-func resolveSession(client *daemon.Client, nameOrID string) (id, name, hostID string, err error) {
+// resolveSession resolves a session name or ID to the actual session ID and name
+func resolveSession(client *daemon.Client, nameOrID string) (id, name string, err error) {
 	sessions, err := client.List()
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 
 	return resolveSessionFromList(sessions, nameOrID)
 }
 
 // resolveSessionFromList resolves a session name or ID from a pre-fetched session list
-func resolveSessionFromList(sessions []session.Info, nameOrID string) (id, name, hostID string, err error) {
+func resolveSessionFromList(sessions []session.Info, nameOrID string) (id, name string, err error) {
 	for _, s := range sessions {
 		if s.Name == nameOrID || s.ID == nameOrID {
-			return s.ID, s.Name, s.HostID, nil
+			return s.ID, s.Name, nil
 		}
 	}
 
-	return "", "", "", exitcode.Errorf(exitcode.SessionNotFound, "session not found: %s", nameOrID)
+	return "", "", exitcode.Errorf(exitcode.SessionNotFound, "session not found: %s", nameOrID)
 }
 
 func renderActionResultJSON(w io.Writer, result actionResult) error {
