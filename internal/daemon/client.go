@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/notify"
+	"github.com/takaaki-s/honjin/internal/session"
 )
 
 // Client is the daemon client
@@ -47,7 +47,7 @@ func (c *Client) IsRunning() bool {
 func (c *Client) send(req Request) (*Response, error) {
 	conn, err := net.Dial("unix", c.socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("daemon not running. Start with: ccvalet daemon")
+		return nil, fmt.Errorf("daemon not running. Start with: jin daemon")
 	}
 	defer conn.Close()
 

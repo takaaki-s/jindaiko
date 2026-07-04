@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/honjin/internal/config"
 )
 
 func TestIsNotInstalled(t *testing.T) {
@@ -23,37 +23,37 @@ func TestIsNotInstalled(t *testing.T) {
 	}{
 		{
 			name:   "command not found",
-			output: "ccvalet: command not found",
+			output: "jin: command not found",
 			err:    nil,
 			want:   true,
 		},
 		{
 			name:   "not found",
-			output: "ccvalet: not found",
+			output: "jin: not found",
 			err:    nil,
 			want:   true,
 		},
 		{
 			name:   "no such file or directory case insensitive",
-			output: "ccvalet: No such file or directory",
+			output: "jin: No such file or directory",
 			err:    nil,
 			want:   true,
 		},
 		{
-			name:   "other error without ccvalet mention",
+			name:   "other error without jin mention",
 			output: "some other error",
 			err:    nil,
 			want:   false,
 		},
 		{
-			name:   "not found without ccvalet",
+			name:   "not found without jin",
 			output: "not found",
 			err:    nil,
 			want:   false,
 		},
 		{
-			name:   "multi-line with ccvalet error on second line",
-			output: "connecting to host...\nccvalet: command not found",
+			name:   "multi-line with jin error on second line",
+			output: "connecting to host...\njin: command not found",
 			err:    nil,
 			want:   true,
 		},
@@ -70,7 +70,7 @@ func TestIsNotInstalled(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "exit code 1 without ccvalet in output",
+			name:   "exit code 1 without jin in output",
 			output: "some output",
 			err:    exitErr1,
 			want:   false,
@@ -110,7 +110,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			"-o", "ControlMaster=no",
 			"-o", "ClearAllForwardings=yes",
 			"myhost",
-			"ccvalet daemon start --socket ~/.local/state/ccvalet/daemon.sock",
+			"jin daemon start --socket ~/.local/state/honjin/daemon.sock",
 		}
 		if len(cmd.Args) != len(wantArgs) {
 			t.Fatalf("args length = %d, want %d\ngot:  %v\nwant: %v", len(cmd.Args), len(wantArgs), cmd.Args, wantArgs)
@@ -133,7 +133,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			t.Fatal("expected non-nil command")
 		}
 
-		wantRemoteCmd := "ccvalet daemon start --socket /tmp/custom.sock"
+		wantRemoteCmd := "jin daemon start --socket /tmp/custom.sock"
 		// The remote command is the last element of Args
 		lastArg := cmd.Args[len(cmd.Args)-1]
 		if lastArg != wantRemoteCmd {
@@ -158,7 +158,7 @@ func TestStartSlaveCommand(t *testing.T) {
 			"-o", "ClearAllForwardings=yes",
 			"-p", "2222", "-i", "/path/to/key",
 			"myhost",
-			"ccvalet daemon start --socket ~/.local/state/ccvalet/daemon.sock",
+			"jin daemon start --socket ~/.local/state/honjin/daemon.sock",
 		}
 		if len(cmd.Args) != len(wantArgs) {
 			t.Fatalf("args length = %d, want %d\ngot:  %v\nwant: %v", len(cmd.Args), len(wantArgs), cmd.Args, wantArgs)
@@ -182,7 +182,7 @@ func TestStartSlaveCommand(t *testing.T) {
 
 		wantArgs := []string{
 			"docker", "exec", "my-container", "sh", "-c",
-			"ccvalet daemon start --socket ~/.local/state/ccvalet/daemon.sock",
+			"jin daemon start --socket ~/.local/state/honjin/daemon.sock",
 		}
 		if len(cmd.Args) != len(wantArgs) {
 			t.Fatalf("args length = %d, want %d\ngot:  %v\nwant: %v", len(cmd.Args), len(wantArgs), cmd.Args, wantArgs)
@@ -207,7 +207,7 @@ func TestStartSlaveCommand(t *testing.T) {
 	t.Run("ssh with BootstrapOptions", func(t *testing.T) {
 		hc := config.HostConfig{Type: "ssh", Host: "myhost"}
 		opts := BootstrapOptions{
-			PeerSocketPath: "/tmp/ccvalet-peers/mac/daemon.sock",
+			PeerSocketPath: "/tmp/jin-peers/mac/daemon.sock",
 			PeerHostID:     "mac",
 		}
 		cmd := StartSlaveCommand(hc, opts)
@@ -215,41 +215,41 @@ func TestStartSlaveCommand(t *testing.T) {
 			t.Fatal("expected non-nil command")
 		}
 		lastArg := cmd.Args[len(cmd.Args)-1]
-		want := "ccvalet daemon start --socket ~/.local/state/ccvalet/daemon.sock --peer-socket /tmp/ccvalet-peers/mac/daemon.sock --peer-id mac"
+		want := "jin daemon start --socket ~/.local/state/honjin/daemon.sock --peer-socket /tmp/jin-peers/mac/daemon.sock --peer-id mac"
 		if lastArg != want {
 			t.Errorf("remote command = %q, want %q", lastArg, want)
 		}
 	})
 
-	t.Run("ssh with custom ccvalet_path", func(t *testing.T) {
+	t.Run("ssh with custom jin_path", func(t *testing.T) {
 		hc := config.HostConfig{
-			Type:        "ssh",
-			Host:        "myhost",
-			CcvaletPath: "/home/user/.local/bin/ccvalet",
+			Type:    "ssh",
+			Host:    "myhost",
+			JinPath: "/home/user/.local/bin/jin",
 		}
 		cmd := StartSlaveCommand(hc)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
 		lastArg := cmd.Args[len(cmd.Args)-1]
-		want := "/home/user/.local/bin/ccvalet daemon start --socket ~/.local/state/ccvalet/daemon.sock"
+		want := "/home/user/.local/bin/jin daemon start --socket ~/.local/state/honjin/daemon.sock"
 		if lastArg != want {
 			t.Errorf("remote command = %q, want %q", lastArg, want)
 		}
 	})
 
-	t.Run("docker with custom ccvalet_path", func(t *testing.T) {
+	t.Run("docker with custom jin_path", func(t *testing.T) {
 		hc := config.HostConfig{
-			Type:        "docker",
-			Container:   "my-container",
-			CcvaletPath: "/usr/local/bin/ccvalet",
+			Type:      "docker",
+			Container: "my-container",
+			JinPath:   "/usr/local/bin/jin",
 		}
 		cmd := StartSlaveCommand(hc)
 		if cmd == nil {
 			t.Fatal("expected non-nil command")
 		}
 		lastArg := cmd.Args[len(cmd.Args)-1]
-		want := "/usr/local/bin/ccvalet daemon start --socket ~/.local/state/ccvalet/daemon.sock"
+		want := "/usr/local/bin/jin daemon start --socket ~/.local/state/honjin/daemon.sock"
 		if lastArg != want {
 			t.Errorf("remote command = %q, want %q", lastArg, want)
 		}
@@ -286,8 +286,8 @@ func TestValidatePath(t *testing.T) {
 		input string
 		valid bool
 	}{
-		{"/tmp/ccvalet-peers/mac/daemon.sock", true},
-		{"~/.local/state/ccvalet/daemon.sock", true},
+		{"/tmp/jin-peers/mac/daemon.sock", true},
+		{"~/.local/state/honjin/daemon.sock", true},
 		{"/a/b/c", true},
 		{"", false},
 		{"/tmp/foo;rm -rf /", false},

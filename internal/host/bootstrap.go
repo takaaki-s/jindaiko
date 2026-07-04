@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/paths"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/paths"
 )
 
 // slaveStartTimeout is the timeout for slave startup commands.
@@ -17,7 +17,7 @@ const slaveStartTimeout = 30 * time.Second
 
 // BootstrapOptions configures optional peer information for the slave daemon
 type BootstrapOptions struct {
-	PeerSocketPath string // Reverse tunnel socket path on remote (e.g., /tmp/ccvalet-peers/mac/daemon.sock)
+	PeerSocketPath string // Reverse tunnel socket path on remote (e.g., /tmp/jin-peers/mac/daemon.sock)
 	PeerHostID     string // Master daemon's host ID
 }
 
@@ -56,12 +56,12 @@ func StartSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *
 		socketPath = paths.RemoteDefaultSocket()
 	}
 
-	ccvaletBin := "ccvalet"
-	if hostConfig.CcvaletPath != "" {
-		ccvaletBin = hostConfig.CcvaletPath
+	jinBin := "jin"
+	if hostConfig.JinPath != "" {
+		jinBin = hostConfig.JinPath
 	}
 
-	remoteCmd := fmt.Sprintf("%s daemon start --socket %s", ccvaletBin, socketPath)
+	remoteCmd := fmt.Sprintf("%s daemon start --socket %s", jinBin, socketPath)
 	if len(opts) > 0 && opts[0].PeerSocketPath != "" && opts[0].PeerHostID != "" {
 		remoteCmd += fmt.Sprintf(" --peer-socket %s --peer-id %s", opts[0].PeerSocketPath, opts[0].PeerHostID)
 	}
@@ -85,12 +85,12 @@ func StartSlaveCommand(hostConfig config.HostConfig, opts ...BootstrapOptions) *
 }
 
 // StartSlave starts the slave daemon on a remote host and returns the result.
-// Returns an error if ccvalet is not installed on the remote host.
+// Returns an error if jin is not installed on the remote host.
 func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
 	// Validate all inputs before building the shell command (prevent injection)
-	if hostConfig.CcvaletPath != "" {
-		if err := validatePath(hostConfig.CcvaletPath); err != nil {
-			return fmt.Errorf("invalid ccvalet_path: %w", err)
+	if hostConfig.JinPath != "" {
+		if err := validatePath(hostConfig.JinPath); err != nil {
+			return fmt.Errorf("invalid jin_path: %w", err)
 		}
 	}
 	if hostConfig.SocketPath != "" {
@@ -120,9 +120,9 @@ func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
 	if err != nil {
 		outStr := strings.TrimSpace(string(output))
 
-		// Detect if ccvalet is not installed
+		// Detect if jin is not installed
 		if isNotInstalled(outStr, err) {
-			return fmt.Errorf("ccvalet is not installed on host '%s'. Install it first: go install github.com/takaaki-s/claude-code-valet/cmd/ccvalet@latest", hostConfig.ID)
+			return fmt.Errorf("jin is not installed on host '%s'. Install it first: go install github.com/takaaki-s/honjin/cmd/jin@latest", hostConfig.ID)
 		}
 
 		if ctx.Err() == context.DeadlineExceeded {
@@ -135,14 +135,14 @@ func StartSlave(hostConfig config.HostConfig, opts ...BootstrapOptions) error {
 	return nil
 }
 
-// isNotInstalled determines from command output whether ccvalet is not installed
+// isNotInstalled determines from command output whether jin is not installed
 func isNotInstalled(output string, err error) bool {
 	lower := strings.ToLower(output)
-	// Detect shell errors like "ccvalet: command not found" or "ccvalet: not found"
-	// Only check lines containing "ccvalet" to distinguish from SSH infrastructure
+	// Detect shell errors like "jin: command not found" or "jin: not found"
+	// Only check lines containing "jin" to distinguish from SSH infrastructure
 	// errors (ControlPath etc.) that also contain "not found"
 	for line := range strings.SplitSeq(lower, "\n") {
-		if !strings.Contains(line, "ccvalet") {
+		if !strings.Contains(line, "jin") {
 			continue
 		}
 		if strings.Contains(line, "command not found") ||

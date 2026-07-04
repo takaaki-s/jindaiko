@@ -5,13 +5,13 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/honjin/internal/config"
 )
 
 // SSHControlPath returns the ControlMaster socket path for a host.
 // Each host gets a unique socket so connections don't interfere with each other.
 func SSHControlPath(hostID string) string {
-	return filepath.Join("/tmp", "ccvalet-ssh-ctrl-"+hostID)
+	return filepath.Join("/tmp", "jin-ssh-ctrl-"+hostID)
 }
 
 // EnsureSSHMaster ensures a background ControlMaster SSH connection exists for the host.
@@ -48,7 +48,7 @@ func EnsureSSHMaster(hostConfig config.HostConfig) error {
 }
 
 // AttachCommand generates a tmux attach command based on host type.
-// tmuxTarget is a tmux target string like "ccvalet:sess-xxx".
+// tmuxTarget is a tmux target string like "jin:sess-xxx".
 func AttachCommand(hostConfig config.HostConfig, tmuxTarget string) *exec.Cmd {
 	switch hostConfig.Type {
 	case "ssh":
@@ -57,7 +57,7 @@ func AttachCommand(hostConfig config.HostConfig, tmuxTarget string) *exec.Cmd {
 		return dockerAttachCommand(hostConfig, tmuxTarget)
 	default:
 		// Local: use tmux select-window directly
-		return exec.Command("tmux", "-L", "ccvalet", "select-window", "-t", tmuxTarget)
+		return exec.Command("tmux", "-L", "jin", "select-window", "-t", tmuxTarget)
 	}
 }
 
@@ -66,7 +66,7 @@ func AttachCommand(hostConfig config.HostConfig, tmuxTarget string) *exec.Cmd {
 func AttachCommandString(hostConfig config.HostConfig, tmuxTarget string) string {
 	switch hostConfig.Type {
 	case "ssh":
-		remoteCmd := fmt.Sprintf("tmux -L ccvalet attach -t %s", tmuxTarget)
+		remoteCmd := fmt.Sprintf("tmux -L jin attach -t %s", tmuxTarget)
 		ctrlPath := SSHControlPath(hostConfig.ID)
 		// ControlMaster=no: slave-only (master is pre-started via EnsureSSHMaster)
 		// ControlPath: reference master socket for SSH multiplexing (near-instant connection)
@@ -78,14 +78,14 @@ func AttachCommandString(hostConfig config.HostConfig, tmuxTarget string) string
 		cmd += " -t " + hostConfig.Host + " '" + remoteCmd + "'"
 		return cmd
 	case "docker":
-		return fmt.Sprintf("docker exec -it %s tmux -L ccvalet attach -t %s", hostConfig.Container, tmuxTarget)
+		return fmt.Sprintf("docker exec -it %s tmux -L jin attach -t %s", hostConfig.Container, tmuxTarget)
 	default:
-		return fmt.Sprintf("tmux -L ccvalet attach -t %s", tmuxTarget)
+		return fmt.Sprintf("tmux -L jin attach -t %s", tmuxTarget)
 	}
 }
 
 func sshAttachCommand(hostConfig config.HostConfig, tmuxTarget string) *exec.Cmd {
-	remoteCmd := fmt.Sprintf("tmux -L ccvalet attach -t %s", tmuxTarget)
+	remoteCmd := fmt.Sprintf("tmux -L jin attach -t %s", tmuxTarget)
 	ctrlPath := SSHControlPath(hostConfig.ID)
 	args := make([]string, 0, len(hostConfig.SSHOpts)+9)
 	args = append(args, "-o", "ControlMaster=no",
@@ -96,5 +96,5 @@ func sshAttachCommand(hostConfig config.HostConfig, tmuxTarget string) *exec.Cmd
 }
 
 func dockerAttachCommand(hostConfig config.HostConfig, tmuxTarget string) *exec.Cmd {
-	return exec.Command("docker", "exec", "-it", hostConfig.Container, "tmux", "-L", "ccvalet", "attach", "-t", tmuxTarget)
+	return exec.Command("docker", "exec", "-it", hostConfig.Container, "tmux", "-L", "jin", "attach", "-t", tmuxTarget)
 }

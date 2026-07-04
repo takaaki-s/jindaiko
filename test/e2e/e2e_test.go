@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/daemon"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
-	"github.com/takaaki-s/claude-code-valet/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/daemon"
+	"github.com/takaaki-s/honjin/internal/session"
+	"github.com/takaaki-s/honjin/internal/tmux"
 )
 
 func TestMain(m *testing.M) {
@@ -85,7 +85,7 @@ func TestE2E_SessionLifecycle(t *testing.T) {
 	info, err := client.NewWithOptions(daemon.NewOptions{
 		Name:    "e2e-test",
 		WorkDir: t.TempDir(), // Use a real directory
-		Start:   false,       // Don't start (tmux ccvalet session may not exist)
+		Start:   false,       // Don't start (tmux jin session may not exist)
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -137,8 +137,8 @@ func TestE2E_HookEventFlow(t *testing.T) {
 
 	// UserPromptSubmit → thinking
 	if err := client.SendHook(daemon.HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	}); err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit): %v", err)
 	}
@@ -153,7 +153,7 @@ func TestE2E_HookEventFlow(t *testing.T) {
 
 	// Notification(permission_prompt) → permission
 	if err := client.SendHook(daemon.HookRequest{
-		CcvaletSessionID: info.ID,
+		JinSessionID:     info.ID,
 		HookEventName:    "Notification",
 		NotificationType: "permission_prompt",
 	}); err != nil {
@@ -170,8 +170,8 @@ func TestE2E_HookEventFlow(t *testing.T) {
 
 	// Stop → idle
 	if err := client.SendHook(daemon.HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	}); err != nil {
 		t.Fatalf("SendHook(Stop): %v", err)
 	}
@@ -209,12 +209,12 @@ func TestE2E_NotificationHistory(t *testing.T) {
 
 	// Make it thinking first, then stop
 	client.SendHook(daemon.HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	})
 	client.SendHook(daemon.HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	})
 
 	// Check notification history

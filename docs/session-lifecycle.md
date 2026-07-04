@@ -65,7 +65,7 @@ Session (runtime only, json:"-")
 
 1. `Manager.CreateWithOptions()` creates a Session and persists it via Store
 2. `Manager.StartBackground()` → `startSession()` → `startSessionTmux()`
-3. `ensureTmuxClient()` initializes the inner tmux (`-L ccvalet`)
+3. `ensureTmuxClient()` initializes the inner tmux (`-L jin`)
 4. `ensureClaudeTrustState()` sets trust config in `~/.claude/settings.local.json`
 5. Creates an inner tmux session and runs `claude --session-id {ID}`
 6. `TagManagedPane()` tags the pane for remain-on-exit

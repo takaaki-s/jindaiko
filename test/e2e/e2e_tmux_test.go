@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/daemon"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
-	"github.com/takaaki-s/claude-code-valet/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/daemon"
+	"github.com/takaaki-s/honjin/internal/session"
+	"github.com/takaaki-s/honjin/internal/tmux"
 )
 
 // --- helpers ---
@@ -55,7 +55,7 @@ func setupE2EWithDataDir(t *testing.T, sessionsDir, configDir string) (*daemon.C
 	return daemon.NewClient(socketPath), server
 }
 
-// hasTmuxSession checks if a tmux session exists on the ccvalet socket.
+// hasTmuxSession checks if a tmux session exists on the jin socket.
 func hasTmuxSession(name string) bool {
 	tc, err := tmux.NewClient()
 	if err != nil {
@@ -64,7 +64,7 @@ func hasTmuxSession(name string) bool {
 	return tc.HasSession(name)
 }
 
-// cleanupTmuxSessions kills all sessions on the ccvalet tmux socket.
+// cleanupTmuxSessions kills all sessions on the jin tmux socket.
 func cleanupTmuxSessions(t *testing.T) {
 	t.Helper()
 	_ = exec.Command("tmux", "-L", tmux.SocketName, "kill-server").Run()
@@ -114,7 +114,7 @@ func TestE2E_TmuxSessionCreation(t *testing.T) {
 
 	innerName := tmux.InnerSessionName(info.ID)
 
-	// tmux session should exist on the ccvalet socket
+	// tmux session should exist on the jin socket
 	// Wait briefly for async session creation
 	time.Sleep(500 * time.Millisecond)
 
@@ -412,9 +412,9 @@ func TestE2E_HookCWDUpdateOnStartedSession(t *testing.T) {
 	// Send hook with CWD
 	newCWD := t.TempDir()
 	if err := client.SendHook(daemon.HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
-		CWD:              newCWD,
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
+		CWD:           newCWD,
 	}); err != nil {
 		t.Fatalf("SendHook: %v", err)
 	}

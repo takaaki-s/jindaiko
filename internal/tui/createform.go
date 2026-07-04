@@ -9,11 +9,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/daemon"
-	"github.com/takaaki-s/claude-code-valet/internal/paths"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
-	"github.com/takaaki-s/claude-code-valet/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/daemon"
+	"github.com/takaaki-s/honjin/internal/paths"
+	"github.com/takaaki-s/honjin/internal/session"
+	"github.com/takaaki-s/honjin/internal/tmux"
 )
 
 // formStep represents the current form step
@@ -28,7 +28,7 @@ const (
 
 // CreateFormModel is a standalone Bubble Tea model for the session creation form.
 // It is designed to run inside a tmux popup and communicates the result
-// back to the parent TUI via the CCVALET_CREATED_SESSION environment variable.
+// back to the parent TUI via the JIN_CREATED_SESSION environment variable.
 type CreateFormModel struct {
 	client   *daemon.Client
 	sessions []session.Info
@@ -199,7 +199,7 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Success - set env var for parent TUI to detect
 		if tc, err := tmux.NewMgrClient(); err == nil {
-			_ = tc.SetEnvironment(tmux.SessionName, "CCVALET_CREATED_SESSION", msg.sessionID)
+			_ = tc.SetEnvironment(tmux.SessionName, "JIN_CREATED_SESSION", msg.sessionID)
 		}
 		return m, tea.Quit
 

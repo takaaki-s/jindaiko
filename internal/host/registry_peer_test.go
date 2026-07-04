@@ -3,7 +3,7 @@ package host
 import (
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
+	"github.com/takaaki-s/honjin/internal/config"
 )
 
 func TestRegistry_RegisterPeer(t *testing.T) {

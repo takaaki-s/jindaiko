@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
+	"github.com/takaaki-s/honjin/internal/notify"
 )
 
 // --- entryTypeLabel ---

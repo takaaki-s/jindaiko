@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/host"
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/host"
+	"github.com/takaaki-s/honjin/internal/notify"
+	"github.com/takaaki-s/honjin/internal/session"
 )
 
 // shortTempDir creates a short temporary directory under /tmp to avoid macOS
@@ -203,9 +203,9 @@ func TestIntegration_HookEvent(t *testing.T) {
 
 	// Send a hook event
 	err = client.SendHook(HookRequest{
-		SessionID:        info.ClaudeSessionID,
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		SessionID:     info.ClaudeSessionID,
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	})
 	if err != nil {
 		t.Fatalf("SendHook: %v", err)
@@ -321,16 +321,16 @@ func TestIntegration_HookStopTriggersIdle(t *testing.T) {
 
 	// First make it "thinking"
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	}); err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit): %v", err)
 	}
 
 	// Then send "Stop" to transition to idle
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	}); err != nil {
 		t.Fatalf("SendHook(Stop): %v", err)
 	}
@@ -364,7 +364,7 @@ func TestIntegration_HookPermission(t *testing.T) {
 	}
 
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
+		JinSessionID:     info.ID,
 		HookEventName:    "Notification",
 		NotificationType: "permission_prompt",
 	}); err != nil {
@@ -509,9 +509,9 @@ func TestIntegration_HookCWDUpdate(t *testing.T) {
 	// Send a hook with CWD field set
 	newCWD := "/home/user/new-project"
 	err = client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
-		CWD:              newCWD,
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
+		CWD:           newCWD,
 	})
 	if err != nil {
 		t.Fatalf("SendHook: %v", err)
@@ -562,8 +562,8 @@ func TestIntegration_MultipleHookTransitions(t *testing.T) {
 
 	// Step 1: UserPromptSubmit → thinking
 	err = client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	})
 	if err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit #1): %v", err)
@@ -572,8 +572,8 @@ func TestIntegration_MultipleHookTransitions(t *testing.T) {
 
 	// Step 2: Stop → idle
 	err = client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	})
 	if err != nil {
 		t.Fatalf("SendHook(Stop): %v", err)
@@ -582,8 +582,8 @@ func TestIntegration_MultipleHookTransitions(t *testing.T) {
 
 	// Step 3: UserPromptSubmit → thinking (again)
 	err = client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	})
 	if err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit #2): %v", err)
@@ -592,7 +592,7 @@ func TestIntegration_MultipleHookTransitions(t *testing.T) {
 
 	// Step 4: Notification(permission_prompt) → permission
 	err = client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
+		JinSessionID:     info.ID,
 		HookEventName:    "Notification",
 		NotificationType: "permission_prompt",
 	})
@@ -633,16 +633,16 @@ func TestIntegration_NotificationHistoryWithEntries(t *testing.T) {
 
 	// UserPromptSubmit → thinking
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	}); err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit): %v", err)
 	}
 
 	// Stop → idle (generates a "task complete" notification)
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	}); err != nil {
 		t.Fatalf("SendHook(Stop): %v", err)
 	}
@@ -1003,14 +1003,14 @@ func TestIntegration_SendWithHostID(t *testing.T) {
 
 	// Make session idle so Send is accepted
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "UserPromptSubmit",
+		JinSessionID:  info.ID,
+		HookEventName: "UserPromptSubmit",
 	}); err != nil {
 		t.Fatalf("SendHook(UserPromptSubmit): %v", err)
 	}
 	if err := client.SendHook(HookRequest{
-		CcvaletSessionID: info.ID,
-		HookEventName:    "Stop",
+		JinSessionID:  info.ID,
+		HookEventName: "Stop",
 	}); err != nil {
 		t.Fatalf("SendHook(Stop): %v", err)
 	}

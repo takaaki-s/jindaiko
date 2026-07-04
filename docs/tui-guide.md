@@ -14,10 +14,10 @@ internal/tui/
 ├─ helpview.go    ... Help view (for popup, ~100 lines)
 └─ styles.go      ... lipgloss style definitions (Tokyo Night color scheme)
 
-cmd/ccvalet/cmd/
-├─ create_popup.go  ... ccvalet create-popup (Hidden) → launches CreateFormModel
-├─ help_popup.go    ... ccvalet help-popup (Hidden)   → launches HelpModel
-└─ notify_popup.go  ... ccvalet notify-popup (Hidden) → launches NotifyModel
+cmd/jin/cmd/
+├─ create_popup.go  ... jin create-popup (Hidden) → launches CreateFormModel
+├─ help_popup.go    ... jin help-popup (Hidden)   → launches HelpModel
+└─ notify_popup.go  ... jin notify-popup (Hidden) → launches NotifyModel
 ```
 
 ## Model Structure
@@ -66,7 +66,7 @@ func (m Model) View() string {
 - **Help**: `HelpModel` in `helpview.go` (keybind list)
 - **Notification history**: `NotifyModel` in `notifyview.go` (notification list + session selection)
 
-After popup completion, results are returned to the parent TUI via environment variables (`CCVALET_CREATED_SESSION`, `CCVALET_NOTIFY_SESSION`). The parent TUI detects them during tickMsg polling.
+After popup completion, results are returned to the parent TUI via environment variables (`JIN_CREATED_SESSION`, `JIN_NOTIFY_SESSION`). The parent TUI detects them during tickMsg polling.
 
 ## Styling
 
@@ -77,7 +77,7 @@ After popup completion, results are returned to the parent TUI via environment v
 ## Adding a New Popup
 
 1. Create a new `.go` file in `internal/tui/` and implement an independent `tea.Model`
-2. Create `xxx_popup.go` in `cmd/ccvalet/cmd/` (register as a Hidden command)
+2. Create `xxx_popup.go` in `cmd/jin/cmd/` (register as a Hidden command)
 3. Use `tea.NewProgram()` inside the popup to run as an independent BubbleTea program
 4. If returning results via environment variables, add detection logic in `model.go`'s `tick()`
 5. Add a keybind for popup launch in `model.go`'s `updateListMode()`
@@ -87,4 +87,4 @@ After popup completion, results are returned to the parent TUI via environment v
 
 Keybindings are retrieved from `config.GetKeybindings()`.
 Default values are defined in `config.DefaultKeybindings()`.
-Users can customize them in the `keybindings` section of `~/.config/ccvalet/config.yaml` (or wherever `$XDG_CONFIG_HOME/ccvalet/config.yaml` resolves to).
+Users can customize them in the `keybindings` section of `~/.config/honjin/config.yaml` (or wherever `$XDG_CONFIG_HOME/honjin/config.yaml` resolves to).

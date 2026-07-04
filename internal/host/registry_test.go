@@ -4,9 +4,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
-	"github.com/takaaki-s/claude-code-valet/internal/session"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/notify"
+	"github.com/takaaki-s/honjin/internal/session"
 )
 
 // mockSlaveClient implements SlaveClient for testing.

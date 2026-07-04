@@ -19,7 +19,7 @@ func TestIsProcessRunning(t *testing.T) {
 		},
 		{
 			name: "Running session with TmuxWindowName is running",
-			s:    &Session{Status: StatusRunning, TmuxWindowName: "ccvalet_test-123"},
+			s:    &Session{Status: StatusRunning, TmuxWindowName: "jin_test-123"},
 			want: true,
 		},
 		{
@@ -29,7 +29,7 @@ func TestIsProcessRunning(t *testing.T) {
 		},
 		{
 			name: "Idle session with TmuxWindowName is running",
-			s:    &Session{Status: StatusIdle, TmuxWindowName: "ccvalet_idle"},
+			s:    &Session{Status: StatusIdle, TmuxWindowName: "jin_idle"},
 			want: true,
 		},
 		{
@@ -39,7 +39,7 @@ func TestIsProcessRunning(t *testing.T) {
 		},
 		{
 			name: "Permission session with TmuxWindowName is running",
-			s:    &Session{Status: StatusPermission, TmuxWindowName: "ccvalet_perm"},
+			s:    &Session{Status: StatusPermission, TmuxWindowName: "jin_perm"},
 			want: true,
 		},
 	}

@@ -2,17 +2,17 @@
 
 ## Overview
 
-ccvalet is a CLI/TUI tool that manages multiple Claude Code sessions on tmux.
+honjin is a CLI/TUI tool that manages multiple Claude Code sessions on tmux.
 A daemon process provides IPC via Unix socket, with CLI and TUI connecting as clients.
 
 ## Data Flow
 
 ```
 User
- ├─ ccvalet tui          ─┐
- ├─ ccvalet session new   │  daemon.Client (Unix socket)
- ├─ ccvalet session list  ├─────────────────────────────→ daemon.Server
- └─ ccvalet session kill ─┘                                   │
+ ├─ jin tui              ─┐
+ ├─ jin session new       │  daemon.Client (Unix socket)
+ ├─ jin session list      ├─────────────────────────────→ daemon.Server
+ └─ jin session kill     ─┘                                   │
                                                               ▼
                                                       session.Manager
                                                          │       │
@@ -20,7 +20,7 @@ User
                                                     tmux.Client  Store (JSON)
                                                          │
                                                          ▼
-                                                   tmux -L ccvalet
+                                                   tmux -L jin
                                                     (inner tmux)
                                                          │
                                                          ▼
@@ -31,7 +31,7 @@ User
 
 ```
 Claude Code (hook event)
-  → ccvalet hook (cmd/ccvalet/cmd/hook.go)
+  → jin hook (cmd/jin/cmd/hook.go)
     → daemon.Client.Send("hook", HookRequest)
       → daemon.Server.handleHook()
         → session.Manager.HandleHookEvent()
@@ -46,7 +46,7 @@ Hook Events:
 ## Package Dependency
 
 ```
-cmd/ccvalet/cmd/   → daemon (client), config, session (types only), tui, tmux, host
+cmd/jin/cmd/       → daemon (client), config, session (types only), tui, tmux, host
                       │
 daemon/            → session, config, host, notify, tmux, tunnel
                       │
@@ -86,13 +86,13 @@ Requests destined for remote hosts are forwarded via `forwardToSlave()`, which s
 
 ## File Storage
 
-ccvalet follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/):
+honjin follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/):
 
 ```
-$XDG_CONFIG_HOME/ccvalet/        (default: ~/.config/ccvalet)
+$XDG_CONFIG_HOME/honjin/        (default: ~/.config/honjin)
   └─ config.yaml                 ... User settings (keybindings, hosts)
 
-$XDG_STATE_HOME/ccvalet/         (default: ~/.local/state/ccvalet)
+$XDG_STATE_HOME/honjin/         (default: ~/.local/state/honjin)
   ├─ state.yaml                  ... Persistent state (StateManager)
   ├─ sessions/
   │   └─ {uuid}.json             ... Session persistence data
@@ -100,6 +100,6 @@ $XDG_STATE_HOME/ccvalet/         (default: ~/.local/state/ccvalet)
   ├─ daemon-debug.log            ... Daemon debug log
   └─ hook-debug.log              ... Hook debug log
 
-$XDG_RUNTIME_DIR/ccvalet/        (fallback: $TMPDIR/ccvalet-<uid>)
+$XDG_RUNTIME_DIR/honjin/        (fallback: $TMPDIR/honjin-<uid>)
   └─ daemon.sock                 ... Unix domain socket
 ```

@@ -9,9 +9,9 @@ Common pitfalls and caveats that agents tend to fall into.
   Panes added by the user are destroyed immediately.
   (Fixed in commit 980e99f)
 
-- **tmux session name** is the `tmux.SessionName` constant ("ccvalet"). Do not change it.
+- **tmux session name** is the `tmux.SessionName` constant ("jin"). Do not change it.
 
-- **inner tmux**: ccvalet uses its own tmux socket (`-L ccvalet`).
+- **inner tmux**: honjin uses its own tmux socket (`-L jin`).
   It runs as a separate server process from the user's main tmux.
 
 - **base-index issue**: If `base-index=1` is set in the user's `~/.tmux.conf`,
@@ -19,7 +19,7 @@ Common pitfalls and caveats that agents tend to fall into.
 
 ## Hook
 
-- **Session identification uses the `CCVALET_SESSION_ID` environment variable** (most reliable).
+- **Session identification uses the `JIN_SESSION_ID` environment variable** (most reliable).
   Claude Code's session ID is used as a fallback.
   (Improved in commit a0bd6f7)
 

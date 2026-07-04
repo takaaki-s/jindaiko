@@ -21,7 +21,7 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 		ClaudeSessionStarted: true,
 		Fleet:                "backend",
 		HostID:               "ec2-instance",
-		TmuxWindowName:       "ccvalet_test-id-123",
+		TmuxWindowName:       "jin_test-id-123",
 		TmuxPaneID:           "%42",
 
 		// Runtime fields (should NOT appear in Info but CurrentWorkDir/CurrentBranch are mapped)
@@ -119,7 +119,7 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 		ClaudeSessionStarted: true,
 		Fleet:                "frontend",
 		HostID:               "docker-dev",
-		TmuxWindowName:       "ccvalet_round-trip-id",
+		TmuxWindowName:       "jin_round-trip-id",
 		TmuxPaneID:           "%99",
 	}
 

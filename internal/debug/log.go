@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/takaaki-s/claude-code-valet/internal/paths"
+	"github.com/takaaki-s/honjin/internal/paths"
 )
 
-// enabled is true when CCVALET_DEBUG=1 is set.
-var enabled = os.Getenv("CCVALET_DEBUG") == "1"
+// enabled is true when JIN_DEBUG=1 is set.
+var enabled = os.Getenv("JIN_DEBUG") == "1"
 
 // NewLogger returns a debug logging function that writes to
-// $XDG_STATE_HOME/ccvalet/<filename> (default ~/.local/state/ccvalet/<filename>)
-// when CCVALET_DEBUG=1 is set.
+// $XDG_STATE_HOME/honjin/<filename> (default ~/.local/state/honjin/<filename>)
+// when JIN_DEBUG=1 is set.
 // When debugging is disabled or the state directory cannot be resolved,
 // the returned function is a no-op.
 func NewLogger(filename string) func(string, ...any) {

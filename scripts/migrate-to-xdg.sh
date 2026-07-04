@@ -5,9 +5,9 @@
 # Move ccvalet's data out of the legacy ~/.ccvalet/ directory and into the
 # XDG-compliant locations used by current versions:
 #
-#   config:  $XDG_CONFIG_HOME/ccvalet   (default ~/.config/ccvalet)
-#   state:   $XDG_STATE_HOME/ccvalet    (default ~/.local/state/ccvalet)
-#   socket:  $XDG_RUNTIME_DIR/ccvalet   (regenerated automatically)
+#   config:  $XDG_CONFIG_HOME/honjin   (default ~/.config/honjin)
+#   state:   $XDG_STATE_HOME/honjin    (default ~/.local/state/honjin)
+#   socket:  $XDG_RUNTIME_DIR/honjin   (regenerated automatically)
 #
 # Safe to re-run: refuses to clobber existing files in the target directories.
 # Run with --dry-run to preview without touching anything.
@@ -15,8 +15,8 @@
 set -euo pipefail
 
 OLD_DIR="${HOME}/.ccvalet"
-CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/ccvalet"
-STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/ccvalet"
+CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/honjin"
+STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/honjin"
 
 DRY_RUN=0
 
@@ -63,7 +63,7 @@ if [ ! -d "$OLD_DIR" ]; then
 fi
 
 # Pre-flight: if a legacy daemon is still running, stop it.
-# Reason: post-XDG `ccvalet daemon stop` looks at the new socket path and
+# Reason: post-XDG `jin daemon stop` looks at the new socket path and
 # cannot see a legacy daemon listening on the old socket, so we have to
 # terminate it ourselves before moving files.
 stop_legacy_daemon() {

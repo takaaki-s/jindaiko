@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/takaaki-s/claude-code-valet/internal/config"
-	"github.com/takaaki-s/claude-code-valet/internal/debug"
-	"github.com/takaaki-s/claude-code-valet/internal/notify"
-	"github.com/takaaki-s/claude-code-valet/internal/tmux"
-	"github.com/takaaki-s/claude-code-valet/internal/transcript"
+	"github.com/takaaki-s/honjin/internal/config"
+	"github.com/takaaki-s/honjin/internal/debug"
+	"github.com/takaaki-s/honjin/internal/notify"
+	"github.com/takaaki-s/honjin/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/transcript"
 )
 
 var debugLog = debug.NewLogger("daemon-debug.log")
@@ -107,13 +107,13 @@ func (m *Manager) recoverTmuxSessionsLocked() {
 	}
 }
 
-// ensureTmuxClient lazily initializes the inner tmux client (-L ccvalet).
+// ensureTmuxClient lazily initializes the inner tmux client (-L jin).
 // Each CC session creates its own tmux session, so no shared session is needed.
 func (m *Manager) ensureTmuxClient() {
 	if m.tmuxClient != nil {
 		return
 	}
-	tc, err := tmux.NewClient() // Uses SocketName = "ccvalet"
+	tc, err := tmux.NewClient() // Uses SocketName = "jin"
 	if err != nil {
 		return
 	}
@@ -124,7 +124,7 @@ func (m *Manager) ensureTmuxClient() {
 	m.recoverTmuxSessionsLocked()
 }
 
-// configureInnerTmux applies ccvalet-specific settings to the inner tmux server.
+// configureInnerTmux applies jin-specific settings to the inner tmux server.
 // User's ~/.tmux.conf is automatically loaded by tmux on server startup.
 // Must only be called after the inner tmux server is confirmed to exist (i.e., after
 // a session has been created).
@@ -559,7 +559,7 @@ func (m *Manager) startSessionTmux(session *Session) error {
 	// Use ; instead of && so cd failure doesn't prevent claude from starting
 	shellDir := workDirForShell(startDir)
 	customEnv := buildEnvString(m.configMgr.GetEnv())
-	envVars := fmt.Sprintf("CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
+	envVars := fmt.Sprintf("JIN_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
 	if customEnv != "" {
 		envVars += " " + customEnv
 	}
@@ -587,7 +587,7 @@ func (m *Manager) startSessionTmux(session *Session) error {
 	// Kill existing inner session with the same name if it exists (stale from daemon restart)
 	_ = m.tmuxClient.KillSession(innerSessionName) // ignore error (session might not exist)
 
-	// Create a new inner tmux session (-L ccvalet) for this CC session
+	// Create a new inner tmux session (-L jin) for this CC session
 	if err := m.tmuxClient.NewSessionWithCmdInDir(innerSessionName, 200, 50, expandedWorkDir, shellCmd); err != nil {
 		return fmt.Errorf("failed to create inner tmux session: %w", err)
 	}
@@ -700,7 +700,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 				shell := m.configMgr.GetShell()
 				shellDir := workDirForShell(session.WorkDir)
 				customEnv := buildEnvString(m.configMgr.GetEnv())
-				envVars := fmt.Sprintf("CCVALET_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
+				envVars := fmt.Sprintf("JIN_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
 				if customEnv != "" {
 					envVars += " " + customEnv
 				}
@@ -802,14 +802,14 @@ func (m *Manager) FindByClaudeSessionID(ccSessionID string) (*Session, bool) {
 }
 
 // HandleHookEvent processes a Claude Code hook event and updates session status
-func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, notificationType, cwd, stopReason string) {
+func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notificationType, cwd, stopReason string) {
 	var session *Session
 	var ok bool
 
-	// Try ccvalet session ID first (from CCVALET_SESSION_ID env var, most reliable)
-	if ccvaletSessionID != "" {
+	// Try jin session ID first (from JIN_SESSION_ID env var, most reliable)
+	if jinSessionID != "" {
 		m.mu.RLock()
-		session, ok = m.sessions[ccvaletSessionID]
+		session, ok = m.sessions[jinSessionID]
 		m.mu.RUnlock()
 	}
 
@@ -819,7 +819,7 @@ func (m *Manager) HandleHookEvent(ccSessionID, ccvaletSessionID, eventName, noti
 	}
 
 	if !ok {
-		debugLog("[HOOK] Unknown session: ccvalet=%s cc=%s", ccvaletSessionID, ccSessionID)
+		debugLog("[HOOK] Unknown session: jin=%s cc=%s", jinSessionID, ccSessionID)
 		return
 	}
 
@@ -1169,7 +1169,7 @@ type hooksSettings struct {
 }
 
 // ensureHooksSettingsFile generates hooks-settings.json inside stateDir with the
-// ccvalet hook command for all required hook events. The file is written on
+// jin hook command for all required hook events. The file is written on
 // every call so that it stays up-to-date if the binary path changes.
 // Returns the absolute path to the generated file.
 func ensureHooksSettingsFile(stateDir, execPath string) (string, error) {

@@ -54,13 +54,13 @@ type KeybindingsConfig struct {
 
 // HostConfig represents a remote host configuration
 type HostConfig struct {
-	ID          string   `mapstructure:"id"`                     // Host identifier (e.g., "ec2", "docker-dev")
-	Type        string   `mapstructure:"type"`                   // "ssh" or "docker"
-	Host        string   `mapstructure:"host,omitempty"`         // SSH target (e.g., "ec2-host")
-	SSHOpts     []string `mapstructure:"ssh_opts,omitempty"`     // Additional SSH options
-	Container   string   `mapstructure:"container,omitempty"`    // Docker container name/ID
-	SocketPath  string   `mapstructure:"socket_path,omitempty"`  // Remote socket path (default: ~/.local/state/ccvalet/daemon.sock)
-	CcvaletPath string   `mapstructure:"ccvalet_path,omitempty"` // Full path to ccvalet binary on remote (default: ccvalet)
+	ID         string   `mapstructure:"id"`                    // Host identifier (e.g., "ec2", "docker-dev")
+	Type       string   `mapstructure:"type"`                  // "ssh" or "docker"
+	Host       string   `mapstructure:"host,omitempty"`        // SSH target (e.g., "ec2-host")
+	SSHOpts    []string `mapstructure:"ssh_opts,omitempty"`    // Additional SSH options
+	Container  string   `mapstructure:"container,omitempty"`   // Docker container name/ID
+	SocketPath string   `mapstructure:"socket_path,omitempty"` // Remote socket path (default: ~/.local/state/honjin/daemon.sock)
+	JinPath    string   `mapstructure:"jin_path,omitempty"`    // Full path to jin binary on remote (default: jin)
 }
 
 // Config represents the application-wide configuration

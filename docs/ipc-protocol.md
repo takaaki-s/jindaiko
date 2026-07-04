@@ -2,7 +2,7 @@
 
 ## Transport
 
-- Unix domain socket: `$XDG_RUNTIME_DIR/ccvalet/daemon.sock` (fallback `$TMPDIR/ccvalet-<uid>/daemon.sock`)
+- Unix domain socket: `$XDG_RUNTIME_DIR/honjin/daemon.sock` (fallback `$TMPDIR/honjin-<uid>/daemon.sock`)
 - One request / one response per connection (no connection pooling)
 - JSON encoding/decoding
 
@@ -59,7 +59,7 @@ type IDRequest struct {
 
 type HookRequest struct {
     SessionID        string `json:"session_id"`
-    CcvaletSessionID string `json:"ccvalet_session_id,omitempty"`
+    JinSessionID     string `json:"jin_session_id,omitempty"`
     HookEventName    string `json:"hook_event_name"`
     NotificationType string `json:"notification_type,omitempty"`
     CWD              string `json:"cwd,omitempty"`
@@ -122,4 +122,4 @@ Each daemon has a `hostID` (flag `--host-id` > config `host_id` > default `"loca
 2. Define a Request type if needed
 3. Implement a `handle{Action}()` method
 4. Add a corresponding method in `client.go`
-5. Add a CLI command in `cmd/ccvalet/cmd/` (→ docs/adding-commands.md)
+5. Add a CLI command in `cmd/jin/cmd/` (→ docs/adding-commands.md)

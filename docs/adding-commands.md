@@ -4,7 +4,7 @@
 
 ### 1. Create the Command File
 
-Create a new `.go` file in `cmd/ccvalet/cmd/`.
+Create a new `.go` file in `cmd/jin/cmd/`.
 
 ### 2. Define the Cobra Command
 
@@ -34,7 +34,7 @@ func init() {
 ### 3. If Daemon Communication Is Needed
 
 ```go
-import "github.com/takaaki-s/claude-code-valet/internal/daemon"
+import "github.com/takaaki-s/honjin/internal/daemon"
 
 client, err := daemon.NewClient()
 if err != nil {
@@ -52,7 +52,7 @@ resp, err := client.Send(daemon.Request{
 ### 4. Command Hierarchy
 
 ```
-ccvalet (root)
+jin (root)
 ├─ daemon start/stop/status
 ├─ session
 │   ├─ new
