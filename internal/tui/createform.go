@@ -15,16 +15,18 @@ import (
 	"github.com/takaaki-s/honjin/internal/paths"
 	"github.com/takaaki-s/honjin/internal/session"
 	"github.com/takaaki-s/honjin/internal/tmux"
+	"github.com/takaaki-s/honjin/internal/worktreehook"
 )
 
 // formStep represents the current form step
 type formStep int
 
 const (
-	stepWorkDir  formStep = iota // Work directory selection
-	stepName                     // Session name
-	stepFleet                    // Fleet selection
-	stepWorktree                 // Worktree yes/no
+	stepWorkDir    formStep = iota // Work directory selection
+	stepName                       // Session name
+	stepFleet                      // Fleet selection
+	stepWorktree                   // Worktree yes/no
+	stepHookPrompt                 // Post-create hook not-allowed / changed prompt
 )
 
 // CreateFormModel is a standalone Bubble Tea model for the session creation form.
@@ -59,11 +61,17 @@ type CreateFormModel struct {
 	worktreeEnabled  bool   // user selection
 	worktreeDisabled bool   // true when the current dir cannot support worktree
 	worktreeReason   string // shown when disabled
+
+	// Step 5: Hook prompt (only reached when a post-create hook exists but
+	// is not on the allowlist, or its SHA256 has changed).
+	hookScriptPath string
+	hookVerdict    worktreehook.Verdict
 }
 
 // createFormCompleteMsg is sent when session creation finishes.
 type createFormCompleteMsg struct {
 	sessionID string
+	warning   string
 	err       error
 }
 
@@ -154,6 +162,11 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.step = stepFleet
 				m.fleetInput.Focus()
 				return m, nil
+			case stepHookPrompt:
+				m.step = stepWorktree
+				m.hookScriptPath = ""
+				m.hookVerdict = 0
+				return m, nil
 			default:
 				return m, tea.Quit
 			}
@@ -166,9 +179,12 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.step = stepWorktree
 			return m, nil
 		}
-		// Success - set env var for parent TUI to detect
+		// Success - set env vars for parent TUI to detect
 		if tc, err := tmux.NewMgrClient(); err == nil {
 			_ = tc.SetEnvironment(tmux.SessionName, "JIN_CREATED_SESSION", msg.sessionID)
+			if msg.warning != "" {
+				_ = tc.SetEnvironment(tmux.SessionName, "JIN_CREATED_WARNING", msg.warning)
+			}
 		}
 		return m, tea.Quit
 
@@ -188,6 +204,8 @@ func (m CreateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateFleetStep(msg)
 	case stepWorktree:
 		return m.updateWorktreeStep(msg)
+	case stepHookPrompt:
+		return m.updateHookPromptStep(msg)
 	}
 
 	return m, nil
@@ -268,6 +286,8 @@ func (m CreateFormModel) View() string {
 		b.WriteString(stepStyle.Render("  Step 4: Worktree"))
 		b.WriteString("\n\n")
 		b.WriteString(m.viewWorktreeStep())
+	case stepHookPrompt:
+		b.WriteString(m.viewHookPromptStep())
 	}
 
 	return b.String()
@@ -448,6 +468,84 @@ func (m CreateFormModel) viewWorktreeStep() string {
 	return b.String()
 }
 
+// --- Step: HookPrompt ---
+
+func (m CreateFormModel) updateHookPromptStep(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch keyMsg.String() {
+	case "a", "A":
+		// Trust the hook: add to allowlist with current SHA256, then submit
+		// with hooks enabled. Any allow error surfaces as an inline form
+		// error and leaves the user on the prompt so they can retry.
+		absRepo, err := filepath.Abs(m.dirPicker.Result())
+		if err != nil {
+			m.err = fmt.Errorf("resolve repo path: %w", err)
+			return m, nil
+		}
+		sha, err := worktreehook.ComputeSHA256(m.hookScriptPath)
+		if err != nil {
+			m.err = fmt.Errorf("read hook script: %w", err)
+			return m, nil
+		}
+		allowlist, err := worktreehook.LoadAllowlist(paths.State())
+		if err != nil {
+			m.err = fmt.Errorf("load allowlist: %w", err)
+			return m, nil
+		}
+		if err := allowlist.Allow(absRepo, sha); err != nil {
+			m.err = fmt.Errorf("allow hook: %w", err)
+			return m, nil
+		}
+		m.processingMsg = "Creating session..."
+		m.err = nil
+		return m, m.submitWith(false)
+	case "s", "S":
+		m.processingMsg = "Creating session..."
+		m.err = nil
+		return m, m.submitWith(true)
+	case "c", "C":
+		m.step = stepWorktree
+		m.hookScriptPath = ""
+		m.hookVerdict = 0
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m CreateFormModel) viewHookPromptStep() string {
+	var b strings.Builder
+
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68")).Bold(true)
+	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7"))
+	keyStyle := lipgloss.NewStyle().Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+
+	var headline string
+	switch m.hookVerdict {
+	case worktreehook.VerdictNotAllowed:
+		headline = "⚠ Post-create hook is not trusted"
+	case worktreehook.VerdictChanged:
+		headline = "⚠ Post-create hook has changed since last trust"
+	default:
+		headline = "⚠ Post-create hook needs attention"
+	}
+
+	b.WriteString("  " + warnStyle.Render(headline))
+	b.WriteString("\n")
+	b.WriteString("  " + pathStyle.Render(m.hookScriptPath))
+	b.WriteString("\n\n")
+	b.WriteString("  What would you like to do?\n\n")
+	b.WriteString("    " + keyStyle.Render("a") + ": Allow (trust this script and run it)\n")
+	b.WriteString("    " + keyStyle.Render("s") + ": Skip (create session without running the hook)\n")
+	b.WriteString("    " + keyStyle.Render("c") + ": Cancel (back to Worktree step)\n\n")
+	b.WriteString("  " + helpStyle.Render("a/s/c or Esc"))
+
+	return b.String()
+}
+
 // --- Submit ---
 
 func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
@@ -465,26 +563,87 @@ func (m CreateFormModel) handleSubmit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	name := strings.TrimSpace(m.nameInput.Value())
-	fleet := strings.TrimSpace(m.fleetInput.Value())
+	// When creating a worktree, check hook allowlist synchronously
+	// (fast local file I/O) before dispatching the async create. If the
+	// hook script exists but isn't allowlisted, pause and let the user
+	// choose: allow, skip, or cancel.
+	if m.worktreeEnabled {
+		if script, verdict, ok := m.evaluateHook(workDir); ok {
+			switch verdict {
+			case worktreehook.VerdictNotAllowed, worktreehook.VerdictChanged:
+				m.hookScriptPath = script
+				m.hookVerdict = verdict
+				m.step = stepHookPrompt
+				return m, nil
+			}
+		}
+	}
 
 	m.processingMsg = "Creating session..."
 	m.err = nil
+	return m, m.submitWith(false)
+}
 
+// evaluateHook checks whether workDir has a post-create hook that would
+// require user attention. Returns (scriptPath, verdict, true) when a script
+// exists; (_, _, false) when there is no script or hooks are globally
+// disabled via config.
+func (m CreateFormModel) evaluateHook(workDir string) (string, worktreehook.Verdict, bool) {
+	if m.configMgr != nil {
+		cfg := m.configMgr.GetWorktreeConfig()
+		if cfg.HookEnabled != nil && !*cfg.HookEnabled {
+			return "", 0, false
+		}
+	}
+	scriptPath := filepath.Join(workDir, ".jin", "worktree-post-create.sh")
+	if _, err := os.Stat(scriptPath); err != nil {
+		return "", 0, false
+	}
+	allowlist, err := worktreehook.LoadAllowlist(paths.State())
+	if err != nil {
+		return "", 0, false
+	}
+	absRepo, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", 0, false
+	}
+	sha, err := worktreehook.ComputeSHA256(scriptPath)
+	if err != nil {
+		return "", 0, false
+	}
+	entry, ok := allowlist.Get(absRepo)
+	switch {
+	case !ok:
+		return scriptPath, worktreehook.VerdictNotAllowed, true
+	case entry.SHA256 != sha:
+		return scriptPath, worktreehook.VerdictChanged, true
+	default:
+		return scriptPath, worktreehook.VerdictOK, true
+	}
+}
+
+// submitWith returns the tea.Cmd that dispatches the actual daemon call.
+// noHook is passed through to skip the post-create hook. Caller is
+// responsible for setting m.processingMsg before dispatching.
+func (m CreateFormModel) submitWith(noHook bool) tea.Cmd {
+	workDir := m.dirPicker.Result()
+	name := strings.TrimSpace(m.nameInput.Value())
+	fleet := strings.TrimSpace(m.fleetInput.Value())
 	client := m.client
 	worktree := m.worktreeEnabled
-	return m, func() tea.Msg {
-		s, err := client.NewWithOptions(daemon.NewOptions{
+	return func() tea.Msg {
+		s, warning, err := client.NewWithOptions(daemon.NewOptions{
 			Name:     name,
 			WorkDir:  workDir,
 			Start:    true,
 			Fleet:    fleet,
 			Worktree: worktree,
+			NoHook:   noHook,
 		})
 		if err != nil {
 			return createFormCompleteMsg{err: err}
 		}
-		return createFormCompleteMsg{sessionID: s.ID}
+		return createFormCompleteMsg{sessionID: s.ID, warning: warning}
 	}
 }
 

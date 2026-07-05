@@ -137,6 +137,7 @@ type Model struct {
 	width    int
 	height   int
 	err      error
+	warning  string // Non-fatal notice from last create (e.g. hook not allowlisted)
 	keys     KeyMap // Keybinding settings
 
 	// Config manager (used for remote session attach)
@@ -602,6 +603,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Dismiss any transient warning on the first key press.
+		m.warning = ""
+
 		// Handle delete confirmation mode
 		if m.confirmDelete {
 			// Sub-confirmation: force delete dirty worktree
@@ -1058,6 +1062,13 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_CREATED_SESSION")
 				m.focusSessionID = id
 			}
+			// Non-fatal warning from the create popup (e.g. hook not
+			// allowlisted). Read alongside JIN_CREATED_SESSION so it
+			// surfaces on the same tick.
+			if w := m.tmuxClient.GetEnvironment(tmux.SessionName, "JIN_CREATED_WARNING"); w != "" {
+				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_CREATED_WARNING")
+				m.warning = w
+			}
 			// Poll for session selected from notification history popup
 			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "JIN_NOTIFY_SESSION"); id != "" {
 				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_NOTIFY_SESSION")
@@ -1233,6 +1244,12 @@ func (m Model) renderListContent(contentWidth int) string {
 	// Error message
 	if m.err != nil {
 		content.WriteString(lipgloss.NewStyle().Foreground(errorColor).Render(fmt.Sprintf("Error: %v", m.err)))
+		content.WriteString("\n\n")
+	}
+
+	// Non-fatal warning (e.g. hook not allowlisted). Dismissed on next key press.
+	if m.warning != "" {
+		content.WriteString(lipgloss.NewStyle().Foreground(warningColor).Render(fmt.Sprintf("⚠ %s", m.warning)))
 		content.WriteString("\n\n")
 	}
 
