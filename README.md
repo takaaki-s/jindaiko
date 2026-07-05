@@ -343,7 +343,7 @@ When a session starts, honjin generates `$XDG_STATE_HOME/honjin/hooks-settings.j
 
 ## Worktree Post-Create Hook
 
-When you create a session with `jin session new --worktree`, honjin can run a setup script right after the worktree is created and before Claude Code starts — installing dependencies, copying `.env`, etc. — so Claude never sees a half-set-up checkout.
+When you create a session with `jin session new --worktree`, honjin can run a setup script right after the worktree is created — installing dependencies, copying `.env`, initializing submodules — so every new worktree lands ready to use without any manual steps.
 
 ### Script location
 
