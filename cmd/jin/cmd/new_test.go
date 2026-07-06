@@ -113,3 +113,20 @@ func TestNewCmd_WorktreeFlagsParse(t *testing.T) {
 		t.Errorf("worktree-base: got (%q, %v), want (%q, nil)", worktreeBase, err, "develop")
 	}
 }
+
+// TestNewCmd_AgentFlagParse verifies the --agent flag is registered on
+// newCmd and parses to the expected string. Actual "unknown kind" validation
+// happens on the daemon side (see internal/daemon.handleNew), so this test
+// only exercises the flag plumbing.
+func TestNewCmd_AgentFlagParse(t *testing.T) {
+	flags := newCmd.Flags()
+	t.Cleanup(func() { _ = flags.Set("agent", "") })
+
+	if err := flags.Set("agent", "claude"); err != nil {
+		t.Fatalf("Set(agent): %v", err)
+	}
+	got, err := flags.GetString("agent")
+	if err != nil || got != "claude" {
+		t.Errorf("agent: got (%q, %v), want (%q, nil)", got, err, "claude")
+	}
+}

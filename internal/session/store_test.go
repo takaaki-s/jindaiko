@@ -34,18 +34,18 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 
 	now := time.Now().Truncate(time.Millisecond)
 	session := &Session{
-		ID:              "test-123",
-		Description:     "my-session",
-		WorkDir:         "/home/user/project",
-		CreatedAt:       now,
-		Status:          StatusIdle,
-		LastActiveAt:    now,
-		ErrorMessage:    "some error",
-		ClaudeSessionID: "claude-456",
-		TmuxWindowName:  "sess-test-123",
-		TmuxPaneID:      "%42",
-		CurrentWorkDir:  "/runtime/dir", // persisted
-		CurrentBranch:   "main",         // json:"-"
+		ID:             "test-123",
+		Description:    "my-session",
+		WorkDir:        "/home/user/project",
+		CreatedAt:      now,
+		Status:         StatusIdle,
+		LastActiveAt:   now,
+		ErrorMessage:   "some error",
+		AgentSessionID: "claude-456",
+		TmuxWindowName: "sess-test-123",
+		TmuxPaneID:     "%42",
+		CurrentWorkDir: "/runtime/dir", // persisted
+		CurrentBranch:  "main",         // json:"-"
 	}
 
 	if err := store.Save(session); err != nil {
@@ -69,8 +69,8 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 	if loaded.Status != session.Status {
 		t.Errorf("Status: got %q, want %q", loaded.Status, session.Status)
 	}
-	if loaded.ClaudeSessionID != session.ClaudeSessionID {
-		t.Errorf("ClaudeSessionID: got %q, want %q", loaded.ClaudeSessionID, session.ClaudeSessionID)
+	if loaded.AgentSessionID != session.AgentSessionID {
+		t.Errorf("AgentSessionID: got %q, want %q", loaded.AgentSessionID, session.AgentSessionID)
 	}
 	if loaded.TmuxWindowName != session.TmuxWindowName {
 		t.Errorf("TmuxWindowName: got %q, want %q", loaded.TmuxWindowName, session.TmuxWindowName)

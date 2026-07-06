@@ -16,7 +16,7 @@ var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
-	Long:    `List all Claude Code sessions.`,
+	Long:    `List all agent sessions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := daemon.NewClient(getSocketPath())
 		sessions, err := client.List()
@@ -33,51 +33,63 @@ var listCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "DESCRIPTION\tSTATUS\tWORKDIR\tBRANCH\tLAST_ACTIVE")
-		for _, s := range sessions {
-			statusStr := string(s.Status)
-			if s.Status == "error" && s.ErrorMessage != "" {
-				statusStr = fmt.Sprintf("error: %s", truncateStr(s.ErrorMessage, 30))
-			}
-
-			// Use CurrentWorkDir if available, fall back to WorkDir
-			displayDir := s.CurrentWorkDir
-			if displayDir == "" {
-				displayDir = s.WorkDir
-			}
-			// Shorten home directory
-			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
-				displayDir = "~" + displayDir[len(home):]
-			}
-
-			branch := s.CurrentBranch
-			if branch == "" {
-				branch = "-"
-			}
-
-			var lastActive string
-			if !s.LastActiveAt.IsZero() {
-				lastActive = s.LastActiveAt.Format("2006-01-02 15:04")
-			} else {
-				lastActive = s.CreatedAt.Format("2006-01-02 15:04")
-			}
-
-			desc := s.Description
-			if s.DescriptionLocked {
-				desc += "*"
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				truncateStr(desc, 40),
-				statusStr,
-				truncatePath(displayDir, 40),
-				branch,
-				lastActive,
-			)
-		}
-		w.Flush()
-		return nil
+		return renderSessionTable(os.Stdout, sessions)
 	},
+}
+
+// renderSessionTable writes the tabwriter-formatted session list to w. The
+// caller is responsible for handling the "no sessions" case; this function
+// always emits at least a header row.
+func renderSessionTable(w io.Writer, sessions []session.Info) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "DESCRIPTION\tSTATUS\tAGENT\tWORKDIR\tBRANCH\tLAST_ACTIVE")
+	for _, s := range sessions {
+		statusStr := string(s.Status)
+		if s.Status == "error" && s.ErrorMessage != "" {
+			statusStr = fmt.Sprintf("error: %s", truncateStr(s.ErrorMessage, 30))
+		}
+
+		// Use CurrentWorkDir if available, fall back to WorkDir
+		displayDir := s.CurrentWorkDir
+		if displayDir == "" {
+			displayDir = s.WorkDir
+		}
+		// Shorten home directory
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(displayDir, home) {
+			displayDir = "~" + displayDir[len(home):]
+		}
+
+		branch := s.CurrentBranch
+		if branch == "" {
+			branch = "-"
+		}
+
+		agentKind := s.AgentKind
+		if agentKind == "" {
+			agentKind = "-"
+		}
+
+		var lastActive string
+		if !s.LastActiveAt.IsZero() {
+			lastActive = s.LastActiveAt.Format("2006-01-02 15:04")
+		} else {
+			lastActive = s.CreatedAt.Format("2006-01-02 15:04")
+		}
+
+		desc := s.Description
+		if s.DescriptionLocked {
+			desc += "*"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			truncateStr(desc, 40),
+			statusStr,
+			agentKind,
+			truncatePath(displayDir, 40),
+			branch,
+			lastActive,
+		)
+	}
+	return tw.Flush()
 }
 
 func init() {

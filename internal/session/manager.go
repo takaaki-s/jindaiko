@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -34,18 +33,21 @@ var ErrWorktreeDirty = errors.New("worktree has uncommitted changes")
 // caller can surface the discrepancy to the user.
 var ErrNotWorktree = errors.New("path is not a git worktree")
 
-// Manager manages multiple Claude Code sessions
+// Manager owns the honjin-side session lifecycle. Every agent-specific
+// concern is fetched via agentResolver so no CC-specific literal survives
+// in this file after the abstraction refactor.
 type Manager struct {
-	sessions   map[string]*Session
-	store      *Store
-	notifier   *notify.Notifier
-	configMgr  *config.Manager
-	tmuxClient tmux.Runner // tmux client for session management
-	hookRunner worktreehook.Runner
-	gitClient  *git.Client
-	ccEnhancer DescriptionEnhancer // Layer C description upgrader; nil disables Layer C
-	mu         sync.RWMutex
-	stateDir   string
+	sessions       map[string]*Session
+	store          *Store
+	notifier       *notify.Notifier
+	configMgr      *config.Manager
+	tmuxClient     tmux.Runner // tmux client for session management
+	hookRunner     worktreehook.Runner
+	gitClient      *git.Client
+	agentResolver  AgentResolver // resolves AgentKind → Agent adapter (owns Layer C enhancer via Description())
+	mu             sync.RWMutex
+	stateDir       string
+	tmuxSocketName string // "" ⇒ tmux.SocketName; tests set an isolated name so ensureTmuxClient does not touch the shared "jin" server
 }
 
 // SetTmuxClient sets the tmux client for tmux-based session management.
@@ -61,11 +63,29 @@ func (m *Manager) SetHookRunner(r worktreehook.Runner) {
 	m.hookRunner = r
 }
 
-// SetDescriptionEnhancer installs the Layer C DescriptionEnhancer. Called once
-// at daemon startup; a nil enhancer keeps Layer C disabled without altering
-// any other behaviour.
-func (m *Manager) SetDescriptionEnhancer(e DescriptionEnhancer) {
-	m.ccEnhancer = e
+// SetTmuxSocketName overrides the tmux socket name used by ensureTmuxClient's
+// lazy fallback (production leaves this empty and gets tmux.SocketName).
+// Tests set an isolated per-run name so a test that exercises the auto-init
+// path — where the caller deliberately skips SetTmuxClient — cannot leak a
+// real "-L jin" server that would then pollute a subsequent daemon start's
+// environment inheritance.
+//
+// Set exactly once before the first session start; no lock is taken.
+func (m *Manager) SetTmuxSocketName(name string) {
+	m.tmuxSocketName = name
+}
+
+// SetAgentResolver installs the AgentResolver used by startSessionTmux and
+// HandleHookEvent to fetch adapter behaviour. Left nil, session start returns
+// an error rather than defaulting silently.
+//
+// Must be called exactly once at startup, before any goroutine reads the
+// resolver (daemon.NewServer wires this before returning; tests inject a
+// stub before touching the Manager). No lock is taken here to match the
+// other one-shot setters (SetTmuxClient / SetHookRunner) — installing at
+// runtime while other goroutines are already reading would race regardless.
+func (m *Manager) SetAgentResolver(ar AgentResolver) {
+	m.agentResolver = ar
 }
 
 // RecoverTmuxSessions checks for sessions with existing tmux windows after daemon restart
@@ -130,16 +150,24 @@ func (m *Manager) recoverTmuxSessionsLocked() {
 
 // ensureTmuxClient lazily initializes the inner tmux client (-L jin).
 // Each CC session creates its own tmux session, so no shared session is needed.
+//
+// Uses tmux.SocketName ("jin") in production; tests override via
+// SetTmuxSocketName so an auto-init on the shared socket doesn't leak a
+// server the next daemon start would inherit env from.
 func (m *Manager) ensureTmuxClient() {
 	if m.tmuxClient != nil {
 		return
 	}
-	tc, err := tmux.NewClient() // Uses SocketName = "jin"
+	socketName := m.tmuxSocketName
+	if socketName == "" {
+		socketName = tmux.SocketName
+	}
+	tc, err := tmux.NewClientWithSocket(socketName)
 	if err != nil {
 		return
 	}
 	m.tmuxClient = tc
-	debugLog("[TMUX] Inner tmux client initialized (socket: %s)", tmux.SocketName)
+	debugLog("[TMUX] Inner tmux client initialized (socket: %s)", socketName)
 	// Don't call configureInnerTmux here — the inner tmux server may not exist yet.
 	// Configuration is applied in startSessionTmux after the first session is created.
 	m.recoverTmuxSessionsLocked()
@@ -208,6 +236,7 @@ type CreateOptions struct {
 	WorkDir     string // Working directory path
 	Description string // Human-readable session description (empty = auto-generated)
 	Fleet       string // Fleet name for session grouping; defaults to DefaultFleet if empty
+	AgentKind   string // Adapter identifier; defaults to "claude" if empty
 
 	Worktree       bool   // Create a git worktree for this session
 	NoHook         bool   // Skip the worktree post-create hook (worktree path only)
@@ -418,8 +447,16 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 		locked = false
 	}
 
-	// Generate Claude session ID for session persistence
-	claudeSessionID := uuid.New().String()
+	// Mint the adapter-side session ID up front. Every adapter honjin knows
+	// about needs some kind of persistent handle (Claude Code's --session-id,
+	// Codex's conversation id, ...) and a fresh UUID is a safe universal
+	// default. Adapters that don't need one can ignore the value.
+	agentSessionID := uuid.New().String()
+
+	agentKind := opts.AgentKind
+	if agentKind == "" {
+		agentKind = "claude"
+	}
 
 	session := &Session{
 		ID:                id,
@@ -428,7 +465,8 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 		WorkDir:           opts.WorkDir,
 		CreatedAt:         time.Now(),
 		Status:            StatusStopped,
-		ClaudeSessionID:   claudeSessionID,
+		AgentKind:         agentKind,
+		AgentSessionID:    agentSessionID,
 		Fleet:             opts.Fleet,
 		// Set IsWorktree immediately so the TUI delete modal offers the
 		// worktree removal option without waiting for the 10s
@@ -460,8 +498,8 @@ func (m *Manager) List() []Info {
 	reader := transcript.NewReader()
 	for i := range infos {
 		info := &infos[i]
-		if info.ClaudeSessionID != "" && info.WorkDir != "" {
-			if msgs, err := reader.GetLastMessages(info.WorkDir, info.ClaudeSessionID); err == nil && msgs != nil {
+		if info.AgentSessionID != "" && info.WorkDir != "" {
+			if msgs, err := reader.GetLastMessages(info.WorkDir, info.AgentSessionID); err == nil && msgs != nil {
 				if msgs.User != nil {
 					info.LastUserMessage = transcript.TruncateMessage(msgs.User.Content, 500)
 				}
@@ -716,6 +754,113 @@ func workDirForShell(dir string) string {
 	return dir
 }
 
+// quickResumeFailWindow bounds "how long after startup does a pane death
+// still count as a resume failure worth retrying with a fresh session id".
+// Set to 10s: shorter would miss slow-machine resumes, longer would treat a
+// deliberate quick exit as a resume failure.
+const quickResumeFailWindow = 10 * time.Second
+
+// spawnSnapshot is a value-typed snapshot of the session fields
+// buildAgentShellCmd needs. Callers copy the fields they care about while
+// holding m.mu, then release the lock before calling the builder — this
+// makes buildAgentShellCmd safe to run concurrently with HandleHookEvent /
+// List / Get, which mutate the source session under lock.
+type spawnSnapshot struct {
+	JinSessionID        string
+	AgentKind           string
+	AgentSessionID      string
+	AgentSessionStarted bool
+	StartDir            string // pre-tmux shell workdir (may be ~-prefixed)
+	ExpandedWorkDir     string // absolute, ~-expanded workdir handed to Setup()
+}
+
+// snapshotForSpawn takes the fields buildAgentShellCmd depends on. Callers
+// must hold m.mu — the read must be atomic with respect to the field
+// writes the daemon performs elsewhere.
+func snapshotForSpawn(session *Session, startDir, expandedWorkDir string) spawnSnapshot {
+	return spawnSnapshot{
+		JinSessionID:        session.ID,
+		AgentKind:           session.AgentKind,
+		AgentSessionID:      session.AgentSessionID,
+		AgentSessionStarted: session.AgentSessionStarted,
+		StartDir:            startDir,
+		ExpandedWorkDir:     expandedWorkDir,
+	}
+}
+
+// buildAgentShellCmd wraps the adapter's SpawnPlan in the fixed shell
+// template Manager uses everywhere it spawns an agent (start and quick-fail
+// retry). Centralising the assembly keeps the two call sites in lock-step
+// on env vars, shell escaping, and the Setup() invariant.
+//
+// Pure builder: reads only the immutable snapshot; performs NO Session
+// writes. Callers own the "started once" invariant
+// (session.AgentSessionStarted = true) and must set it inside their own
+// lock context. Callers ALSO own the read side: buildAgentShellCmd takes a
+// value-typed snapshot precisely so the retry path in captureOutputTmux
+// can call it after m.mu.Unlock() without racing HandleHookEvent's writes
+// to session.WorkDir / AgentSessionID / etc.
+func (m *Manager) buildAgentShellCmd(snap spawnSnapshot) (string, error) {
+	if m.agentResolver == nil {
+		return "", fmt.Errorf("agent resolver not configured")
+	}
+	ag, err := m.agentResolver.Resolve(snap.AgentKind)
+	if err != nil {
+		return "", fmt.Errorf("resolve agent %q: %w", snap.AgentKind, err)
+	}
+
+	execPath, execErr := os.Executable()
+	if execErr != nil {
+		debugLog("[AGENT] Warning: failed to get executable path: %v", execErr)
+	}
+	if err := ag.Setup(SetupContext{
+		StateDir: m.stateDir,
+		ExecPath: execPath,
+		WorkDir:  snap.ExpandedWorkDir,
+	}); err != nil {
+		debugLog("[AGENT] Setup returned error: %v", err)
+	}
+
+	plan := ag.SpawnCommand(SpawnOptions{
+		JinSessionID:        snap.JinSessionID,
+		AgentSessionID:      snap.AgentSessionID,
+		AgentSessionStarted: snap.AgentSessionStarted,
+		WorkDir:             snap.ExpandedWorkDir,
+		CustomEnv:           m.configMgr.GetEnv(),
+	})
+
+	shellDir := workDirForShell(snap.StartDir)
+	customEnv := buildEnvString(m.configMgr.GetEnv())
+	envVars := fmt.Sprintf("JIN_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", snap.JinSessionID)
+	if customEnv != "" {
+		envVars += " " + customEnv
+	}
+	for k, v := range plan.ExtraEnv {
+		// Keys go through the same env-name validation as UnsetEnv; the
+		// value is single-quoted so any adapter output survives the outer
+		// -ic 'cmd' wrapping.
+		if !validEnvKeyPattern.MatchString(k) {
+			return "", fmt.Errorf("agent %q returned invalid ExtraEnv key %q", snap.AgentKind, k)
+		}
+		envVars += fmt.Sprintf(" %s=%s", k, shellEscape(v))
+	}
+	unsetFlags := " -u TMUX -u TMUX_PANE"
+	for _, k := range plan.UnsetEnv {
+		if !validEnvKeyPattern.MatchString(k) {
+			return "", fmt.Errorf("agent %q returned invalid UnsetEnv name %q", snap.AgentKind, k)
+		}
+		unsetFlags += " -u " + k
+	}
+	// plan.Command is spliced verbatim into `-ic '...'`. Per the SpawnPlan
+	// doc comment, adapters emit the raw command and Manager defensively
+	// escapes any single quote that slipped through — so a malformed
+	// adapter can't break out of the wrapper into the parent shell.
+	safeCmd := strings.ReplaceAll(plan.Command, "'", `'\''`)
+	shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env%s %s %s -ic '%s'",
+		shellDir, unsetFlags, envVars, m.configMgr.GetShell(), safeCmd)
+	return shellCmd, nil
+}
+
 // startSessionTmux starts a session in a tmux window.
 func (m *Manager) startSessionTmux(session *Session) error {
 	// Resume in the last known cwd (e.g. worktree) when available, so the
@@ -738,51 +883,20 @@ func (m *Manager) startSessionTmux(session *Session) error {
 		return fmt.Errorf("work directory does not exist: %s (may have been deleted, e.g. git worktree removed)", startDir)
 	}
 
-	// Set trust state
-	if err := ensureClaudeTrustState(expandedWorkDir); err != nil {
-		debugLog("[TRUST] Warning: failed to set trust state: %v", err)
+	// Snapshot the session fields buildAgentShellCmd needs. Reading here is
+	// safe: startSessionTmux runs under StartBackground's m.mu.Lock() (see
+	// callchain StartBackground → startSession → startSessionTmux) so no
+	// other goroutine can mutate the session under us.
+	shellCmd, err := m.buildAgentShellCmd(snapshotForSpawn(session, startDir, expandedWorkDir))
+	if err != nil {
+		return err
 	}
 
-	// Build Claude command
-	shell := m.configMgr.GetShell()
-
-	// Generate hooks settings file so Claude Code hooks are auto-configured
-	claudeCmd := "claude"
-	execPath, err := os.Executable()
-	if err == nil {
-		if hooksPath, err := ensureHooksSettingsFile(m.stateDir, execPath); err == nil {
-			claudeCmd = fmt.Sprintf("claude --settings %s", hooksPath)
-		} else {
-			debugLog("[HOOKS] Warning: failed to generate hooks settings: %v", err)
-		}
-	} else {
-		debugLog("[HOOKS] Warning: failed to get executable path: %v", err)
-	}
-
-	if session.ClaudeSessionID != "" {
-		if session.ClaudeSessionStarted {
-			claudeCmd += fmt.Sprintf(" --resume %s", session.ClaudeSessionID)
-			debugLog("[SESSION] Resuming Claude session: %s", session.ClaudeSessionID)
-		} else {
-			claudeCmd += fmt.Sprintf(" --session-id %s", session.ClaudeSessionID)
-			debugLog("[SESSION] Starting new Claude session with ID: %s", session.ClaudeSessionID)
-			session.ClaudeSessionStarted = true
-		}
-	}
-
-	// Build shell command with environment setup
-	// Unset TMUX/TMUX_PANE to prevent nested tmux detection
-	// Embed cd to WorkDir so the shell expands ~ and $HOME
-	// (tmux's -c flag doesn't expand ~, and RespawnPane doesn't accept -c at all)
-	// Use ; instead of && so cd failure doesn't prevent claude from starting
-	shellDir := workDirForShell(startDir)
-	customEnv := buildEnvString(m.configMgr.GetEnv())
-	envVars := fmt.Sprintf("JIN_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
-	if customEnv != "" {
-		envVars += " " + customEnv
-	}
-	shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env -u TMUX -u TMUX_PANE -u CLAUDECODE %s %s -ic '%s'",
-		shellDir, envVars, shell, claudeCmd)
+	// Commit the "started once" invariant: from this point a subsequent
+	// resume must take the --resume branch even if SessionStart never fires
+	// (crashes on start, no hook binary, etc.). Same lock context as the
+	// snapshot above.
+	session.AgentSessionStarted = true
 
 	innerSessionName := tmux.InnerSessionName(session.ID)
 
@@ -905,34 +1019,47 @@ func (m *Manager) captureOutputTmux(session *Session) {
 				return
 			}
 
-			// If claude --resume fails immediately (within 10 seconds of startup),
-			// auto-restart with a fresh session ID using plain claude
-			if session.ClaudeSessionStarted && time.Since(session.StartedAt) < 10*time.Second {
-				debugLog("[TMUX] Session %s pane died quickly (resume likely failed), retrying with fresh claude", session.Description)
+			// If the agent's --resume fails immediately (within 10 seconds of
+			// startup), auto-restart with a fresh session ID by going back
+			// through the adapter's SpawnCommand (this way agents without a
+			// --resume concept still get sensible retry semantics).
+			if session.AgentSessionStarted && time.Since(session.StartedAt) < quickResumeFailWindow {
+				debugLog("[TMUX] Session %s pane died quickly (resume likely failed), retrying with fresh agent session", session.Description)
 				newSessionID := uuid.New().String()
-				session.ClaudeSessionStarted = false
-				session.ClaudeSessionID = newSessionID
+				session.AgentSessionStarted = false
+				session.AgentSessionID = newSessionID
+				// Snapshot every field buildAgentShellCmd needs BEFORE
+				// releasing m.mu. Without this the retry runs the builder
+				// with lock-free reads of session.WorkDir /
+				// AgentSessionID / AgentSessionStarted, racing writes from
+				// HandleHookEvent.
+				retrySnap := snapshotForSpawn(session, session.WorkDir, expandTilde(session.WorkDir))
 				m.mu.Unlock()
 				_ = m.store.Save(session)
 
-				shell := m.configMgr.GetShell()
-				shellDir := workDirForShell(session.WorkDir)
-				customEnv := buildEnvString(m.configMgr.GetEnv())
-				envVars := fmt.Sprintf("JIN_SESSION_ID=%s TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1", session.ID)
-				if customEnv != "" {
-					envVars += " " + customEnv
+				shellCmd, buildErr := m.buildAgentShellCmd(retrySnap)
+				if buildErr != nil {
+					debugLog("[TMUX] Session %s: cannot build retry cmd: %v", session.Description, buildErr)
+					m.mu.Lock()
+					if _, exists := m.sessions[session.ID]; !exists {
+						m.mu.Unlock()
+						return
+					}
+					session.Status = StatusStopped
+					session.LastActiveAt = time.Now()
+					m.mu.Unlock()
+					_ = m.store.Save(session)
+					return
 				}
-				shellCmd := fmt.Sprintf("cd \"%s\" 2>/dev/null; env -u TMUX -u TMUX_PANE -u CLAUDECODE %s %s -ic 'claude --session-id %s'",
-					shellDir, envVars, shell, newSessionID)
 				if err := m.tmuxClient.RespawnPane(target, shellCmd); err == nil {
 					m.mu.Lock()
 					session.Status = StatusRunning
-					session.ClaudeSessionStarted = true
+					session.AgentSessionStarted = true
 					session.StartedAt = time.Now()
 					session.LastOutputTime = time.Now()
 					m.mu.Unlock()
 					_ = m.store.Save(session)
-					debugLog("[TMUX] Session %s restarted with fresh claude (session-id: %s)", session.Description, newSessionID)
+					debugLog("[TMUX] Session %s restarted with fresh agent session (id: %s)", session.Description, newSessionID)
 					continue
 				}
 				debugLog("[TMUX] Session %s respawn failed after quick death", session.Description)
@@ -1007,20 +1134,30 @@ func (m *Manager) captureOutputTmux(session *Session) {
 	}
 }
 
-// FindByClaudeSessionID finds a session by its Claude Code session ID
-func (m *Manager) FindByClaudeSessionID(ccSessionID string) (*Session, bool) {
+// FindByAgentSessionID finds a session by its adapter-side session ID
+// (Claude Code --session-id UUID, Codex conversation id, ...).
+func (m *Manager) FindByAgentSessionID(agentSessionID string) (*Session, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, s := range m.sessions {
-		if s.ClaudeSessionID == ccSessionID {
+		if s.AgentSessionID == agentSessionID {
 			return s, true
 		}
 	}
 	return nil, false
 }
 
-// HandleHookEvent processes a Claude Code hook event and updates session status
-func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notificationType, cwd, stopReason string) {
+// HandleHookEvent processes an incoming agent hook event and updates the
+// session state. The event vocabulary itself (which event name means what
+// status) is owned by the adapter — this function is agent-agnostic wiring:
+//
+//  1. resolve the session (jin id preferred, adapter-side id as fallback)
+//  2. update the adapter session id if the adapter has re-keyed it
+//  3. run agent-agnostic side effects (CWD tracking, AgentSessionStarted)
+//  4. hand the raw event to the adapter's StatusSource for interpretation
+//  5. dispatch notifications the adapter requested
+//  6. trigger a Layer C description upgrade on prompt/stop events
+func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notificationType, cwd, stopReason string) {
 	var session *Session
 	var ok bool
 
@@ -1031,28 +1168,52 @@ func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notifica
 		m.mu.RUnlock()
 	}
 
-	// Fall back to Claude Code session ID
+	// Fall back to adapter-side session ID
 	if !ok {
-		session, ok = m.FindByClaudeSessionID(ccSessionID)
+		session, ok = m.FindByAgentSessionID(agentSessionID)
 	}
 
 	if !ok {
-		debugLog("[HOOK] Unknown session: jin=%s cc=%s", jinSessionID, ccSessionID)
+		debugLog("[HOOK] Unknown session: jin=%s agent=%s", jinSessionID, agentSessionID)
 		return
 	}
+
+	m.mu.RLock()
+	kind := session.AgentKind
+	m.mu.RUnlock()
+	if m.agentResolver == nil {
+		debugLog("[HOOK] Session %s: no agent resolver configured", session.Description)
+		return
+	}
+	ag, err := m.agentResolver.Resolve(kind)
+	if err != nil {
+		debugLog("[HOOK] Session %s: cannot resolve agent %q: %v", session.Description, kind, err)
+		return
+	}
+
+	upd, updOK := ag.StatusSource().Interpret(StatusSignal{
+		Kind: "hook",
+		Payload: map[string]string{
+			"event":             eventName,
+			"notification_type": notificationType,
+			"stop_reason":       stopReason,
+			"cwd":               cwd,
+		},
+	})
 
 	m.mu.Lock()
 	oldStatus := session.Status
 	sessionID := session.ID
 	sessionName := session.Description
 
-	// Update ClaudeSessionID if it changed (Claude Code may assign its own)
-	if ccSessionID != "" && session.ClaudeSessionID != ccSessionID {
-		debugLog("[HOOK] Updating ClaudeSessionID for %s: %s -> %s", sessionName, session.ClaudeSessionID, ccSessionID)
-		session.ClaudeSessionID = ccSessionID
+	// Update AgentSessionID if it changed (adapter may re-key it, e.g. CC
+	// assigns its own UUID when we started with an empty one).
+	if agentSessionID != "" && session.AgentSessionID != agentSessionID {
+		debugLog("[HOOK] Updating AgentSessionID for %s: %s -> %s", sessionName, session.AgentSessionID, agentSessionID)
+		session.AgentSessionID = agentSessionID
 	}
 
-	// Update CWD from Claude Code's actual working directory.
+	// Update CWD from the agent's actual working directory.
 	// Only update persisted WorkDir when the new path is a git root
 	// (project root or worktree root) to prevent drift to subdirectories.
 	cwdChanged := false
@@ -1064,58 +1225,52 @@ func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notifica
 		}
 	}
 
+	// SessionStart bookkeeping is agent-agnostic: any "first hook" observed
+	// after spawn confirms the agent came up successfully. Adapters that
+	// don't emit an explicit SessionStart event won't hit this branch, but
+	// startSessionTmux already flips the flag defensively before the spawn.
 	sessionStarted := false
-	switch eventName {
-	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
-		session.Status = StatusThinking
-		session.ErrorMessage = ""
-		session.LastOutputTime = time.Now()
-	case "Stop":
-		session.Status = StatusIdle
-		session.ErrorMessage = ""
-		session.LastOutputTime = time.Now()
-	case "StopFailure":
-		session.Status = StatusIdle
-		session.ErrorMessage = stopReason
-		session.LastOutputTime = time.Now()
-	case "CwdChanged":
-		// CWD is already updated in the common block above.
-		// Just update LastOutputTime; status is unchanged.
-		session.LastOutputTime = time.Now()
-	case "SessionStart":
-		if !session.ClaudeSessionStarted {
-			session.ClaudeSessionStarted = true
-			sessionStarted = true
-		}
-		session.LastOutputTime = time.Now()
-	case "SessionEnd":
-		if session.Status == StatusStopped {
-			// Already stopped — save any CWD/session-ID changes, then return
-			m.mu.Unlock()
-			if cwdChanged {
-				_ = m.store.Save(session)
-				debugLog("[HOOK] Session %s: CWD updated to %s (SessionEnd, already stopped)", sessionName, cwd)
-			}
-			return
-		}
-		session.Status = StatusStopped
-		session.LastActiveAt = time.Now()
-	case "Notification":
-		switch notificationType {
-		case "permission_prompt", "elicitation_dialog":
-			session.Status = StatusPermission
-			session.LastOutputTime = time.Now()
-		case "idle_prompt":
-			session.Status = StatusIdle
-			session.LastOutputTime = time.Now()
-		default:
-			m.mu.Unlock()
-			return
-		}
-	default:
+	if eventName == "SessionStart" && !session.AgentSessionStarted {
+		session.AgentSessionStarted = true
+		sessionStarted = true
+	}
+
+	// SessionEnd on an already-stopped session: no verdict fields should be
+	// applied (they would mutate LastOutputTime / LastActiveAt in memory but
+	// only persist on cwdChanged, which drops the change on daemon restart).
+	// Take the early return before assigning anything from upd — mirrors the
+	// pre-refactor SessionEnd branch that also short-circuited here.
+	if updOK && upd.Status == StatusStopped && oldStatus == StatusStopped {
 		m.mu.Unlock()
+		if cwdChanged {
+			_ = m.store.Save(session)
+			debugLog("[HOOK] Session %s: CWD updated to %s (SessionEnd, already stopped)", sessionName, cwd)
+		}
 		return
 	}
+
+	// Fold in the adapter's status verdict. A missing verdict (updOK=false)
+	// still lets us persist CWD / SessionStart changes, but leaves Status
+	// alone. ErrorMessage uses the tri-state documented on StatusUpdate:
+	// non-empty means set, ClearError means clear, both zero means leave.
+	if updOK {
+		session.Status = upd.Status
+		if upd.ErrorMessage != "" {
+			session.ErrorMessage = upd.ErrorMessage
+		} else if upd.ClearError {
+			session.ErrorMessage = ""
+		}
+		session.LastOutputTime = time.Now()
+		if upd.Status == StatusStopped {
+			session.LastActiveAt = time.Now()
+		}
+	} else if eventName == "CwdChanged" || eventName == "SessionStart" {
+		// Non-status events that we still track internally: keep
+		// LastOutputTime moving so the "no hook for 30s" fallback in
+		// captureOutputTmux doesn't fire.
+		session.LastOutputTime = time.Now()
+	}
+
 	m.mu.Unlock()
 
 	// CwdChanged: immediately check git branch outside the lock
@@ -1134,13 +1289,13 @@ func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notifica
 		}
 	}
 
-	switch eventName {
-	case "Stop":
-		m.notifier.NotifyTaskComplete(sessionID, sessionName)
-	case "StopFailure":
-		m.notifier.NotifyError(sessionID, sessionName, stopReason)
-	case "Notification":
-		if notificationType == "permission_prompt" || notificationType == "elicitation_dialog" {
+	if updOK {
+		switch upd.Notify {
+		case NotifyTaskComplete:
+			m.notifier.NotifyTaskComplete(sessionID, sessionName)
+		case NotifyError:
+			m.notifier.NotifyError(sessionID, sessionName, upd.ErrorMessage)
+		case NotifyPermission:
 			m.notifier.NotifyPermission(sessionID, sessionName)
 		}
 	}
@@ -1157,9 +1312,34 @@ func (m *Manager) HandleHookEvent(ccSessionID, jinSessionID, eventName, notifica
 	//     transcript happens to already be visible.
 	//
 	// TryUpgradeDescription self-limits via the baseline-equality guard, so
-	// calling it on both events at most produces one write per session.
+	// calling it on both events at most produces one write per session. The
+	// enhancer comes from the adapter's Description() slot so agents that
+	// can't produce a description (returned nil) simply skip the upgrade.
 	if eventName == "UserPromptSubmit" || eventName == "Stop" {
-		m.TryUpgradeDescription(sessionID, m.ccEnhancer)
+		if enh := ag.Description(); enh != nil {
+			m.TryUpgradeDescription(sessionID, enh)
+		}
+	}
+}
+
+// HandleAgentSignal is the agent-agnostic entry point for status signals.
+// Currently only kind="hook" is fully wired: it forwards to HandleHookEvent
+// so the existing Claude Code hook route works verbatim over the new IPC
+// action. Other kinds are logged and dropped — future adapters (pane-tail,
+// log-tail) can add cases here without touching the daemon transport layer.
+func (m *Manager) HandleAgentSignal(jinSessionID, kind string, payload map[string]string) {
+	switch kind {
+	case "hook":
+		m.HandleHookEvent(
+			payload["agent_session_id"],
+			jinSessionID,
+			payload["event"],
+			payload["notification_type"],
+			payload["cwd"],
+			payload["stop_reason"],
+		)
+	default:
+		debugLog("[SIGNAL] Session %s: unsupported signal kind %q", jinSessionID, kind)
 	}
 }
 
@@ -1280,131 +1460,7 @@ func (m *Manager) removeGitWorktree(workDir string, force bool) error {
 	}
 }
 
-// ClaudeSettings represents the structure of ~/.claude/settings.local.json
-type ClaudeSettings struct {
-	Projects map[string]ClaudeProjectSettings `json:"projects,omitempty"`
-}
-
-// ClaudeProjectSettings represents project-specific settings in Claude
-type ClaudeProjectSettings struct {
-	HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted,omitempty"`
-}
-
-// ensureClaudeTrustState sets hasTrustDialogAccepted=true in ~/.claude/settings.local.json
-// Claude Code checks this setting to skip the trust confirmation dialog
-func ensureClaudeTrustState(workDir string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	// Get absolute path of workDir
-	absWorkDir, err := filepath.Abs(workDir)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %w", err)
-	}
-
-	settingsPath := filepath.Join(homeDir, ".claude", "settings.local.json")
-
-	// Ensure .claude directory exists
-	claudeDir := filepath.Join(homeDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0700); err != nil {
-		return fmt.Errorf("failed to create .claude directory: %w", err)
-	}
-
-	// Read existing settings or create new
-	var settings ClaudeSettings
-	data, err := os.ReadFile(settingsPath)
-	if err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			// If parsing fails, start fresh but preserve the raw JSON
-			settings = ClaudeSettings{}
-		}
-	}
-
-	// Initialize projects map if nil
-	if settings.Projects == nil {
-		settings.Projects = make(map[string]ClaudeProjectSettings)
-	}
-
-	// Check if already trusted
-	if projectSettings, exists := settings.Projects[absWorkDir]; exists && projectSettings.HasTrustDialogAccepted {
-		return nil // Already trusted
-	}
-
-	// Set trust state for this project
-	settings.Projects[absWorkDir] = ClaudeProjectSettings{
-		HasTrustDialogAccepted: true,
-	}
-
-	// Write back to file
-	newData, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal settings: %w", err)
-	}
-
-	if err := os.WriteFile(settingsPath, newData, 0600); err != nil {
-		return fmt.Errorf("failed to write settings file: %w", err)
-	}
-
-	debugLog("[TRUST] Set hasTrustDialogAccepted=true for %s", absWorkDir)
-	return nil
-}
-
-// hooksEntry is a single hook command entry in the hooks settings file.
-type hooksEntry struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
-	Timeout int    `json:"timeout"`
-}
-
-// hooksMatcher is a hook event matcher with its hooks list.
-type hooksMatcher struct {
-	Matcher string       `json:"matcher,omitempty"`
-	Hooks   []hooksEntry `json:"hooks"`
-}
-
-// hooksSettings is the structure written to hooks-settings.json.
-type hooksSettings struct {
-	Hooks map[string][]hooksMatcher `json:"hooks"`
-}
-
-// ensureHooksSettingsFile generates hooks-settings.json inside stateDir with the
-// jin hook command for all required hook events. The file is written on
-// every call so that it stays up-to-date if the binary path changes.
-// Returns the absolute path to the generated file.
-func ensureHooksSettingsFile(stateDir, execPath string) (string, error) {
-	entry := hooksEntry{
-		Type:    "command",
-		Command: execPath + " hook",
-		Timeout: 5,
-	}
-	settings := hooksSettings{
-		Hooks: map[string][]hooksMatcher{
-			"UserPromptSubmit": {{Hooks: []hooksEntry{entry}}},
-			"Stop":             {{Hooks: []hooksEntry{entry}}},
-			"StopFailure":      {{Hooks: []hooksEntry{entry}}},
-			"PostToolUse":      {{Hooks: []hooksEntry{entry}}},
-			"CwdChanged":       {{Hooks: []hooksEntry{entry}}},
-			"SessionStart":     {{Hooks: []hooksEntry{entry}}},
-			"SessionEnd":       {{Hooks: []hooksEntry{entry}}},
-			"Notification": {{
-				Matcher: "permission_prompt|elicitation_dialog|idle_prompt",
-				Hooks:   []hooksEntry{entry},
-			}},
-		},
-	}
-
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal hooks settings: %w", err)
-	}
-
-	path := filepath.Join(stateDir, "hooks-settings.json")
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return "", fmt.Errorf("failed to write hooks settings file: %w", err)
-	}
-
-	debugLog("[HOOKS] Wrote hooks settings to %s", path)
-	return path, nil
-}
+// Claude Code-specific setup helpers (hooks-settings.json generation, trust
+// dialog suppression) live under internal/agent/claude/. The adapter's
+// Setup() is invoked from startSessionTmux, so no CC-specific code remains
+// in this file.

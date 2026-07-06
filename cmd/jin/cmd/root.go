@@ -7,6 +7,11 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	// Register every known agent adapter with the process-global registry.
+	// The blank import must fire before daemon.NewServer's agent.Lookup call
+	// path executes; root.go is the earliest deterministic entry point in
+	// the CLI.
+	_ "github.com/takaaki-s/honjin/internal/agent/register"
 	"github.com/takaaki-s/honjin/internal/exitcode"
 	"github.com/takaaki-s/honjin/internal/version"
 )

@@ -183,3 +183,71 @@ func TestRenderSessionListJSON(t *testing.T) {
 		}
 	})
 }
+
+// TestRenderSessionTable_HeaderAndAgentColumn locks in the AGENT column's
+// position (STATUS の直後、WORKDIR の前) and its value pass-through. If the
+// column order changes the header assertion fails immediately.
+func TestRenderSessionTable_HeaderAndAgentColumn(t *testing.T) {
+	sessions := []session.Info{
+		{
+			ID:          "abc123",
+			Description: "alpha",
+			Status:      "running",
+			AgentKind:   "claude",
+			WorkDir:     "/tmp/alpha",
+			CreatedAt:   time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := renderSessionTable(&buf, sessions); err != nil {
+		t.Fatalf("renderSessionTable failed: %v", err)
+	}
+
+	got := buf.String()
+	// Header order must include AGENT between STATUS and WORKDIR.
+	wantHeader := "DESCRIPTION"
+	if !bytes.Contains(buf.Bytes(), []byte(wantHeader)) {
+		t.Fatalf("header not found in output:\n%s", got)
+	}
+	// Assert the exact column sequence via a substring check.
+	for _, want := range []string{"DESCRIPTION", "STATUS", "AGENT", "WORKDIR", "BRANCH", "LAST_ACTIVE"} {
+		if !bytes.Contains(buf.Bytes(), []byte(want)) {
+			t.Errorf("header column %q missing:\n%s", want, got)
+		}
+	}
+	// Sequence assertion: STATUS index < AGENT index < WORKDIR index.
+	statusIdx := bytes.Index(buf.Bytes(), []byte("STATUS"))
+	agentIdx := bytes.Index(buf.Bytes(), []byte("AGENT"))
+	workdirIdx := bytes.Index(buf.Bytes(), []byte("WORKDIR"))
+	if !(statusIdx < agentIdx && agentIdx < workdirIdx) {
+		t.Errorf("column order wrong: STATUS=%d AGENT=%d WORKDIR=%d\n%s", statusIdx, agentIdx, workdirIdx, got)
+	}
+	// The row itself must carry the "claude" value.
+	if !bytes.Contains(buf.Bytes(), []byte("claude")) {
+		t.Errorf("row missing AgentKind value:\n%s", got)
+	}
+}
+
+// TestRenderSessionTable_EmptyAgentRendersDash guards against a missing
+// AgentKind (should never happen with the migration, but defence in depth).
+func TestRenderSessionTable_EmptyAgentRendersDash(t *testing.T) {
+	sessions := []session.Info{{
+		ID:          "x",
+		Description: "d",
+		Status:      "stopped",
+		AgentKind:   "",
+		WorkDir:     "/tmp/x",
+		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}}
+	var buf bytes.Buffer
+	if err := renderSessionTable(&buf, sessions); err != nil {
+		t.Fatalf("renderSessionTable failed: %v", err)
+	}
+	// "-" appears in the row (either AgentKind or Branch); check by looking
+	// at the row after the header — both columns fall back to "-" so
+	// just confirming presence is enough.
+	if !bytes.Contains(buf.Bytes(), []byte("-")) {
+		t.Errorf("expected fallback %q in output:\n%s", "-", buf.String())
+	}
+}

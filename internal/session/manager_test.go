@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/takaaki-s/honjin/internal/config"
 	"github.com/takaaki-s/honjin/internal/git"
 )
@@ -35,7 +36,93 @@ func newTestManager(t *testing.T) (*Manager, *mockTmuxRunner, *mockHookRunner) {
 	mgr.SetTmuxClient(tmuxMock)
 	hookMock := newMockHookRunner()
 	mgr.SetHookRunner(hookMock)
+	mgr.SetAgentResolver(newFakeAgentResolver())
 	return mgr, tmuxMock, hookMock
+}
+
+// fakeAgent implements session.Agent with the CC hook vocabulary hard-wired
+// so HandleHookEvent-driven tests still see the same status transitions as
+// pre-refactor code. The concrete Claude Code adapter lives in
+// internal/agent/claude/; importing it here would create a build cycle
+// (agent/claude → session), so we hand-roll a duplicate mapping.
+//
+// enhancer is the Layer C enhancer the adapter returns via Description();
+// tests that exercise Layer C swap it via installEnhancer (which reaches
+// into the fakeAgentResolver held by newTestManager).
+type fakeAgent struct {
+	enhancer DescriptionEnhancer
+}
+
+func (a *fakeAgent) Kind() string                        { return "claude" }
+func (a *fakeAgent) Setup(SetupContext) error            { return nil }
+func (a *fakeAgent) SpawnCommand(SpawnOptions) SpawnPlan { return SpawnPlan{Command: "claude"} }
+func (a *fakeAgent) Description() DescriptionEnhancer    { return a.enhancer }
+func (a *fakeAgent) StatusSource() StatusSource          { return fakeStatusSource{} }
+
+type fakeStatusSource struct{}
+
+func (fakeStatusSource) Interpret(sig StatusSignal) (StatusUpdate, bool) {
+	if sig.Kind != "hook" {
+		return StatusUpdate{}, false
+	}
+	switch sig.Payload["event"] {
+	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+		return StatusUpdate{Status: StatusThinking, ClearError: true, Notify: NotifyNone}, true
+	case "Stop":
+		return StatusUpdate{Status: StatusIdle, ClearError: true, Notify: NotifyTaskComplete}, true
+	case "StopFailure":
+		return StatusUpdate{
+			Status:       StatusIdle,
+			ErrorMessage: sig.Payload["stop_reason"],
+			Notify:       NotifyError,
+		}, true
+	case "SessionEnd":
+		return StatusUpdate{Status: StatusStopped, Notify: NotifyNone}, true
+	case "Notification":
+		switch sig.Payload["notification_type"] {
+		case "permission_prompt", "elicitation_dialog":
+			return StatusUpdate{Status: StatusPermission, Notify: NotifyPermission}, true
+		case "idle_prompt":
+			return StatusUpdate{Status: StatusIdle, Notify: NotifyNone}, true
+		}
+	}
+	return StatusUpdate{}, false
+}
+
+type fakeAgentResolver struct {
+	agents map[string]Agent
+}
+
+func newFakeAgentResolver() *fakeAgentResolver {
+	return &fakeAgentResolver{
+		agents: map[string]Agent{"claude": &fakeAgent{}},
+	}
+}
+
+func (r *fakeAgentResolver) Resolve(kind string) (Agent, error) {
+	a, ok := r.agents[kind]
+	if !ok {
+		return nil, fmt.Errorf("unknown agent kind: %s", kind)
+	}
+	return a, nil
+}
+
+// installEnhancer swaps the Layer C enhancer the "claude" fake adapter
+// returns via Description(). Tests that used to call
+// Manager.SetDescriptionEnhancer(enh) now do installEnhancer(mgr, enh) —
+// the effect (HandleHookEvent picks up enh on UserPromptSubmit / Stop) is
+// identical.
+func installEnhancer(t *testing.T, mgr *Manager, enh DescriptionEnhancer) {
+	t.Helper()
+	resolver, ok := mgr.agentResolver.(*fakeAgentResolver)
+	if !ok {
+		t.Fatalf("expected *fakeAgentResolver, got %T", mgr.agentResolver)
+	}
+	ag, ok := resolver.agents["claude"].(*fakeAgent)
+	if !ok {
+		t.Fatalf(`expected "claude" adapter to be *fakeAgent, got %T`, resolver.agents["claude"])
+	}
+	ag.enhancer = enh
 }
 
 // ---------------------------------------------------------------------------
@@ -64,8 +151,8 @@ func TestManager_CreateWithOptions_Success(t *testing.T) {
 	if sess.Status != StatusStopped {
 		t.Errorf("Status = %q, want %q", sess.Status, StatusStopped)
 	}
-	if sess.ClaudeSessionID == "" {
-		t.Error("expected non-empty ClaudeSessionID")
+	if sess.AgentSessionID == "" {
+		t.Error("expected non-empty AgentSessionID")
 	}
 }
 
@@ -470,7 +557,7 @@ func TestManager_HandleHookEvent_UserPromptSubmit(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -491,7 +578,7 @@ func TestManager_HandleHookEvent_Stop(t *testing.T) {
 	// Set to thinking first
 	mgr.SetStatus(sess.ID, StatusThinking)
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "Stop", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -510,7 +597,7 @@ func TestManager_HandleHookEvent_Notification_Permission(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Notification", "permission_prompt", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "Notification", "permission_prompt", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -538,7 +625,7 @@ func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
 
 	// CWD to a non-git-root path: WorkDir should NOT update, only CurrentWorkDir
 	nonGitCwd := "/tmp/hook-cwd-subdir"
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", nonGitCwd, "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", nonGitCwd, "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -556,7 +643,7 @@ func TestManager_HandleHookEvent_CWDUpdate(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(gitRootCwd, ".git"), 0o755); err != nil {
 		t.Fatalf("mkdir .git: %v", err)
 	}
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", gitRootCwd, "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", gitRootCwd, "")
 
 	got, ok = mgr.Get(sess.ID)
 	if !ok {
@@ -587,7 +674,7 @@ func TestManager_HandleHookEvent_CwdChanged(t *testing.T) {
 	if err := os.Mkdir(subDir, 0o755); err != nil {
 		t.Fatalf("mkdir subdir: %v", err)
 	}
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "CwdChanged", "", subDir, "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "CwdChanged", "", subDir, "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -610,7 +697,7 @@ func TestManager_HandleHookEvent_CwdChanged(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktreeDir, ".git"), []byte("gitdir: ../main/.git/worktrees/wt"), 0o644); err != nil {
 		t.Fatalf("write .git file: %v", err)
 	}
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "CwdChanged", "", worktreeDir, "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "CwdChanged", "", worktreeDir, "")
 
 	got, ok = mgr.Get(sess.ID)
 	if !ok {
@@ -633,7 +720,7 @@ func TestManager_HandleHookEvent_StopFailure(t *testing.T) {
 	}
 	mgr.SetStatus(sess.ID, StatusThinking)
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -666,14 +753,14 @@ func TestManager_HandleHookEvent_StopFailure_ThenStop_ClearsError(t *testing.T) 
 	mgr.SetStatus(sess.ID, StatusThinking)
 
 	// First: StopFailure sets ErrorMessage
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
 	got, _ := mgr.Get(sess.ID)
 	if got.ErrorMessage != "rate_limit" {
 		t.Fatalf("ErrorMessage after StopFailure = %q, want %q", got.ErrorMessage, "rate_limit")
 	}
 
 	// Then: Stop clears ErrorMessage
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "Stop", "", "", "")
 	got, _ = mgr.Get(sess.ID)
 	if got.ErrorMessage != "" {
 		t.Errorf("ErrorMessage after Stop = %q, want empty", got.ErrorMessage)
@@ -690,17 +777,103 @@ func TestManager_HandleHookEvent_StopFailure_ThenUserPrompt_ClearsError(t *testi
 	mgr.SetStatus(sess.ID, StatusThinking)
 
 	// StopFailure sets ErrorMessage
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "auth_error")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "StopFailure", "", "", "auth_error")
 	got, _ := mgr.Get(sess.ID)
 	if got.ErrorMessage != "auth_error" {
 		t.Fatalf("ErrorMessage after StopFailure = %q, want %q", got.ErrorMessage, "auth_error")
 	}
 
 	// UserPromptSubmit clears ErrorMessage
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", "", "")
 	got, _ = mgr.Get(sess.ID)
 	if got.ErrorMessage != "" {
 		t.Errorf("ErrorMessage after UserPromptSubmit = %q, want empty", got.ErrorMessage)
+	}
+}
+
+// SessionEnd on a session that still has an error message must preserve
+// that message: pre-refactor SessionEnd never touched ErrorMessage, so a
+// StopFailure that fired just before the process died should still surface
+// after the session is stopped. This guards F002 from regressing back to
+// "any adapter verdict clears the error field".
+func TestManager_HandleHookEvent_SessionEnd_PreservesError(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sessend", Description: "sessend"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "StopFailure", "", "", "rate_limit")
+	got, _ := mgr.Get(sess.ID)
+	if got.ErrorMessage != "rate_limit" {
+		t.Fatalf("ErrorMessage after StopFailure = %q, want %q", got.ErrorMessage, "rate_limit")
+	}
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionEnd", "", "", "")
+	got, _ = mgr.Get(sess.ID)
+	if got.ErrorMessage != "rate_limit" {
+		t.Errorf("ErrorMessage after SessionEnd = %q, want %q (SessionEnd must preserve)", got.ErrorMessage, "rate_limit")
+	}
+	if got.Status != StatusStopped {
+		t.Errorf("Status after SessionEnd = %q, want %q", got.Status, StatusStopped)
+	}
+}
+
+// Notification hooks (permission_prompt / elicitation_dialog / idle_prompt)
+// must not touch ErrorMessage either — F002 regression guard.
+func TestManager_HandleHookEvent_Notification_PreservesError(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-notif", Description: "notif"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.SetStatus(sess.ID, StatusThinking)
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "StopFailure", "", "", "auth_error")
+	got, _ := mgr.Get(sess.ID)
+	if got.ErrorMessage != "auth_error" {
+		t.Fatalf("ErrorMessage after StopFailure = %q, want %q", got.ErrorMessage, "auth_error")
+	}
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "Notification", "permission_prompt", "", "")
+	got, _ = mgr.Get(sess.ID)
+	if got.ErrorMessage != "auth_error" {
+		t.Errorf("ErrorMessage after Notification = %q, want %q (Notification must preserve)", got.ErrorMessage, "auth_error")
+	}
+	if got.Status != StatusPermission {
+		t.Errorf("Status after Notification permission_prompt = %q, want %q", got.Status, StatusPermission)
+	}
+}
+
+// F001 regression guard: SessionEnd delivered to an already-stopped session
+// must not silently mutate in-memory-only fields (LastOutputTime /
+// LastActiveAt). The early-return path handles CWD persistence only.
+func TestManager_HandleHookEvent_SessionEnd_AlreadyStopped_NoOp(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-sess-noop", Description: "noop"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	// Prime the session as already-stopped with a fixed LastActiveAt so we
+	// can prove SessionEnd did not shift it.
+	fixed := time.Now().Add(-1 * time.Hour)
+	mgr.mu.Lock()
+	sess.Status = StatusStopped
+	sess.LastActiveAt = fixed
+	mgr.mu.Unlock()
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionEnd", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q", got.Status, StatusStopped)
+	}
+	if !got.LastActiveAt.Equal(fixed) {
+		t.Errorf("LastActiveAt drifted: got %v, want %v", got.LastActiveAt, fixed)
 	}
 }
 
@@ -713,7 +886,7 @@ func TestManager_HandleHookEvent_StopFailure_EmptyReason(t *testing.T) {
 	}
 	mgr.SetStatus(sess.ID, StatusThinking)
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "StopFailure", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "StopFailure", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -734,17 +907,17 @@ func TestManager_HandleHookEvent_SessionStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
-	// Ensure ClaudeSessionStarted is false initially
-	sess.ClaudeSessionStarted = false
+	// Ensure AgentSessionStarted is false initially
+	sess.AgentSessionStarted = false
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "SessionStart", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionStart", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
 		t.Fatal("Get returned ok=false")
 	}
-	if !got.ClaudeSessionStarted {
-		t.Error("ClaudeSessionStarted should be true after SessionStart hook")
+	if !got.AgentSessionStarted {
+		t.Error("AgentSessionStarted should be true after SessionStart hook")
 	}
 }
 
@@ -757,7 +930,7 @@ func TestManager_HandleHookEvent_SessionEnd(t *testing.T) {
 	}
 	mgr.SetStatus(sess.ID, StatusThinking)
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "SessionEnd", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionEnd", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -781,7 +954,7 @@ func TestManager_HandleHookEvent_SessionEnd_Idempotent(t *testing.T) {
 	}
 
 	// Should not panic or change anything
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "SessionEnd", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionEnd", "", "", "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -792,30 +965,8 @@ func TestManager_HandleHookEvent_SessionEnd_Idempotent(t *testing.T) {
 	}
 }
 
-func TestEnsureHooksSettingsFile_NewHooks(t *testing.T) {
-	dir := t.TempDir()
-	path, err := ensureHooksSettingsFile(dir, "/usr/local/bin/jin")
-	if err != nil {
-		t.Fatalf("ensureHooksSettingsFile failed: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile failed: %v", err)
-	}
-
-	var settings hooksSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-
-	requiredHooks := []string{"UserPromptSubmit", "Stop", "StopFailure", "PostToolUse", "CwdChanged", "SessionStart", "SessionEnd", "Notification"}
-	for _, hook := range requiredHooks {
-		if _, ok := settings.Hooks[hook]; !ok {
-			t.Errorf("hooks-settings.json missing hook: %s", hook)
-		}
-	}
-}
+// ensureHooksSettingsFile lives under internal/agent/claude/ now; its tests
+// moved with it (see hooks_settings_test.go there).
 
 // ---------------------------------------------------------------------------
 // Kill tests
@@ -976,10 +1127,10 @@ func TestManager_RecoverTmuxSessions_NoTmux(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// FindByClaudeSessionID tests
+// FindByAgentSessionID tests
 // ---------------------------------------------------------------------------
 
-func TestManager_FindByClaudeSessionID(t *testing.T) {
+func TestManager_FindByAgentSessionID(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/find-cc", Description: "findcc"})
@@ -987,32 +1138,32 @@ func TestManager_FindByClaudeSessionID(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	// Find by the ClaudeSessionID that was auto-generated during creation.
-	got, ok := mgr.FindByClaudeSessionID(sess.ClaudeSessionID)
+	// Find by the AgentSessionID that was auto-generated during creation.
+	got, ok := mgr.FindByAgentSessionID(sess.AgentSessionID)
 	if !ok {
-		t.Fatal("FindByClaudeSessionID returned ok=false for existing session")
+		t.Fatal("FindByAgentSessionID returned ok=false for existing session")
 	}
 	if got.ID != sess.ID {
 		t.Errorf("ID = %q, want %q", got.ID, sess.ID)
 	}
 
-	// Find with a non-existent ClaudeSessionID should return nil.
-	got2, ok2 := mgr.FindByClaudeSessionID("nonexistent-cc-id")
+	// Find with a non-existent AgentSessionID should return nil.
+	got2, ok2 := mgr.FindByAgentSessionID("nonexistent-cc-id")
 	if ok2 {
-		t.Fatal("FindByClaudeSessionID returned ok=true for non-existent ClaudeSessionID")
+		t.Fatal("FindByAgentSessionID returned ok=true for non-existent AgentSessionID")
 	}
 	if got2 != nil {
 		t.Errorf("expected nil session, got %+v", got2)
 	}
 }
 
-func TestManager_FindByClaudeSessionID_NotFound(t *testing.T) {
+func TestManager_FindByAgentSessionID_NotFound(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
 	// Empty manager: should return nil, false.
-	got, ok := mgr.FindByClaudeSessionID("does-not-exist")
+	got, ok := mgr.FindByAgentSessionID("does-not-exist")
 	if ok {
-		t.Fatal("FindByClaudeSessionID returned ok=true on empty manager")
+		t.Fatal("FindByAgentSessionID returned ok=true on empty manager")
 	}
 	if got != nil {
 		t.Errorf("expected nil session, got %+v", got)
@@ -1139,10 +1290,10 @@ func TestManager_NotificationHistory(t *testing.T) {
 	mgr.SetStatus(sess2.ID, StatusThinking)
 
 	// Trigger Stop event (generates task_complete notification)
-	mgr.HandleHookEvent(sess1.ClaudeSessionID, sess1.ID, "Stop", "", "", "")
+	mgr.HandleHookEvent(sess1.AgentSessionID, sess1.ID, "Stop", "", "", "")
 
 	// Trigger Notification/permission event (generates permission notification)
-	mgr.HandleHookEvent(sess2.ClaudeSessionID, sess2.ID, "Notification", "permission_prompt", "", "")
+	mgr.HandleHookEvent(sess2.AgentSessionID, sess2.ID, "Notification", "permission_prompt", "", "")
 
 	history = mgr.NotificationHistory()
 	if len(history) != 2 {
@@ -1199,7 +1350,23 @@ func TestManager_EnsureTmuxClient_NotSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
-	// Deliberately do NOT call SetTmuxClient — tmux client remains nil.
+	// Deliberately do NOT call SetTmuxClient — tmux client remains nil so
+	// ensureTmuxClient exercises the auto-init path.
+	//
+	// Isolate the auto-init to a unique tmux socket name and register a
+	// cleanup that kills the resulting server. Without this, running this
+	// test on a machine with tmux installed leaves a stray "-L jin" server
+	// behind, and the next daemon start reuses it — the server's tmux env
+	// (including CLAUDE_CODE_CHILD_SESSION inherited from whatever launched
+	// `go test`) propagates to every CC subsequently spawned in that
+	// daemon, silently breaking Layer C description enhancement. See the
+	// spawn.go doc comment on the CLAUDE_CODE_* unset list.
+	socketName := "jin-test-" + uuid.New().String()[:8]
+	mgr.SetTmuxSocketName(socketName)
+	mgr.SetAgentResolver(newFakeAgentResolver())
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", socketName, "kill-server").Run()
+	})
 
 	workDir := t.TempDir()
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Description: "notmux"})
@@ -1472,128 +1639,8 @@ func TestManager_List_Empty(t *testing.T) {
 // EnsureClaudeTrustState tests
 // ---------------------------------------------------------------------------
 
-func TestManager_EnsureClaudeTrustState(t *testing.T) {
-	// ensureClaudeTrustState writes to ~/.claude/settings.local.json.
-	// We override HOME so it writes to a temp directory instead.
-	origHome := os.Getenv("HOME")
-	fakeHome := t.TempDir()
-	os.Setenv("HOME", fakeHome)
-	defer os.Setenv("HOME", origHome)
-
-	workDir := t.TempDir()
-
-	err := ensureClaudeTrustState(workDir)
-	if err != nil {
-		t.Fatalf("ensureClaudeTrustState failed: %v", err)
-	}
-
-	// Verify the trust file was created
-	settingsPath := filepath.Join(fakeHome, ".claude", "settings.local.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("failed to read settings file: %v", err)
-	}
-
-	var settings ClaudeSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("failed to unmarshal settings: %v", err)
-	}
-
-	// workDir should be converted to absolute path
-	absWorkDir, _ := filepath.Abs(workDir)
-	projectSettings, exists := settings.Projects[absWorkDir]
-	if !exists {
-		t.Fatalf("project settings not found for %s, got keys: %v", absWorkDir, func() []string {
-			keys := make([]string, 0, len(settings.Projects))
-			for k := range settings.Projects {
-				keys = append(keys, k)
-			}
-			return keys
-		}())
-	}
-	if !projectSettings.HasTrustDialogAccepted {
-		t.Error("HasTrustDialogAccepted = false, want true")
-	}
-}
-
-func TestManager_EnsureClaudeTrustState_Idempotent(t *testing.T) {
-	origHome := os.Getenv("HOME")
-	fakeHome := t.TempDir()
-	os.Setenv("HOME", fakeHome)
-	defer os.Setenv("HOME", origHome)
-
-	workDir := t.TempDir()
-
-	// Call twice — should be idempotent
-	if err := ensureClaudeTrustState(workDir); err != nil {
-		t.Fatalf("first call failed: %v", err)
-	}
-	if err := ensureClaudeTrustState(workDir); err != nil {
-		t.Fatalf("second call failed: %v", err)
-	}
-
-	// Verify still exactly one entry
-	settingsPath := filepath.Join(fakeHome, ".claude", "settings.local.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("failed to read settings file: %v", err)
-	}
-
-	var settings ClaudeSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("failed to unmarshal settings: %v", err)
-	}
-
-	absWorkDir, _ := filepath.Abs(workDir)
-	if len(settings.Projects) != 1 {
-		t.Errorf("expected 1 project entry, got %d", len(settings.Projects))
-	}
-	if !settings.Projects[absWorkDir].HasTrustDialogAccepted {
-		t.Error("HasTrustDialogAccepted = false, want true")
-	}
-}
-
-func TestManager_EnsureClaudeTrustState_MultipleProjects(t *testing.T) {
-	origHome := os.Getenv("HOME")
-	fakeHome := t.TempDir()
-	os.Setenv("HOME", fakeHome)
-	defer os.Setenv("HOME", origHome)
-
-	workDir1 := t.TempDir()
-	workDir2 := t.TempDir()
-
-	if err := ensureClaudeTrustState(workDir1); err != nil {
-		t.Fatalf("first project failed: %v", err)
-	}
-	if err := ensureClaudeTrustState(workDir2); err != nil {
-		t.Fatalf("second project failed: %v", err)
-	}
-
-	settingsPath := filepath.Join(fakeHome, ".claude", "settings.local.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		t.Fatalf("failed to read settings file: %v", err)
-	}
-
-	var settings ClaudeSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("failed to unmarshal settings: %v", err)
-	}
-
-	if len(settings.Projects) != 2 {
-		t.Errorf("expected 2 project entries, got %d", len(settings.Projects))
-	}
-
-	absWorkDir1, _ := filepath.Abs(workDir1)
-	absWorkDir2, _ := filepath.Abs(workDir2)
-
-	if !settings.Projects[absWorkDir1].HasTrustDialogAccepted {
-		t.Error("project 1 HasTrustDialogAccepted = false, want true")
-	}
-	if !settings.Projects[absWorkDir2].HasTrustDialogAccepted {
-		t.Error("project 2 HasTrustDialogAccepted = false, want true")
-	}
-}
+// ensureClaudeTrustState moved to internal/agent/claude/ as EnsureTrustState;
+// see internal/agent/claude/trust_test.go for the tests.
 
 // ---------------------------------------------------------------------------
 // Idle fallback tests (hook-timeout detection in captureOutputTmux)
@@ -1711,7 +1758,7 @@ func TestManager_HandleHookEvent_CWDUpdate_WorktreePathSkipped(t *testing.T) {
 		t.Fatalf("write .git: %v", err)
 	}
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "CwdChanged", "", worktreeDir, "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "CwdChanged", "", worktreeDir, "")
 
 	got, ok := mgr.Get(sess.ID)
 	if !ok {
@@ -2312,14 +2359,14 @@ func TestManager_TryUpgradeDescription_UnknownSession_NoPanic(t *testing.T) {
 func TestManager_HandleHookEvent_UserPromptSubmit_UpgradesDescription(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	enh := &stubEnhancer{response: "hook-derived", ok: true}
-	mgr.SetDescriptionEnhancer(enh)
+	installEnhancer(t, mgr, enh)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-upgrade"})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", "", "")
 
 	got, _ := mgr.Get(sess.ID)
 	if got.Description != "hook-derived" {
@@ -2337,7 +2384,7 @@ func TestManager_HandleHookEvent_UserPromptSubmit_UpgradesDescription(t *testing
 func TestManager_HandleHookEvent_Stop_UpgradesDescription(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 	enh := &stubEnhancer{response: "stop-derived", ok: true}
-	mgr.SetDescriptionEnhancer(enh)
+	installEnhancer(t, mgr, enh)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-stop-upgrade"})
 	if err != nil {
@@ -2347,7 +2394,7 @@ func TestManager_HandleHookEvent_Stop_UpgradesDescription(t *testing.T) {
 	// stopped, so mirror that ordering to keep the setup realistic.
 	mgr.SetStatus(sess.ID, StatusThinking)
 
-	mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, "Stop", "", "", "")
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "Stop", "", "", "")
 
 	got, _ := mgr.Get(sess.ID)
 	if got.Description != "stop-derived" {
@@ -2366,7 +2413,7 @@ func TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade(t *testing.T) {
 		t.Run(ev, func(t *testing.T) {
 			mgr, _, _ := newTestManager(t)
 			enh := &stubEnhancer{response: "should-not-apply", ok: true}
-			mgr.SetDescriptionEnhancer(enh)
+			installEnhancer(t, mgr, enh)
 
 			sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-" + ev})
 			if err != nil {
@@ -2374,7 +2421,7 @@ func TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade(t *testing.T) {
 			}
 			before := sess.Description
 
-			mgr.HandleHookEvent(sess.ClaudeSessionID, sess.ID, ev, "", "", "")
+			mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, ev, "", "", "")
 
 			got, _ := mgr.Get(sess.ID)
 			if got.Description != before {
@@ -2453,4 +2500,62 @@ func TestManager_SetDescription_WhitespaceOnly_Unlocks(t *testing.T) {
 	if got.DescriptionLocked {
 		t.Error("DescriptionLocked = true, want false (whitespace-only value should unlock)")
 	}
+}
+
+// TestBuildAgentShellCmd_SnapshotIsolatesFromConcurrentWrites is the F402
+// regression guard: buildAgentShellCmd must operate on a value snapshot so
+// callers can invoke it after m.mu.Unlock() while HandleHookEvent (or any
+// other write path) mutates the same session under lock.
+//
+// The test spins a writer goroutine that keeps flipping session.AgentKind /
+// AgentSessionID under lock, and a reader loop that snapshots + builds
+// commands with the lock released. Under -race, any read of session.*
+// inside buildAgentShellCmd would fire.
+func TestBuildAgentShellCmd_SnapshotIsolatesFromConcurrentWrites(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{
+		WorkDir:     "/tmp/spawn-race",
+		Description: "spawn-race",
+	})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	stop := make(chan struct{})
+	writerDone := make(chan struct{})
+	// Writer: flip fields under lock as fast as it can. Mirrors the write
+	// pattern in HandleHookEvent (AgentSessionID / AgentSessionStarted /
+	// WorkDir change under m.mu.Lock).
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			mgr.mu.Lock()
+			sess.AgentSessionID = "written-under-lock"
+			sess.AgentSessionStarted = !sess.AgentSessionStarted
+			sess.WorkDir = "/tmp/spawn-race"
+			mgr.mu.Unlock()
+		}
+	}()
+
+	// Reader: snapshot under lock (mirrors the retry path) then run the
+	// builder outside the lock. If snapshotForSpawn / buildAgentShellCmd
+	// touched the session pointer instead of the value copy, -race would
+	// catch it here.
+	for i := 0; i < 500; i++ {
+		mgr.mu.Lock()
+		snap := snapshotForSpawn(sess, sess.WorkDir, sess.WorkDir)
+		mgr.mu.Unlock()
+
+		if _, err := mgr.buildAgentShellCmd(snap); err != nil {
+			t.Fatalf("build failed at iter %d: %v", i, err)
+		}
+	}
+	close(stop)
+	<-writerDone
 }

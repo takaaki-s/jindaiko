@@ -10,18 +10,18 @@ import (
 func TestToInfo_CopiesAllFields(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	s := &Session{
-		ID:                   "test-id-123",
-		Description:          "my-session",
-		WorkDir:              "/home/user/project",
-		CreatedAt:            now,
-		Status:               StatusThinking,
-		LastActiveAt:         now.Add(-5 * time.Minute),
-		ErrorMessage:         "something went wrong",
-		ClaudeSessionID:      "claude-sess-456",
-		ClaudeSessionStarted: true,
-		Fleet:                "backend",
-		TmuxWindowName:       "jin_test-id-123",
-		TmuxPaneID:           "%42",
+		ID:                  "test-id-123",
+		Description:         "my-session",
+		WorkDir:             "/home/user/project",
+		CreatedAt:           now,
+		Status:              StatusThinking,
+		LastActiveAt:        now.Add(-5 * time.Minute),
+		ErrorMessage:        "something went wrong",
+		AgentSessionID:      "claude-sess-456",
+		AgentSessionStarted: true,
+		Fleet:               "backend",
+		TmuxWindowName:      "jin_test-id-123",
+		TmuxPaneID:          "%42",
 
 		// Runtime fields (should NOT appear in Info but CurrentWorkDir/CurrentBranch are mapped)
 		LastOutputTime: now.Add(-1 * time.Minute),
@@ -56,8 +56,8 @@ func TestToInfo_CopiesAllFields(t *testing.T) {
 	if info.ErrorMessage != s.ErrorMessage {
 		t.Errorf("ErrorMessage: got %q, want %q", info.ErrorMessage, s.ErrorMessage)
 	}
-	if info.ClaudeSessionID != s.ClaudeSessionID {
-		t.Errorf("ClaudeSessionID: got %q, want %q", info.ClaudeSessionID, s.ClaudeSessionID)
+	if info.AgentSessionID != s.AgentSessionID {
+		t.Errorf("AgentSessionID: got %q, want %q", info.AgentSessionID, s.AgentSessionID)
 	}
 	if info.TmuxWindowName != s.TmuxWindowName {
 		t.Errorf("TmuxWindowName: got %q, want %q", info.TmuxWindowName, s.TmuxWindowName)
@@ -104,18 +104,18 @@ func TestStatus_StringValues(t *testing.T) {
 func TestSession_JSONRoundTrip(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	original := &Session{
-		ID:                   "round-trip-id",
-		Description:          "roundtrip",
-		WorkDir:              "/tmp/work",
-		CreatedAt:            now,
-		Status:               StatusIdle,
-		LastActiveAt:         now.Add(-2 * time.Minute),
-		ErrorMessage:         "test error",
-		ClaudeSessionID:      "claude-rt-789",
-		ClaudeSessionStarted: true,
-		Fleet:                "frontend",
-		TmuxWindowName:       "jin_round-trip-id",
-		TmuxPaneID:           "%99",
+		ID:                  "round-trip-id",
+		Description:         "roundtrip",
+		WorkDir:             "/tmp/work",
+		CreatedAt:           now,
+		Status:              StatusIdle,
+		LastActiveAt:        now.Add(-2 * time.Minute),
+		ErrorMessage:        "test error",
+		AgentSessionID:      "claude-rt-789",
+		AgentSessionStarted: true,
+		Fleet:               "frontend",
+		TmuxWindowName:      "jin_round-trip-id",
+		TmuxPaneID:          "%99",
 	}
 
 	data, err := json.Marshal(original)
@@ -150,11 +150,11 @@ func TestSession_JSONRoundTrip(t *testing.T) {
 	if restored.ErrorMessage != original.ErrorMessage {
 		t.Errorf("ErrorMessage: got %q, want %q", restored.ErrorMessage, original.ErrorMessage)
 	}
-	if restored.ClaudeSessionID != original.ClaudeSessionID {
-		t.Errorf("ClaudeSessionID: got %q, want %q", restored.ClaudeSessionID, original.ClaudeSessionID)
+	if restored.AgentSessionID != original.AgentSessionID {
+		t.Errorf("AgentSessionID: got %q, want %q", restored.AgentSessionID, original.AgentSessionID)
 	}
-	if restored.ClaudeSessionStarted != original.ClaudeSessionStarted {
-		t.Errorf("ClaudeSessionStarted: got %v, want %v", restored.ClaudeSessionStarted, original.ClaudeSessionStarted)
+	if restored.AgentSessionStarted != original.AgentSessionStarted {
+		t.Errorf("AgentSessionStarted: got %v, want %v", restored.AgentSessionStarted, original.AgentSessionStarted)
 	}
 	if restored.Fleet != original.Fleet {
 		t.Errorf("Fleet: got %q, want %q", restored.Fleet, original.Fleet)

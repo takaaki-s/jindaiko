@@ -20,7 +20,9 @@ const (
 	StatusPermission Status = "permission" // Waiting for permission (Notification hook)
 )
 
-// Session represents a Claude Code session
+// Session represents an agent session managed by honjin. The concrete agent
+// (Claude Code, Codex CLI, ...) is identified by AgentKind and driven through
+// the interfaces in agent_types.go.
 type Session struct {
 	ID                string    `json:"id"`
 	Description       string    `json:"description"`
@@ -35,9 +37,18 @@ type Session struct {
 	// Error info
 	ErrorMessage string `json:"error_message,omitempty"` // Error message
 
-	// Claude Code session ID (for restoration)
-	ClaudeSessionID      string `json:"claude_session_id,omitempty"`
-	ClaudeSessionStarted bool   `json:"claude_session_started,omitempty"` // Whether the CC session has been started at least once
+	// AgentKind identifies the adapter (registry key) that owns this session.
+	// Always non-empty in persisted form; the store migration backfills legacy
+	// records with "claude".
+	AgentKind string `json:"agent_kind"`
+	// AgentSessionID is the adapter-side persistent identifier (Claude Code's
+	// --session-id / --resume UUID, for example). Kept alongside AgentKind so
+	// the same field can serve every adapter.
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// AgentSessionStarted is true once the agent has been launched at least
+	// once with AgentSessionID; adapters use it to switch between "start" and
+	// "resume" command lines.
+	AgentSessionStarted bool `json:"agent_session_started,omitempty"`
 
 	// Fleet grouping
 	Fleet string `json:"fleet"` // Fleet name for session grouping
@@ -69,9 +80,10 @@ type Info struct {
 	CreatedAt         time.Time `json:"created_at"`
 	LastActiveAt      time.Time `json:"last_active_at,omitzero"`
 	ErrorMessage      string    `json:"error_message,omitempty"`
-	ClaudeSessionID   string    `json:"claude_session_id,omitempty"` // Claude Code session ID for transcript lookup
-	TmuxWindowName    string    `json:"tmux_window_name,omitempty"`  // tmux window name
-	Fleet             string    `json:"fleet"`                       // Fleet name for session grouping
+	AgentKind         string    `json:"agent_kind,omitempty"`       // Adapter identifier ("claude" etc.)
+	AgentSessionID    string    `json:"agent_session_id,omitempty"` // Adapter-side persistent session id (transcript lookup, resume)
+	TmuxWindowName    string    `json:"tmux_window_name,omitempty"` // tmux window name
+	Fleet             string    `json:"fleet"`                      // Fleet name for session grouping
 
 	// Tracked fields (dynamic, from daemon polling)
 	CurrentWorkDir string `json:"current_work_dir,omitempty"` // Current working directory
@@ -114,7 +126,8 @@ func (s *Session) ToInfo() Info {
 		CreatedAt:         s.CreatedAt,
 		LastActiveAt:      s.LastActiveAt,
 		ErrorMessage:      s.ErrorMessage,
-		ClaudeSessionID:   s.ClaudeSessionID,
+		AgentKind:         s.AgentKind,
+		AgentSessionID:    s.AgentSessionID,
 		TmuxWindowName:    s.TmuxWindowName,
 		Fleet:             s.Fleet,
 		CurrentWorkDir:    s.CurrentWorkDir,

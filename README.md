@@ -2,7 +2,9 @@
 
 # honjin
 
-A CLI tool for running and managing multiple Claude Code sessions simultaneously.
+A CLI tool for running and managing multiple agent sessions simultaneously
+(Claude Code is the first-class citizen; other agents plug in via
+`internal/agent/<kind>/`).
 
 https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 

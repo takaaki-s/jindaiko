@@ -239,7 +239,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 		}
 	})
 
-	t.Run("empty ClaudeSessionID returns pending", func(t *testing.T) {
+	t.Run("empty AgentSessionID returns pending", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		e := newEnhancer(t)
@@ -254,8 +254,8 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 		t.Setenv("HOME", home)
 		e := newEnhancer(t)
 		sess := &session.Session{
-			WorkDir:         "/tmp/foo",
-			ClaudeSessionID: "cc-missing",
+			WorkDir:        "/tmp/foo",
+			AgentSessionID: "cc-missing",
 		}
 		if got, ok := e.TryGenerate(sess); ok || got != "" {
 			t.Fatalf("TryGenerate(missing transcript) = (%q, %v), want (\"\", false)", got, ok)
@@ -278,7 +278,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 			},
 		})
 		e := newEnhancer(t)
-		sess := &session.Session{WorkDir: workDir, ClaudeSessionID: sessionID}
+		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
 		got, ok := e.TryGenerate(sess)
 		if ok || got != "" {
 			t.Fatalf("TryGenerate(pending slash) = (%q, %v), want (\"\", false)", got, ok)
@@ -301,7 +301,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 			},
 		})
 		e := newEnhancer(t)
-		sess := &session.Session{WorkDir: workDir, ClaudeSessionID: sessionID}
+		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
 		got, ok := e.TryGenerate(sess)
 		if !ok {
 			t.Fatalf("TryGenerate = (%q, %v), want ok=true", got, ok)
@@ -341,7 +341,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 			},
 		})
 		e := newEnhancer(t)
-		sess := &session.Session{WorkDir: workDir, ClaudeSessionID: sessionID}
+		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
 		got, ok := e.TryGenerate(sess)
 		if !ok {
 			t.Fatalf("TryGenerate = (%q, %v), want ok=true (should skip pending /init and pick next prompt)", got, ok)
@@ -389,7 +389,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 			},
 		})
 		e := newEnhancer(t)
-		sess := &session.Session{WorkDir: workDir, ClaudeSessionID: sessionID}
+		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
 		got, ok := e.TryGenerate(sess)
 		if !ok {
 			t.Fatalf("TryGenerate = (%q, %v), want ok=true", got, ok)

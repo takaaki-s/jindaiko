@@ -14,29 +14,61 @@ func TestMigrateSessionJSON(t *testing.T) {
 		wantDesc       string
 		wantLocked     bool
 		wantNameAbsent bool
+		wantAgentKind  string
+		wantAgentID    string
+		wantAgentStart bool
+		wantCCAbsent   bool // claude_session_id / claude_session_started must be gone
 	}{
 		{
-			name:           "legacy schema with non-empty name migrates to description locked",
+			name:           "legacy v1 schema (name only) migrates description + backfills agent_kind",
 			input:          `{"id":"abc","name":"my-session","work_dir":"/tmp/x"}`,
 			wantChanged:    true,
 			wantDesc:       "my-session",
 			wantLocked:     true,
 			wantNameAbsent: true,
+			wantAgentKind:  "claude",
+			wantCCAbsent:   true,
 		},
 		{
-			name:           "legacy schema with empty name only drops the field",
+			name:           "legacy v1 schema with empty name only drops the field but still backfills agent_kind",
 			input:          `{"id":"abc","name":"","work_dir":"/tmp/x"}`,
 			wantChanged:    true,
 			wantDesc:       "",
 			wantLocked:     false,
 			wantNameAbsent: true,
+			wantAgentKind:  "claude",
+			wantCCAbsent:   true,
 		},
 		{
-			name:        "new schema is untouched",
-			input:       `{"id":"abc","description":"my-session","description_locked":true,"work_dir":"/tmp/x"}`,
-			wantChanged: false,
-			wantDesc:    "my-session",
-			wantLocked:  true,
+			name:          "v2 schema (description present, no agent_kind) gets agent_kind backfilled",
+			input:         `{"id":"abc","description":"my-session","description_locked":true,"work_dir":"/tmp/x"}`,
+			wantChanged:   true,
+			wantDesc:      "my-session",
+			wantLocked:    true,
+			wantAgentKind: "claude",
+			wantCCAbsent:  true,
+		},
+		{
+			name:           "v2 schema with claude_session_* renames to agent_session_*",
+			input:          `{"id":"abc","description":"d","work_dir":"/tmp/x","claude_session_id":"cc-uuid","claude_session_started":true}`,
+			wantChanged:    true,
+			wantDesc:       "d",
+			wantLocked:     false,
+			wantAgentKind:  "claude",
+			wantAgentID:    "cc-uuid",
+			wantAgentStart: true,
+			wantCCAbsent:   true,
+		},
+		{
+			name:           "v3 schema (already migrated) is untouched",
+			input:          `{"id":"abc","description":"d","description_locked":true,"work_dir":"/tmp/x","agent_kind":"claude","agent_session_id":"uuid","agent_session_started":true}`,
+			wantChanged:    false,
+			wantDesc:       "d",
+			wantLocked:     true,
+			wantAgentKind:  "claude",
+			wantAgentID:    "uuid",
+			wantAgentStart: true,
+			wantCCAbsent:   true,
 		},
 		{
 			name:           "existing description takes precedence over legacy name",
@@ -45,6 +77,17 @@ func TestMigrateSessionJSON(t *testing.T) {
 			wantDesc:       "new",
 			wantLocked:     false,
 			wantNameAbsent: true,
+			wantAgentKind:  "claude",
+			wantCCAbsent:   true,
+		},
+		{
+			name:          "non-claude agent_kind is preserved (future adapters)",
+			input:         `{"id":"abc","description":"d","work_dir":"/tmp/x","agent_kind":"codex","agent_session_id":"cx-uuid"}`,
+			wantChanged:   false,
+			wantDesc:      "d",
+			wantAgentKind: "codex",
+			wantAgentID:   "cx-uuid",
+			wantCCAbsent:  true,
 		},
 		{
 			name:    "broken JSON returns an error",
@@ -86,12 +129,30 @@ func TestMigrateSessionJSON(t *testing.T) {
 					t.Errorf("name field should be removed, still present: %v", got["name"])
 				}
 			}
+			if kind, _ := got["agent_kind"].(string); kind != tc.wantAgentKind {
+				t.Errorf("agent_kind = %q, want %q", kind, tc.wantAgentKind)
+			}
+			if id, _ := got["agent_session_id"].(string); id != tc.wantAgentID {
+				t.Errorf("agent_session_id = %q, want %q", id, tc.wantAgentID)
+			}
+			if started, _ := got["agent_session_started"].(bool); started != tc.wantAgentStart {
+				t.Errorf("agent_session_started = %v, want %v", started, tc.wantAgentStart)
+			}
+			if tc.wantCCAbsent {
+				if _, ok := got["claude_session_id"]; ok {
+					t.Errorf("claude_session_id should be removed, still present: %v", got["claude_session_id"])
+				}
+				if _, ok := got["claude_session_started"]; ok {
+					t.Errorf("claude_session_started should be removed, still present: %v", got["claude_session_started"])
+				}
+			}
 		})
 	}
 }
 
 func TestMigrateSessionJSON_Idempotent(t *testing.T) {
-	input := []byte(`{"id":"abc","name":"legacy","work_dir":"/tmp/x"}`)
+	// A v1 record: exercise both migration steps + verify second pass is a no-op.
+	input := []byte(`{"id":"abc","name":"legacy","work_dir":"/tmp/x","claude_session_id":"cc-uuid","claude_session_started":true}`)
 
 	first, changed1, err := migrateSessionJSON(input)
 	if err != nil {

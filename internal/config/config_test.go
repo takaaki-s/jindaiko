@@ -184,6 +184,29 @@ func TestManager_GetWorktreeConfig_PreservesUserValues(t *testing.T) {
 	}
 }
 
+// --- Manager.GetDefaultAgent ---
+
+func TestManager_GetDefaultAgent_DefaultsToClaude(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	if got := m.GetDefaultAgent(); got != "claude" {
+		t.Errorf("GetDefaultAgent() = %q, want %q", got, "claude")
+	}
+}
+
+func TestManager_GetDefaultAgent_UsesConfiguredValue(t *testing.T) {
+	m := &Manager{config: &Config{DefaultAgent: "codex"}}
+	if got := m.GetDefaultAgent(); got != "codex" {
+		t.Errorf("GetDefaultAgent() = %q, want %q", got, "codex")
+	}
+}
+
+func TestManager_GetDefaultAgent_EmptyStringFallsBack(t *testing.T) {
+	m := &Manager{config: &Config{DefaultAgent: ""}}
+	if got := m.GetDefaultAgent(); got != "claude" {
+		t.Errorf("GetDefaultAgent() = %q, want %q", got, "claude")
+	}
+}
+
 // --- formatKeyForTmux ---
 
 func TestFormatKeyForTmux(t *testing.T) {

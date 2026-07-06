@@ -13,13 +13,16 @@ import (
 
 var newCmd = &cobra.Command{
 	Use:   "new",
-	Short: "Create a new Claude Code session",
-	Long: `Create a new Claude Code session and start it in background.
+	Short: "Create a new agent session",
+	Long: `Create a new agent session and start it in background. Defaults to
+Claude Code; use --agent to select a different adapter (once more are
+registered).
 
 Examples:
   jin session new --workdir ~/projects/myapp
   jin session new --workdir . --description myapp
   jin session new --workdir . --fleet backend
+  jin session new --workdir . --agent claude
 
 For interactive session creation, use 'jin ui' (TUI).`,
 	Args: cobra.NoArgs,
@@ -27,6 +30,7 @@ For interactive session creation, use 'jin ui' (TUI).`,
 		workDir, _ := cmd.Flags().GetString("workdir")
 		description, _ := cmd.Flags().GetString("description")
 		fleet, _ := cmd.Flags().GetString("fleet")
+		agentKind, _ := cmd.Flags().GetString("agent")
 		noStart, _ := cmd.Flags().GetBool("no-start")
 		worktree, _ := cmd.Flags().GetBool("worktree")
 		worktreeName, _ := cmd.Flags().GetString("worktree-name")
@@ -55,6 +59,7 @@ For interactive session creation, use 'jin ui' (TUI).`,
 			WorkDir:        workDir,
 			Start:          !noStart,
 			Fleet:          fleet,
+			AgentKind:      agentKind,
 			Worktree:       worktree,
 			WorktreeName:   worktreeName,
 			WorktreeBranch: worktreeBranch,
@@ -90,6 +95,7 @@ func init() {
 	newCmd.Flags().String("workdir", "", "Working directory (default: current directory)")
 	newCmd.Flags().StringP("description", "d", "", "Human-readable session description (default: directory basename)")
 	newCmd.Flags().StringP("fleet", "f", "", "Fleet name for session grouping (default: \"default\")")
+	newCmd.Flags().String("agent", "", "Agent adapter kind (default: config's default_agent, fallback \"claude\")")
 	newCmd.Flags().Bool("no-start", false, "Don't start the session immediately")
 	newCmd.Flags().Bool("worktree", false, "Create a git worktree for this session (from the repo's default branch)")
 	newCmd.Flags().String("worktree-name", "", "Override the auto-generated worktree name (default: jin-<8hex>)")

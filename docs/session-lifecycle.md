@@ -39,18 +39,19 @@ Status constants (session/session.go):
 
 ```go
 Session (persisted)
-├─ ID                  string    // UUID (compatible with Claude Code --session-id)
-├─ Description         string    // Human-readable label (see Description Model below)
-├─ DescriptionLocked   bool      // true = manual override, blocks Layer C auto-upgrade
-├─ WorkDir             string    // Working directory (dynamically updated via hook cwd)
-├─ CreatedAt           time.Time // Creation timestamp
-├─ Status              Status
-├─ LastActiveAt        time.Time
-├─ ErrorMessage        string    // Error message (e.g., on startup failure)
-├─ ClaudeSessionID     string    // Claude Code session ID
-├─ ClaudeSessionStarted bool     // Used to determine --resume vs --session-id
-├─ TmuxWindowName      string    // Inner tmux session name
-└─ TmuxPaneID          string    // CC pane ID (e.g., "%42")
+├─ ID                    string    // UUID (also mint-shape for Claude Code --session-id)
+├─ Description           string    // Human-readable label (see Description Model below)
+├─ DescriptionLocked     bool      // true = manual override, blocks Layer C auto-upgrade
+├─ WorkDir               string    // Working directory (dynamically updated via hook cwd)
+├─ CreatedAt             time.Time // Creation timestamp
+├─ Status                Status
+├─ LastActiveAt          time.Time
+├─ ErrorMessage          string    // Error message (e.g., on startup failure)
+├─ AgentKind             string    // Adapter identifier ("claude" etc.); always non-empty in persisted form
+├─ AgentSessionID        string    // Adapter-side persistent id (CC --session-id / --resume value)
+├─ AgentSessionStarted   bool      // Flipped once the agent has spawned; drives adapter's fresh-vs-resume branch
+├─ TmuxWindowName        string    // Inner tmux session name
+└─ TmuxPaneID            string    // Agent pane ID (e.g., "%42")
 
 Session (runtime only, json:"-")
 ├─ LastOutputTime  time.Time // For idle stability detection
@@ -128,13 +129,22 @@ stdout/stderr are saved to `~/.local/state/honjin/hook-logs/<session-id>.log` re
 ## Auto-Recovery on Resume Failure
 
 Inside `captureOutputTmux()`, detects pane death within 10 seconds of startup:
-1. Determines that `claude --resume` has failed
-2. Generates a new ClaudeSessionID
-3. Respawns pane with `claude --session-id {newID}`
+1. Determines that the adapter's `--resume` path (or equivalent) has failed
+2. Mints a fresh AgentSessionID and flips AgentSessionStarted = false
+3. Rebuilds the shell command via `Agent.SpawnCommand` (fresh-session branch) and respawns the pane
 4. If successful, continues as a new session
+
+## Status Detection via Agent Adapters
+
+`HandleHookEvent()` is agent-agnostic wiring: it looks the session up, updates
+CWD / AgentSessionStarted invariants, and then hands the raw event to
+`Agent.StatusSource.Interpret()`. Every adapter owns its own event vocabulary
+and Status mapping — the Claude Code mapping lives in
+`internal/agent/claude/status.go`; other adapters plug their own
+`StatusSource` into the same slot without touching `session/manager.go`.
 
 ## WorkDir Tracking
 
 WorkDir is updated through two paths:
-1. **Via Hook**: `HandleHookEvent()` `cwd` field (Claude Code's actual CWD)
+1. **Via Hook**: `HandleHookEvent()` `cwd` field (the agent's actual CWD)
 2. **Via Polling**: `captureOutputTmux()` `GetPaneCurrentPath()` (tmux pane's CWD)

@@ -2,7 +2,9 @@
 
 # honjin
 
-複数の Claude Code セッションを同時に稼働させ、一元管理するための CLI ツール。
+複数の対話エージェントセッションを同時に稼働させ、一元管理するための CLI ツール
+(Claude Code を first-class citizen としてサポート。他エージェントは
+`internal/agent/<kind>/` にアダプタを追加することで拡張可能)。
 
 https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 

@@ -29,7 +29,7 @@ const minSlashArgLen = 10
 
 // CCDescriptionEnhancer implements session.DescriptionEnhancer using the
 // Claude Code transcript on disk. It reads the transcript associated with the
-// session's ClaudeSessionID, extracts the first user turn's text, and applies
+// session's AgentSessionID, extracts the first user turn's text, and applies
 // the slash-command aware interpretation documented in the F4 spec.
 type CCDescriptionEnhancer struct {
 	reader *transcript.Reader
@@ -48,7 +48,7 @@ func NewCCDescriptionEnhancer() *CCDescriptionEnhancer {
 // recorded, or when the first user turn is still too short to be meaningful
 // (see interpretUserPrompt). Never mutates sess.
 func (e *CCDescriptionEnhancer) TryGenerate(sess *session.Session) (string, bool) {
-	if sess == nil || sess.ClaudeSessionID == "" {
+	if sess == nil || sess.AgentSessionID == "" {
 		return "", false
 	}
 
@@ -61,7 +61,7 @@ func (e *CCDescriptionEnhancer) TryGenerate(sess *session.Session) (string, bool
 		workDir = sess.WorkDir
 	}
 
-	entries, err := e.reader.ReadEntries(workDir, sess.ClaudeSessionID, "")
+	entries, err := e.reader.ReadEntries(workDir, sess.AgentSessionID, "")
 	if err != nil || len(entries) == 0 {
 		return "", false
 	}

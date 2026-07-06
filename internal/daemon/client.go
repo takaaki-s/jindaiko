@@ -59,6 +59,7 @@ type NewOptions struct {
 	WorkDir     string
 	Start       bool
 	Fleet       string // Fleet name for session grouping
+	AgentKind   string // Adapter identifier; daemon defaults from config when empty
 
 	Worktree       bool   // Create a git worktree for this session
 	WorktreeName   string // Override auto-generated worktree name

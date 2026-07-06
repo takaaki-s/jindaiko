@@ -12,7 +12,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/takaaki-s/honjin/internal/agent/claude"
+	"github.com/takaaki-s/honjin/internal/agent"
 	"github.com/takaaki-s/honjin/internal/config"
 	"github.com/takaaki-s/honjin/internal/debug"
 	"github.com/takaaki-s/honjin/internal/session"
@@ -20,6 +20,16 @@ import (
 	"github.com/takaaki-s/honjin/internal/transcript"
 	"github.com/takaaki-s/honjin/internal/worktreehook"
 )
+
+// agentResolverAdapter wraps agent.Lookup so it satisfies session.AgentResolver
+// without leaking the registry package into internal/session. This is the
+// single point of contact between the two packages — session never imports
+// internal/agent directly.
+type agentResolverAdapter struct{}
+
+func (agentResolverAdapter) Resolve(kind string) (session.Agent, error) {
+	return agent.Lookup(kind)
+}
 
 var debugLog = debug.NewLogger("daemon-debug.log")
 
@@ -66,9 +76,11 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir string) (*Server, er
 		return nil, err
 	}
 
-	// Wire the Claude Code Layer C enhancer. The Manager keeps only the
-	// interface, so agent-specific packages stay out of the session domain.
-	mgr.SetDescriptionEnhancer(claude.NewCCDescriptionEnhancer())
+	// Wire the agent resolver so startSessionTmux / HandleHookEvent can
+	// dispatch to the adapter that owns each session's kind. Layer C
+	// description enhancers now live behind Agent.Description() — no
+	// separate wiring is needed here.
+	mgr.SetAgentResolver(agentResolverAdapter{})
 
 	// Set up tmux client if tmux is available and jin tmux session exists
 	if tc, err := tmux.NewClient(); err == nil {
@@ -191,9 +203,36 @@ func (s *Server) handleRequest(req *Request) Response {
 		return s.handleResult(req.Data)
 	case "set-description":
 		return s.handleSetDescription(req.Data)
+	case "agent-signal":
+		return s.handleAgentSignal(req.Data)
 	default:
 		return Response{Success: false, Error: fmt.Sprintf("unknown action: %s", req.Action)}
 	}
+}
+
+// AgentSignalRequest carries a generic status signal from any agent adapter's
+// out-of-band notifier (a hook binary for Claude Code, a pane-output tailer
+// for adapters without hooks). Manager routes the Payload through the
+// registered agent's StatusSource.Interpret.
+type AgentSignalRequest struct {
+	JinSessionID string            `json:"jin_session_id"`
+	Kind         string            `json:"kind"` // "hook" | "pane-output" | ...
+	Payload      map[string]string `json:"payload,omitempty"`
+}
+
+func (s *Server) handleAgentSignal(data json.RawMessage) Response {
+	var req AgentSignalRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	if req.JinSessionID == "" {
+		return Response{Success: false, Error: "jin_session_id is required"}
+	}
+	if req.Kind == "" {
+		return Response{Success: false, Error: "kind is required"}
+	}
+	s.manager.HandleAgentSignal(req.JinSessionID, req.Kind, req.Payload)
+	return Response{Success: true}
 }
 
 // HookRequest represents a Claude Code hook event
@@ -225,7 +264,8 @@ type NewRequest struct {
 	Description string `json:"description"`
 	WorkDir     string `json:"work_dir"`
 	Start       bool   `json:"start"`
-	Fleet       string `json:"fleet"` // Fleet name for session grouping
+	Fleet       string `json:"fleet"`                // Fleet name for session grouping
+	AgentKind   string `json:"agent_kind,omitempty"` // Adapter identifier; daemon defaults to config default_agent when empty
 
 	Worktree       bool   `json:"worktree,omitempty"`        // Create a git worktree for this session
 	WorktreeName   string `json:"worktree_name,omitempty"`   // Override auto-generated worktree name
@@ -249,6 +289,16 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
+	// Backfill the agent kind from user config, then validate against the
+	// registry. Validation up front means the CLI gets a clear "unknown
+	// kind" error before any tmux / worktree side effects run.
+	if req.AgentKind == "" {
+		req.AgentKind = s.configMgr.GetDefaultAgent()
+	}
+	if _, err := agent.Lookup(req.AgentKind); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+
 	// Synchronous mode - mutual exclusion
 	s.createMu.Lock()
 
@@ -256,6 +306,7 @@ func (s *Server) handleNew(data json.RawMessage) Response {
 		Description:    req.Description,
 		WorkDir:        req.WorkDir,
 		Fleet:          req.Fleet,
+		AgentKind:      req.AgentKind,
 		Worktree:       req.Worktree,
 		WorktreeName:   req.WorktreeName,
 		WorktreeBranch: req.WorktreeBranch,
@@ -305,8 +356,8 @@ func (s *Server) handleGet(data json.RawMessage) Response {
 
 	// Enrich with transcript data
 	reader := transcript.NewReader()
-	if info.ClaudeSessionID != "" && info.WorkDir != "" {
-		if msgs, err := reader.GetLastMessages(info.WorkDir, info.ClaudeSessionID); err == nil && msgs != nil {
+	if info.AgentSessionID != "" && info.WorkDir != "" {
+		if msgs, err := reader.GetLastMessages(info.WorkDir, info.AgentSessionID); err == nil && msgs != nil {
 			if msgs.User != nil {
 				info.LastUserMessage = transcript.TruncateMessage(msgs.User.Content, 500)
 			}
@@ -354,10 +405,10 @@ type ResultRequest struct {
 
 // ResultResponse is the response payload for the "result" action.
 type ResultResponse struct {
-	SessionID       string             `json:"session_id"`
-	ClaudeSessionID string             `json:"claude_session_id,omitempty"`
-	Entries         []transcript.Entry `json:"entries"`
-	Truncated       bool               `json:"truncated,omitempty"` // true if Last truncation was applied
+	SessionID      string             `json:"session_id"`
+	AgentSessionID string             `json:"agent_session_id,omitempty"`
+	Entries        []transcript.Entry `json:"entries"`
+	Truncated      bool               `json:"truncated,omitempty"` // true if Last truncation was applied
 }
 
 func (s *Server) handleResult(data json.RawMessage) Response {
@@ -377,12 +428,12 @@ func (s *Server) handleResult(data json.RawMessage) Response {
 	info := sess.ToInfo()
 
 	resp := ResultResponse{
-		SessionID:       info.ID,
-		ClaudeSessionID: info.ClaudeSessionID,
-		Entries:         []transcript.Entry{},
+		SessionID:      info.ID,
+		AgentSessionID: info.AgentSessionID,
+		Entries:        []transcript.Entry{},
 	}
 
-	if info.ClaudeSessionID == "" {
+	if info.AgentSessionID == "" {
 		respData, _ := json.Marshal(resp)
 		return Response{Success: true, Data: respData}
 	}
@@ -393,7 +444,7 @@ func (s *Server) handleResult(data json.RawMessage) Response {
 	}
 
 	reader := transcript.NewReader()
-	entries, err := reader.ReadEntries(workDir, info.ClaudeSessionID, req.Since)
+	entries, err := reader.ReadEntries(workDir, info.AgentSessionID, req.Since)
 	if err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}

@@ -11,6 +11,11 @@ import (
 	"testing"
 	"time"
 
+	// Blank-import the agent register package so agent.Lookup("claude")
+	// resolves inside these e2e tests. Production wires this via
+	// cmd/jin/cmd/root.go; e2e spins up daemon.NewServer directly and
+	// therefore has to opt in here.
+	_ "github.com/takaaki-s/honjin/internal/agent/register"
 	"github.com/takaaki-s/honjin/internal/daemon"
 	"github.com/takaaki-s/honjin/internal/session"
 	"github.com/takaaki-s/honjin/internal/tmux"

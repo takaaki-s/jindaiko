@@ -39,6 +39,7 @@ type Response struct {
 | `notification-history` | (none) | Get notification history |
 | `result` | `ResultRequest` | Fetch structured transcript entries (orchestration) |
 | `set-description` | `SetDescriptionRequest` | Update session description (empty resets to auto-generated) |
+| `agent-signal` | `AgentSignalRequest` | Deliver an out-of-band status signal from an agent adapter (currently only `kind="hook"` is wired) |
 
 ## Request Types
 
@@ -48,12 +49,22 @@ type NewRequest struct {
     WorkDir     string `json:"work_dir"`
     Start       bool   `json:"start"`
     Fleet       string `json:"fleet"`                     // Fleet name for session grouping
+    AgentKind   string `json:"agent_kind,omitempty"`      // Adapter kind ("claude" etc.); daemon defaults from config's default_agent when empty
 
     Worktree       bool   `json:"worktree,omitempty"`        // Create a git worktree for this session
     WorktreeName   string `json:"worktree_name,omitempty"`   // Override auto-generated worktree name
     WorktreeBranch string `json:"worktree_branch,omitempty"` // Override auto-generated branch name
     WorktreeBase   string `json:"worktree_base,omitempty"`   // Override auto-detected base branch
     NoHook         bool   `json:"no_hook,omitempty"`         // Skip .jin/worktree-post-create.sh hook
+}
+
+// AgentSignalRequest carries a generic status signal from any agent adapter's
+// out-of-band notifier. Manager routes the Payload through the registered
+// agent's StatusSource.Interpret.
+type AgentSignalRequest struct {
+    JinSessionID string            `json:"jin_session_id"`
+    Kind         string            `json:"kind"`              // "hook" (currently the only wired kind)
+    Payload      map[string]string `json:"payload,omitempty"` // adapter-defined bag; for "hook": event, notification_type, cwd, stop_reason, agent_session_id
 }
 
 // SetDescriptionRequest updates a session's description. An empty Description
@@ -105,10 +116,10 @@ type ResultRequest struct {
 // ResultResponse returns the filtered entry list along with session metadata.
 // Truncated=true indicates that Last truncation was applied.
 type ResultResponse struct {
-    SessionID       string             `json:"session_id"`
-    ClaudeSessionID string             `json:"claude_session_id,omitempty"`
-    Entries         []transcript.Entry `json:"entries"`
-    Truncated       bool               `json:"truncated,omitempty"`
+    SessionID      string             `json:"session_id"`
+    AgentSessionID string             `json:"agent_session_id,omitempty"` // adapter-side session id (Claude Code UUID etc.)
+    Entries        []transcript.Entry `json:"entries"`
+    Truncated      bool               `json:"truncated,omitempty"`
 }
 ```
 

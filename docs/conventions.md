@@ -53,6 +53,21 @@ If a new package needs debug logging, duplicate the same pattern.
 - `Info`: Read-only struct for external use (converted via `ToInfo()`)
 - `Request`/`Response`: IPC messages (type flexibility via `json.RawMessage`)
 
+## Agent Adapters
+
+- New agent-specific behaviour must go through `session.Agent` (declared in
+  `internal/session/agent_types.go`, re-exported as aliases from
+  `internal/agent/agent.go`). Never introduce a new switch on `AgentKind`
+  in the session or daemon package — the switch already exists inside the
+  adapter's `StatusSource.Interpret` / `SpawnCommand`, and that's the only
+  place agent-specific vocabulary is allowed to live.
+- Register each adapter from `internal/agent/register/register.go` (blank
+  import into `cmd/jin/cmd/root.go`). Do not register from init() inside
+  the adapter package itself: that would create a hidden dependency edge.
+- `internal/session/` MUST NOT import `internal/agent/*`. If a new
+  cross-package need appears, extend the interface (or add a new one) in
+  `session/agent_types.go`, then satisfy it from the adapter side.
+
 ## Testing
 
 Coverage ~40%. Test files exist for all packages.

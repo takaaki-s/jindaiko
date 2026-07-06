@@ -40,14 +40,14 @@ Examples:
 			return err
 		}
 
-		if info.ClaudeSessionID == "" {
-			return fmt.Errorf("session has no Claude Code session ID (session may not have started yet)")
+		if info.AgentSessionID == "" {
+			return fmt.Errorf("session has no agent session ID (session may not have started yet)")
 		}
 
 		reader := transcript.NewReader()
 
 		if lastN > 0 {
-			msgs, err := reader.GetConversation(info.WorkDir, info.ClaudeSessionID, lastN)
+			msgs, err := reader.GetConversation(info.WorkDir, info.AgentSessionID, lastN)
 			if err != nil {
 				return fmt.Errorf("failed to read conversation: %w", err)
 			}
@@ -67,7 +67,7 @@ Examples:
 		}
 
 		// Default: last assistant message
-		msg, err := reader.GetLastMessage(info.WorkDir, info.ClaudeSessionID)
+		msg, err := reader.GetLastMessage(info.WorkDir, info.AgentSessionID)
 		if err != nil {
 			return fmt.Errorf("failed to read transcript: %w", err)
 		}

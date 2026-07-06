@@ -63,9 +63,10 @@ type WorktreeConfig struct {
 
 // Config represents the application-wide configuration
 type Config struct {
-	Keybindings KeybindingsConfig `mapstructure:"keybindings,omitempty"` // Keybinding settings
-	Worktree    WorktreeConfig    `mapstructure:"worktree,omitempty"`    // Git worktree session settings
-	Env         map[string]string `mapstructure:"-"`                     // Custom environment variables (loaded separately to preserve key case)
+	Keybindings  KeybindingsConfig `mapstructure:"keybindings,omitempty"`   // Keybinding settings
+	Worktree     WorktreeConfig    `mapstructure:"worktree,omitempty"`      // Git worktree session settings
+	Env          map[string]string `mapstructure:"-"`                       // Custom environment variables (loaded separately to preserve key case)
+	DefaultAgent string            `mapstructure:"default_agent,omitempty"` // Adapter used when `jin session new` omits --agent (empty ⇒ "claude")
 }
 
 // Manager manages reading and writing configuration files
@@ -247,13 +248,25 @@ func (m *Manager) GetEnv() map[string]string {
 	return env
 }
 
-// GetShell returns the shell to use when launching Claude Code.
+// GetShell returns the shell to use when launching the agent.
 // Uses the $SHELL environment variable, defaulting to /bin/sh.
 func (m *Manager) GetShell() string {
 	if shell := os.Getenv("SHELL"); shell != "" {
 		return shell
 	}
 	return "/bin/sh"
+}
+
+// GetDefaultAgent returns the adapter kind selected when `jin session new`
+// omits --agent. Empty / unset falls back to "claude" so a fresh install
+// works without touching config.yaml.
+func (m *Manager) GetDefaultAgent() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.config == nil || m.config.DefaultAgent == "" {
+		return "claude"
+	}
+	return m.config.DefaultAgent
 }
 
 // DefaultKeybindings returns the default keybindings

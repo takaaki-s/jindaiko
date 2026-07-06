@@ -1,6 +1,6 @@
 # honjin
 
-CLI tool for managing multiple Claude Code sessions via tmux TUI.
+CLI tool for managing multiple agent sessions (Claude Code as first-class) via tmux TUI.
 
 ## Build & Test
 
@@ -19,9 +19,12 @@ make install        # go install ./cmd/jin
 ```
 cmd/jin/cmd/         Cobra CLI commands (root, daemon, session, tui, hook, ...)
 internal/
+  agent/             Agent adapter interface + kind registry
+    claude/          Claude Code adapter (spawn cmd, hooks-settings, trust, transcript enhancer)
+    register/        Blank-import package that Register()s every known kind at init()
   config/            Viper config management (~/.config/honjin/config.yaml)
   daemon/            Unix socket IPC server/client
-  session/           Session management (core domain, largest module)
+  session/           Session lifecycle (agent-agnostic; owns Agent interface)
   tui/               BubbleTea TUI (largest codebase)
   tmux/              tmux -L jin session control
   notify/            Desktop notifications (macOS/Linux)
