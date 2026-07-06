@@ -27,50 +27,60 @@ const minPromptLen = 3
 // typing the command name or has not fed a description yet.
 const minSlashArgLen = 10
 
-// CCDescriptionEnhancer implements session.DescriptionEnhancer using the
-// Claude Code transcript on disk. It reads the transcript associated with the
-// session's AgentSessionID, extracts the first user turn's text, and applies
-// the slash-command aware interpretation documented in the F4 spec.
+// CCDescriptionEnhancer implements session.DescriptionEnhancer using two
+// Claude Code-specific signals, tried in order of informativeness: the
+// transcript's first user turn (Layer C-transcript), falling back to the
+// session name CC writes to ~/.claude/sessions/<PID>.json at start-up
+// (Layer C-name) when no transcript is available yet.
 type CCDescriptionEnhancer struct {
-	reader *transcript.Reader
+	reader     *transcript.Reader
+	nameReader *CCSessionNameReader
 }
 
 // NewCCDescriptionEnhancer builds an enhancer bound to the local ~/.claude
-// transcript store. Safe to share across goroutines: the underlying Reader
-// only performs read-only file I/O.
+// transcript and sessions stores. Safe to share across goroutines: both
+// underlying readers only perform read-only file I/O.
 func NewCCDescriptionEnhancer() *CCDescriptionEnhancer {
-	return &CCDescriptionEnhancer{reader: transcript.NewReader()}
+	return &CCDescriptionEnhancer{
+		reader:     transcript.NewReader(),
+		nameReader: NewCCSessionNameReader(),
+	}
 }
 
-// TryGenerate returns a candidate description built from the first user prompt
-// of the session's transcript. Returns ("", false) when the session has no
-// Claude session id yet, when no transcript exists, when no user turn has been
-// recorded, or when the first user turn is still too short to be meaningful
-// (see interpretUserPrompt). Never mutates sess.
-func (e *CCDescriptionEnhancer) TryGenerate(sess *session.Session) (string, bool) {
+// TryGenerate tries the transcript first since it yields the higher-quality
+// Layer C-transcript description, then falls back to the CC-assigned session
+// name (Layer C-name) which is available as early as SessionStart, before any
+// transcript has been written. Never mutates sess.
+func (e *CCDescriptionEnhancer) TryGenerate(sess *session.Session) (string, session.DescriptionLayer, bool) {
 	if sess == nil || sess.AgentSessionID == "" {
-		return "", false
+		return "", 0, false
 	}
 
-	// Prefer the last known working directory so we still find the transcript
-	// after the session moves into a worktree (which shifts the encoded path
-	// under ~/.claude/projects/). ReadEntries falls back to a globbed lookup
-	// by sessionID when the path guess misses.
+	if cand, ok := e.tryTranscript(sess); ok {
+		return cand, session.DescriptionLayerTranscript, true
+	}
+
+	if e.nameReader != nil {
+		if name, _, ok := e.nameReader.LookupName(sess.AgentSessionID); ok {
+			return smartTruncate(name, descriptionMaxBytes), session.DescriptionLayerAgentName, true
+		}
+	}
+
+	return "", 0, false
+}
+
+// tryTranscript mines the first meaningful user prompt from the transcript
+// associated with sess.AgentSessionID, applying the slash-command aware
+// interpretation documented in the F4 spec.
+func (e *CCDescriptionEnhancer) tryTranscript(sess *session.Session) (string, bool) {
 	workDir := sess.CurrentWorkDir
 	if workDir == "" {
 		workDir = sess.WorkDir
 	}
-
 	entries, err := e.reader.ReadEntries(workDir, sess.AgentSessionID, "")
 	if err != nil || len(entries) == 0 {
 		return "", false
 	}
-
-	// Skip past pending user turns (e.g. a bare "/init" at position 0). The
-	// transcript is append-only, so if we returned pending on the first user
-	// text we'd stay stuck forever — every subsequent hook would re-read the
-	// same head entry. Instead, keep scanning for the first user turn whose
-	// text produces a real candidate.
 	for _, ent := range entries {
 		if ent.Type != "user" {
 			continue

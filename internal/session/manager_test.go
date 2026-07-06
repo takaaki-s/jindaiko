@@ -2203,15 +2203,20 @@ func TestManager_CreateWithOptions_Worktree_RollsBackOnWorkDirCollision(t *testi
 // stubEnhancer is a minimal DescriptionEnhancer whose response can be scripted
 // per test case. It also records how many times TryGenerate was called so the
 // "no-op" cases can assert the enhancer was never consulted.
+//
+// layer defaults to DescriptionLayerBaseline (zero); tests that expect a
+// successful promotion must set it to a layer strictly greater than the
+// session's current layer.
 type stubEnhancer struct {
 	response string
 	ok       bool
+	layer    DescriptionLayer
 	calls    int
 }
 
-func (s *stubEnhancer) TryGenerate(sess *Session) (string, bool) {
+func (s *stubEnhancer) TryGenerate(sess *Session) (string, DescriptionLayer, bool) {
 	s.calls++
-	return s.response, s.ok
+	return s.response, s.layer, s.ok
 }
 
 func TestManager_TryUpgradeDescription_Locked_NoOp(t *testing.T) {
@@ -2240,6 +2245,12 @@ func TestManager_TryUpgradeDescription_Locked_NoOp(t *testing.T) {
 	}
 }
 
+// TestManager_TryUpgradeDescription_DescriptionDrift_NoOp exercises Guard 1
+// from the "direct drift" angle: Description is off-baseline while
+// DescriptionLayer is still zero, without staging any prior enhancer promotion.
+// The companion RestartGuard test covers the same guard reached through the
+// "layer→restart→zero" path; keep both to document the two ways state can
+// drift, even though they hit the same short-circuit.
 func TestManager_TryUpgradeDescription_DescriptionDrift_NoOp(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
 
@@ -2247,8 +2258,8 @@ func TestManager_TryUpgradeDescription_DescriptionDrift_NoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
-	// Simulate a prior Layer C upgrade or manual out-of-band edit that moved the
-	// description off the baseline while leaving Locked=false.
+	// Simulate an out-of-band edit that moved the description off the baseline
+	// without staging a corresponding DescriptionLayer promotion.
 	mgr.mu.Lock()
 	sess.Description = "already upgraded"
 	mgr.mu.Unlock()
@@ -2280,7 +2291,7 @@ func TestManager_TryUpgradeDescription_Success_ApplyCandidate(t *testing.T) {
 		t.Fatalf("precondition: Description=%q should match baseline %q", sess.Description, baseline)
 	}
 
-	enh := &stubEnhancer{response: "auth refactor", ok: true}
+	enh := &stubEnhancer{response: "auth refactor", ok: true, layer: DescriptionLayerTranscript}
 	mgr.TryUpgradeDescription(sess.ID, enh)
 
 	got, _ := mgr.Get(sess.ID)
@@ -2358,7 +2369,7 @@ func TestManager_TryUpgradeDescription_UnknownSession_NoPanic(t *testing.T) {
 // the hook path calls the installed enhancer for the UserPromptSubmit event.
 func TestManager_HandleHookEvent_UserPromptSubmit_UpgradesDescription(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
-	enh := &stubEnhancer{response: "hook-derived", ok: true}
+	enh := &stubEnhancer{response: "hook-derived", ok: true, layer: DescriptionLayerTranscript}
 	installEnhancer(t, mgr, enh)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-upgrade"})
@@ -2383,7 +2394,7 @@ func TestManager_HandleHookEvent_UserPromptSubmit_UpgradesDescription(t *testing
 // the comment in HandleHookEvent for the ~10ms skew observed in practice.
 func TestManager_HandleHookEvent_Stop_UpgradesDescription(t *testing.T) {
 	mgr, _, _ := newTestManager(t)
-	enh := &stubEnhancer{response: "stop-derived", ok: true}
+	enh := &stubEnhancer{response: "stop-derived", ok: true, layer: DescriptionLayerTranscript}
 	installEnhancer(t, mgr, enh)
 
 	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-stop-upgrade"})
@@ -2407,8 +2418,12 @@ func TestManager_HandleHookEvent_Stop_UpgradesDescription(t *testing.T) {
 
 // TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade guards against wiring
 // Layer C to hook events that don't imply a completed transcript write.
+// SessionStart is intentionally omitted: it is now a Layer C trigger (via the
+// LayerAgentName path) since Claude Code writes ~/.claude/sessions/<PID>.json
+// before that hook fires. See TestManager_HandleHookEvent_SessionStart* for the
+// positive assertion.
 func TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade(t *testing.T) {
-	events := []string{"SessionStart", "SessionEnd", "CwdChanged", "PostToolUse"}
+	events := []string{"SessionEnd", "CwdChanged", "PostToolUse"}
 	for _, ev := range events {
 		t.Run(ev, func(t *testing.T) {
 			mgr, _, _ := newTestManager(t)
@@ -2431,6 +2446,144 @@ func TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade(t *testing.T) {
 				t.Errorf("%s: enhancer.TryGenerate calls = %d, want 0", ev, enh.calls)
 			}
 		})
+	}
+}
+
+// TestManager_HandleHookEvent_SessionStart_TriggersLayerC is the positive
+// counterpart to TestManager_HandleHookEvent_OtherEvents_DoNotUpgrade:
+// SessionStart is a Layer C trigger via the LayerAgentName path, matching
+// Claude Code writing ~/.claude/sessions/<PID>.json before the hook fires.
+func TestManager_HandleHookEvent_SessionStart_TriggersLayerC(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	installEnhancer(t, mgr, &stubEnhancer{response: "cc-name-42", ok: true, layer: DescriptionLayerAgentName})
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-session-start-layerc"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionStart", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "cc-name-42" {
+		t.Errorf("Description = %q, want %q", got.Description, "cc-name-42")
+	}
+	if got.DescriptionLayer != DescriptionLayerAgentName {
+		t.Errorf("DescriptionLayer = %d, want %d", got.DescriptionLayer, DescriptionLayerAgentName)
+	}
+}
+
+// TestManager_TryUpgradeDescription_LayerPromotion locks in the two-hop
+// promotion path a real Claude Code session takes: SessionStart plants
+// LayerAgentName from the session-name file, then a later UserPromptSubmit
+// swaps in the higher-quality LayerTranscript candidate once the transcript
+// has been flushed.
+func TestManager_TryUpgradeDescription_LayerPromotion(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	installEnhancer(t, mgr, &stubEnhancer{response: "cc-name", ok: true, layer: DescriptionLayerAgentName})
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-layer-promotion"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionStart", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "cc-name" || got.DescriptionLayer != DescriptionLayerAgentName {
+		t.Fatalf("after SessionStart: Description=%q Layer=%d, want %q/%d",
+			got.Description, got.DescriptionLayer, "cc-name", DescriptionLayerAgentName)
+	}
+
+	installEnhancer(t, mgr, &stubEnhancer{response: "user prompt", ok: true, layer: DescriptionLayerTranscript})
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+
+	got, _ = mgr.Get(sess.ID)
+	if got.Description != "user prompt" {
+		t.Errorf("Description = %q, want %q", got.Description, "user prompt")
+	}
+	if got.DescriptionLayer != DescriptionLayerTranscript {
+		t.Errorf("DescriptionLayer = %d, want %d", got.DescriptionLayer, DescriptionLayerTranscript)
+	}
+}
+
+// TestManager_TryUpgradeDescription_RejectsDowngrade locks in Guard 2: once a
+// higher-layer description is in place, a lower-layer candidate must not
+// overwrite it, even though the enhancer offers a non-empty candidate. This
+// is what keeps a stray SessionStart delivered after Stop from clobbering an
+// already-good LayerTranscript description.
+func TestManager_TryUpgradeDescription_RejectsDowngrade(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	installEnhancer(t, mgr, &stubEnhancer{response: "prompt-desc", ok: true, layer: DescriptionLayerTranscript})
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-reject-downgrade"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "prompt-desc" || got.DescriptionLayer != DescriptionLayerTranscript {
+		t.Fatalf("after UserPromptSubmit: Description=%q Layer=%d, want %q/%d",
+			got.Description, got.DescriptionLayer, "prompt-desc", DescriptionLayerTranscript)
+	}
+
+	installEnhancer(t, mgr, &stubEnhancer{response: "name-desc", ok: true, layer: DescriptionLayerAgentName})
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionStart", "", "", "")
+
+	got, _ = mgr.Get(sess.ID)
+	if got.Description != "prompt-desc" {
+		t.Errorf("Description = %q, want %q (lower-layer candidate must not downgrade)", got.Description, "prompt-desc")
+	}
+	if got.DescriptionLayer != DescriptionLayerTranscript {
+		t.Errorf("DescriptionLayer = %d, want %d (unchanged)", got.DescriptionLayer, DescriptionLayerTranscript)
+	}
+}
+
+// TestManager_TryUpgradeDescription_RestartGuard locks in Guard 1: a daemon
+// restart loses the runtime-only DescriptionLayer (json:"-") back to zero,
+// but the persisted Description may already carry a prior Layer C upgrade.
+// The guard must treat that drift as "already upgraded, provenance unknown"
+// and refuse to consult the enhancer at all, rather than let a fresh
+// SessionStart clobber it.
+func TestManager_TryUpgradeDescription_RestartGuard(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	installEnhancer(t, mgr, &stubEnhancer{response: "prior-upgrade", ok: true, layer: DescriptionLayerAgentName})
+
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/hook-restart-guard"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionStart", "", "", "")
+
+	got, _ := mgr.Get(sess.ID)
+	if got.Description != "prior-upgrade" || got.DescriptionLayer != DescriptionLayerAgentName {
+		t.Fatalf("precondition: Description=%q Layer=%d, want %q/%d",
+			got.Description, got.DescriptionLayer, "prior-upgrade", DescriptionLayerAgentName)
+	}
+
+	// Simulate the daemon restart: reset the in-memory layer to zero while
+	// leaving the persisted Description drifted from baseline, exactly what
+	// a freshly loaded Manager would observe.
+	mgr.mu.Lock()
+	got.DescriptionLayer = DescriptionLayerBaseline
+	mgr.mu.Unlock()
+
+	enh := &stubEnhancer{response: "should-not-apply", ok: true, layer: DescriptionLayerAgentName}
+	installEnhancer(t, mgr, enh)
+
+	mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "SessionStart", "", "", "")
+
+	final, _ := mgr.Get(sess.ID)
+	if final.Description != "prior-upgrade" {
+		t.Errorf("Description = %q, want %q (Guard 1 should have blocked the overwrite)", final.Description, "prior-upgrade")
+	}
+	if enh.calls != 0 {
+		t.Errorf("enhancer.TryGenerate calls = %d, want 0 (Guard 1 short-circuits before consulting the enhancer)", enh.calls)
 	}
 }
 
@@ -2459,7 +2612,7 @@ func TestManager_TryUpgradeDescription_BranchPopulated_StillFires(t *testing.T) 
 	sess.TmuxWindowName = "jin-abc"
 	mgr.mu.Unlock()
 
-	enh := &stubEnhancer{response: "post-poll upgrade", ok: true}
+	enh := &stubEnhancer{response: "post-poll upgrade", ok: true, layer: DescriptionLayerTranscript}
 	mgr.TryUpgradeDescription(sess.ID, enh)
 
 	got, _ := mgr.Get(sess.ID)

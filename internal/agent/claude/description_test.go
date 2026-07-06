@@ -221,50 +221,53 @@ func writeTranscript(t *testing.T, home, workDir, sessionID string, entries []an
 	}
 }
 
-// newEnhancer builds a CCDescriptionEnhancer whose underlying Reader picks up
-// the HOME override set by the caller. transcript.NewReader reads HOME at
-// construction time, so callers must t.Setenv before invoking this helper.
-func newEnhancer(t *testing.T) *CCDescriptionEnhancer {
+// newEnhancer builds a CCDescriptionEnhancer bound to a fresh, empty temp dir
+// set as HOME, and returns that dir so callers can write a transcript beneath
+// it via writeTranscript. Owning HOME setup here (rather than leaving it to
+// each subtest) guarantees the name-fallback path never accidentally matches
+// a real ~/.claude/sessions/*.json on the developer's machine: nothing but
+// writeTranscript's own .claude/projects/ tree exists under this HOME, so
+// CCSessionNameReader.LookupName always misses unless a subtest deliberately
+// populates .claude/sessions/ itself.
+func newEnhancer(t *testing.T) (*CCDescriptionEnhancer, string) {
 	t.Helper()
-	return &CCDescriptionEnhancer{reader: transcript.NewReader()}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return &CCDescriptionEnhancer{
+		reader:     transcript.NewReader(),
+		nameReader: NewCCSessionNameReader(),
+	}, home
 }
 
 func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 	t.Run("nil session returns pending", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		e := newEnhancer(t)
-		if got, ok := e.TryGenerate(nil); ok || got != "" {
+		e, _ := newEnhancer(t)
+		if got, _, ok := e.TryGenerate(nil); ok || got != "" {
 			t.Fatalf("TryGenerate(nil) = (%q, %v), want (\"\", false)", got, ok)
 		}
 	})
 
 	t.Run("empty AgentSessionID returns pending", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		e := newEnhancer(t)
+		e, _ := newEnhancer(t)
 		sess := &session.Session{WorkDir: "/tmp/foo"}
-		if got, ok := e.TryGenerate(sess); ok || got != "" {
+		if got, _, ok := e.TryGenerate(sess); ok || got != "" {
 			t.Fatalf("TryGenerate(empty CC id) = (%q, %v), want (\"\", false)", got, ok)
 		}
 	})
 
 	t.Run("missing transcript returns pending", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		e := newEnhancer(t)
+		e, _ := newEnhancer(t)
 		sess := &session.Session{
 			WorkDir:        "/tmp/foo",
 			AgentSessionID: "cc-missing",
 		}
-		if got, ok := e.TryGenerate(sess); ok || got != "" {
+		if got, _, ok := e.TryGenerate(sess); ok || got != "" {
 			t.Fatalf("TryGenerate(missing transcript) = (%q, %v), want (\"\", false)", got, ok)
 		}
 	})
 
 	t.Run("first user turn is a slash command with no args → pending", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		e, home := newEnhancer(t)
 		workDir := "/tmp/pending-slash"
 		sessionID := "cc-pending"
 		writeTranscript(t, home, workDir, sessionID, []any{
@@ -277,17 +280,15 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 				},
 			},
 		})
-		e := newEnhancer(t)
 		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
-		got, ok := e.TryGenerate(sess)
+		got, _, ok := e.TryGenerate(sess)
 		if ok || got != "" {
 			t.Fatalf("TryGenerate(pending slash) = (%q, %v), want (\"\", false)", got, ok)
 		}
 	})
 
 	t.Run("first user turn plain text is used verbatim", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		e, home := newEnhancer(t)
 		workDir := "/tmp/plain"
 		sessionID := "cc-plain"
 		writeTranscript(t, home, workDir, sessionID, []any{
@@ -300,9 +301,8 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 				},
 			},
 		})
-		e := newEnhancer(t)
 		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
-		got, ok := e.TryGenerate(sess)
+		got, _, ok := e.TryGenerate(sess)
 		if !ok {
 			t.Fatalf("TryGenerate = (%q, %v), want ok=true", got, ok)
 		}
@@ -318,8 +318,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 		// returned pending immediately, so the transcript could never move
 		// past "/init" no matter how many prompts followed. The enhancer must
 		// keep scanning until a real prompt is found.
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		e, home := newEnhancer(t)
 		workDir := "/tmp/pending-then-real"
 		sessionID := "cc-pending-then-real"
 		writeTranscript(t, home, workDir, sessionID, []any{
@@ -340,9 +339,8 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 				},
 			},
 		})
-		e := newEnhancer(t)
 		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
-		got, ok := e.TryGenerate(sess)
+		got, _, ok := e.TryGenerate(sess)
 		if !ok {
 			t.Fatalf("TryGenerate = (%q, %v), want ok=true (should skip pending /init and pick next prompt)", got, ok)
 		}
@@ -353,8 +351,7 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 	})
 
 	t.Run("skips leading non-user entries and empty text blocks", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		e, home := newEnhancer(t)
 		workDir := "/tmp/skip"
 		sessionID := "cc-skip"
 		writeTranscript(t, home, workDir, sessionID, []any{
@@ -388,9 +385,8 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 				},
 			},
 		})
-		e := newEnhancer(t)
 		sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
-		got, ok := e.TryGenerate(sess)
+		got, _, ok := e.TryGenerate(sess)
 		if !ok {
 			t.Fatalf("TryGenerate = (%q, %v), want ok=true", got, ok)
 		}
@@ -399,4 +395,74 @@ func TestCCDescriptionEnhancer_TryGenerate(t *testing.T) {
 			t.Errorf("got = %q, want %q", got, want)
 		}
 	})
+}
+
+// writeSessionName writes a fake ~/.claude/sessions/<id>.json file so
+// CCSessionNameReader.LookupName can find it by sessionId, mirroring the
+// layout CC 2.x writes at SessionStart.
+func writeSessionName(t *testing.T, home, sessionID, name string) {
+	t.Helper()
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	raw, err := json.Marshal(map[string]string{"sessionId": sessionID, "name": name})
+	if err != nil {
+		t.Fatalf("marshal session name: %v", err)
+	}
+	path := filepath.Join(dir, sessionID+".json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestCCDescriptionEnhancer_FallbackToName(t *testing.T) {
+	e, home := newEnhancer(t)
+	sessionID := "cc-name-fallback"
+	writeSessionName(t, home, sessionID, "honjin-d1")
+
+	sess := &session.Session{WorkDir: "/tmp/name-fallback", AgentSessionID: sessionID}
+	got, layer, ok := e.TryGenerate(sess)
+	if !ok {
+		t.Fatalf("TryGenerate = (%q, %v), want ok=true", got, ok)
+	}
+	if layer != session.DescriptionLayerAgentName {
+		t.Errorf("layer = %d, want %d (DescriptionLayerAgentName)", layer, session.DescriptionLayerAgentName)
+	}
+	want := "honjin-d1"
+	if got != want {
+		t.Errorf("got = %q, want %q", got, want)
+	}
+}
+
+func TestCCDescriptionEnhancer_TranscriptPreferred(t *testing.T) {
+	e, home := newEnhancer(t)
+	workDir := "/tmp/transcript-preferred"
+	sessionID := "cc-transcript-preferred"
+	writeTranscript(t, home, workDir, sessionID, []any{
+		map[string]any{
+			"type":      "user",
+			"timestamp": "2026-01-01T00:00:00Z",
+			"message": map[string]any{
+				"role":    "user",
+				"content": "implement the transcript path please",
+			},
+		},
+	})
+	// A name is also on disk, but the transcript hit must win since it's the
+	// higher layer.
+	writeSessionName(t, home, sessionID, "honjin-different-name")
+
+	sess := &session.Session{WorkDir: workDir, AgentSessionID: sessionID}
+	got, layer, ok := e.TryGenerate(sess)
+	if !ok {
+		t.Fatalf("TryGenerate = (%q, %v), want ok=true", got, ok)
+	}
+	if layer != session.DescriptionLayerTranscript {
+		t.Errorf("layer = %d, want %d (DescriptionLayerTranscript)", layer, session.DescriptionLayerTranscript)
+	}
+	want := "implement the transcript path please"
+	if got != want {
+		t.Errorf("got = %q, want %q", got, want)
+	}
 }

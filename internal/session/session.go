@@ -58,9 +58,10 @@ type Session struct {
 	TmuxPaneID     string `json:"tmux_pane_id,omitempty"`     // CC pane ID (e.g., "%42") for capture-pane
 
 	// Runtime fields (not persisted)
-	LastOutputTime time.Time `json:"-"` // Last PTY output received (for idle stability detection)
-	StartedAt      time.Time `json:"-"` // Process start time (prevents false error detection right after startup)
-	SSHAuthSock    string    `json:"-"` // SSH_AUTH_SOCK (for git operations, not persisted)
+	LastOutputTime   time.Time        `json:"-"` // Last PTY output received (for idle stability detection)
+	StartedAt        time.Time        `json:"-"` // Process start time (prevents false error detection right after startup)
+	SSHAuthSock      string           `json:"-"` // SSH_AUTH_SOCK (for git operations, not persisted)
+	DescriptionLayer DescriptionLayer `json:"-"` // Runtime-only enhancer layer; see DescriptionLayer docs + TryUpgradeDescription's restart guard
 
 	// Tracked runtime fields (CurrentWorkDir is persisted so worktree/subdir
 	// context survives daemon restarts and enables resume in the last known dir).

@@ -621,6 +621,7 @@ func (m *Manager) SetDescription(id string, desc string) error {
 	if desc == "" {
 		session.Description = GenerateBaselineDescription(session.WorkDir, "", false, "")
 		session.DescriptionLocked = false
+		session.DescriptionLayer = DescriptionLayerBaseline
 	} else {
 		session.Description = desc
 		session.DescriptionLocked = true
@@ -629,17 +630,25 @@ func (m *Manager) SetDescription(id string, desc string) error {
 }
 
 // TryUpgradeDescription asks the given enhancer for a Layer C description and
-// applies it when three conditions hold: the session is not manually locked,
-// its current description still matches the Layer A baseline (i.e. Layer C has
-// not already fired), and the enhancer returns ok=true.
+// applies it when two layer guards allow the write. Callers should invoke it
+// from every hook event that might carry new signal; guard-heavy internal
+// short-circuiting is what keeps repeated calls cheap.
 //
-// The baseline-equality guard doubles as an "already upgraded" check without
-// needing a persisted attempt counter. Once Layer C mutates the description
-// off-baseline, every subsequent call short-circuits — even if the enhancer
-// runs on every UserPromptSubmit hook.
+// Guard 1 (restart protection): if the persisted Description has drifted from
+// the Layer A baseline while our in-memory DescriptionLayer is still zero,
+// assume the drift came from a previous Layer C write in an earlier daemon
+// process. Refuse to overwrite it — we have no way to know that the incoming
+// candidate is actually higher-quality than what is already there.
 //
-// A nil enhancer (or an unknown session id) is a silent no-op so callers do
-// not need to guard hook wiring.
+// Guard 2 (monotonic layer): reject candidates whose layer is not strictly
+// greater than the session's current layer. This lets us call the same
+// enhancer on both SessionStart (transcript miss → LayerAgentName) and later
+// UserPromptSubmit (transcript hit → LayerTranscript) without the second call
+// getting rejected by a baseline-equality check, while still preventing a
+// same-layer or lower-layer proposal from clobbering a better value.
+//
+// A nil enhancer (or an unknown session id, or a locked description) is a
+// silent no-op so callers do not need to guard hook wiring.
 func (m *Manager) TryUpgradeDescription(id string, enhancer DescriptionEnhancer) {
 	if enhancer == nil {
 		return
@@ -658,15 +667,26 @@ func (m *Manager) TryUpgradeDescription(id string, enhancer DescriptionEnhancer)
 	// here would make the comparison miss as soon as captureOutputTmux populates
 	// those runtime fields, silently disabling Layer C on the very first poll.
 	baseline := GenerateBaselineDescription(session.WorkDir, "", false, "")
-	if session.Description != baseline {
+
+	// Guard 1: description drifted from baseline but our layer counter is zero.
+	// Most commonly this means daemon restart lost the runtime layer while the
+	// persisted Description still carries a prior Layer C value.
+	if session.Description != baseline && session.DescriptionLayer == DescriptionLayerBaseline {
 		return
 	}
 
-	candidate, ok := enhancer.TryGenerate(session)
+	candidate, layer, ok := enhancer.TryGenerate(session)
 	if !ok || candidate == "" {
 		return
 	}
+
+	// Guard 2: only promote strictly upward.
+	if layer <= session.DescriptionLayer {
+		return
+	}
+
 	session.Description = candidate
+	session.DescriptionLayer = layer
 	_ = m.store.Save(session)
 }
 
@@ -1300,22 +1320,25 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 		}
 	}
 
-	// Layer C: opportunistically upgrade the description from the transcript's
-	// first user turn. Runs on both UserPromptSubmit and Stop:
+	// Layer C: opportunistically upgrade the description. Runs on three events
+	// that each expose a different signal source:
 	//
-	//   - UserPromptSubmit is the earliest signal but races Claude Code's own
-	//     transcript flush; observed skew is only ~10ms but that is enough for
-	//     ReadEntries to see an empty jsonl on some sessions.
+	//   - SessionStart is the earliest hook; the transcript is still empty but
+	//     the agent may already have written a session-name file (Claude Code
+	//     2.x populates ~/.claude/sessions/<PID>.json by then). The enhancer
+	//     returns LayerAgentName here.
+	//   - UserPromptSubmit races Claude Code's transcript flush by ~10ms, so
+	//     it sometimes still sees an empty jsonl but is our fastest chance at
+	//     a LayerTranscript win.
 	//   - Stop fires after the assistant response completes, by which point
-	//     the transcript is guaranteed to be flushed. It is our reliable
-	//     upgrade path; UserPromptSubmit just gives us a faster win when the
-	//     transcript happens to already be visible.
+	//     the transcript is guaranteed to be flushed. It is the reliable
+	//     upgrade path to LayerTranscript.
 	//
-	// TryUpgradeDescription self-limits via the baseline-equality guard, so
-	// calling it on both events at most produces one write per session. The
-	// enhancer comes from the adapter's Description() slot so agents that
-	// can't produce a description (returned nil) simply skip the upgrade.
-	if eventName == "UserPromptSubmit" || eventName == "Stop" {
+	// TryUpgradeDescription self-limits via the monotonic-layer guard, so
+	// calling it on all three events at most produces one write per layer per
+	// session. Agents that can't produce a description (Description() == nil)
+	// simply skip the upgrade.
+	if eventName == "SessionStart" || eventName == "UserPromptSubmit" || eventName == "Stop" {
 		if enh := ag.Description(); enh != nil {
 			m.TryUpgradeDescription(sessionID, enh)
 		}

@@ -54,12 +54,13 @@ Session (persisted)
 └─ TmuxPaneID            string    // Agent pane ID (e.g., "%42")
 
 Session (runtime only, json:"-")
-├─ LastOutputTime  time.Time // For idle stability detection
-├─ StartedAt      time.Time // Prevents false error detection right after startup
-├─ SSHAuthSock    string    // For git operations
-├─ CurrentWorkDir string    // tmux pane_current_path
-├─ CurrentBranch  string    // git branch
-└─ IsGitRepo      bool
+├─ LastOutputTime    time.Time         // For idle stability detection
+├─ StartedAt        time.Time         // Prevents false error detection right after startup
+├─ SSHAuthSock      string            // For git operations
+├─ CurrentWorkDir   string            // tmux pane_current_path
+├─ CurrentBranch    string            // git branch
+├─ IsGitRepo        bool
+└─ DescriptionLayer DescriptionLayer  // 0=Baseline, 1=Layer C-name, 2=Layer C-transcript; drives Manager.TryUpgradeDescription's promotion guard
 ```
 
 ## Description Model
@@ -68,7 +69,11 @@ Sessions carry a `Description` (human-readable label) that is separate from the 
 
 - **Layer A (baseline)** — `GenerateBaselineDescription(workDir, branch, isWorktree, tmuxHint)` produces `<repo>[:<branch>][:<subpath>]` (e.g. `honjin:main`). Always populated at session creation, never empty. Agent-independent.
 - **Layer B (manual override)** — Set via `--description` on `session new`, the `set-description` subcommand, or the TUI description step. Sets `DescriptionLocked = true`, blocking Layer C.
-- **Layer C (agent-specific enhancer)** — On `UserPromptSubmit` hooks, if `DescriptionLocked = false` **and** the current Description still equals the Layer A baseline, the registered `DescriptionEnhancer` (currently `internal/agent/claude/CCDescriptionEnhancer`) inspects the first meaningful user prompt and upgrades the Description. Slash commands (`/init …`) without substantial args are treated as pending and skipped.
+- **Layer C (agent-specific enhancer)** — On `SessionStart` / `UserPromptSubmit` / `Stop` hooks, if `DescriptionLocked = false`, the registered `DescriptionEnhancer` (currently `internal/agent/claude/CCDescriptionEnhancer`) returns a `(candidate, DescriptionLayer, ok)` tuple. `TryUpgradeDescription` applies the candidate only when its `DescriptionLayer` is strictly higher than the session's current layer, giving a 3-stage promotion path:
+  - **Layer C-name** (`DescriptionLayerAgentName`) — reads `~/.claude/sessions/<PID>.json` for the name Claude Code assigned (`honjin-42`). Fires at `SessionStart`, so the description leaves the Layer A baseline the moment the process boots.
+  - **Layer C-transcript** (`DescriptionLayerTranscript`) — mines the first meaningful user prompt from the transcript. Slash commands (`/init …`) without substantial args are treated as pending and skipped. Overwrites Layer C-name.
+
+  `Session.DescriptionLayer` is a runtime-only field (`json:"-"`), so daemon restart resets it to zero. A separate guard (`Description != baseline && layer == 0 → skip`) prevents a lower layer from clobbering a higher-layer value that survived the restart in the persisted `Description`.
 
 ### DescriptionLocked Lifecycle
 
