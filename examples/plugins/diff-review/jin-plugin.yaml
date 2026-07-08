@@ -1,6 +1,0 @@
-name: diff-review
-api_version: 1
-on: []                  # action-only: never fires on status_changed, only via
-                         # `jin plugin run diff-review --session <selector>`
-run: ./diff-review.sh
-timeout: 300s            # interactive review; longer than the 30s default
