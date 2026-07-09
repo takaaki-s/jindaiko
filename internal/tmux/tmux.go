@@ -540,8 +540,10 @@ func (c *Client) DetachClientByTTY(clientTTY string) error {
 
 // DisplayPopupOptions configures a tmux display-popup.
 type DisplayPopupOptions struct {
+	Target string // pane/session target for the popup (-t); empty uses the active client
 	Width  string // e.g., "80%"
 	Height string // e.g., "80%"
+	Dir    string // working directory for the command inside the popup (-d)
 	Cmd    string // command to run inside the popup
 	Title  string // popup title (tmux 3.3+)
 }
@@ -549,11 +551,17 @@ type DisplayPopupOptions struct {
 // DisplayPopup opens a tmux popup that runs a command and closes when it exits.
 func (c *Client) DisplayPopup(opts DisplayPopupOptions) error {
 	args := []string{"display-popup", "-E"}
+	if opts.Target != "" {
+		args = append(args, "-t", opts.Target)
+	}
 	if opts.Width != "" {
 		args = append(args, "-w", opts.Width)
 	}
 	if opts.Height != "" {
 		args = append(args, "-h", opts.Height)
+	}
+	if opts.Dir != "" {
+		args = append(args, "-d", opts.Dir)
 	}
 	if opts.Title != "" {
 		args = append(args, "-T", opts.Title)

@@ -224,8 +224,14 @@ $XDG_STATE_HOME/jindaiko/       （デフォルト: ~/.local/state/jindaiko）
 ├── state.yaml                 # 状態ファイル（前回使用したリポジトリ等）
 ├── sessions/                  # セッションデータ
 ├── hooks-settings.json        # Claude Code フック設定（自動生成）
+├── plugins.lock.yaml          # インストール済みプラグイン台帳（下記のプラグイン節を参照）
+├── plugin-logs/               # プラグインごとの dispatch/run とビルド出力
 ├── daemon-debug.log           # デーモンデバッグログ（JIN_DEBUG=1 時）
-└── hook-debug.log             # フックデバッグログ（JIN_DEBUG=1 時）
+├── hook-debug.log             # フックデバッグログ（JIN_DEBUG=1 時）
+└── plugin-debug.log           # プラグインディスパッチャーのデバッグログ（JIN_DEBUG=1 時）
+
+$XDG_DATA_HOME/jindaiko/        （デフォルト: ~/.local/share/jindaiko）
+└── plugins/                   # インストール済みプラグイン（下記のプラグイン節を参照）
 
 $XDG_RUNTIME_DIR/jindaiko/      （未設定時のフォールバック: $TMPDIR/jindaiko-<uid>）
 └── daemon.sock                # デーモンソケット
@@ -416,6 +422,127 @@ jin worktree list     # 信頼済みリポジトリを一覧
 
 hook が非ゼロ終了またはタイムアウトすると、worktree とブランチは rollback され、`jin session new` は非ゼロ exit code で失敗します。stdout/stderr は `~/.local/state/jindaiko/hook-logs/<session-id>.log` に保存され、rollback 後も診断のために残ります。
 
+## プラグイン
+
+jindaiko では、セッションのステータス変化に反応して、あるいはオンデマンドで、任意のシェル実行可能なプラグインを実行できます。プラグインはマニフェストとエントリーポイントのスクリプトを持つディレクトリです。jindaiko はスクリプトが何をするかには関与せず、いつ実行されどんな環境を受け取るかだけを管理します。
+
+### 2 通りの実行方式
+
+- **Event listener（イベントリスナー）** — マニフェストの `on:` マッチャー経由で `status_changed` を購読します。通知、ロギング、CI トリガーなど、非対話的な用途に向いています。
+- **Action（アクション）** — `jin plugin run <name> --session <selector>` で明示的に起動します。ポップアップベースの diff レビュー UI のような、対話的なワークフローに向いています。`on: []` を指定すると action 専用のプラグインになります。
+
+どちらのエントリーポイントも同じ `run:` コマンドを同じ環境で実行します。違いはトリガーだけです。
+
+### マニフェスト（`jin-plugin.yaml`）
+
+このファイルをプラグインディレクトリのルートに配置します:
+
+```yaml
+name: notifier
+api_version: 1
+on: ["status_changed:idle", "status_changed:permission"]
+run: ./notify.sh                 # プラグイン自身のディレクトリからの相対パス
+build: go build -o bin/plugin .  # 省略可。install/update 時に一度だけ実行
+timeout: 30s                     # 省略可。デフォルト 30s
+```
+
+| フィールド | 必須 | 説明 |
+|-----------|------|------|
+| `name` | あり | `[a-z0-9][a-z0-9-]*`。jindaiko がインストールするディレクトリ名と一致している必要があります |
+| `api_version` | あり | 範囲ではなく単一の整数 — [API 互換性](#api-互換性) を参照 |
+| `on` | なし | `status_changed` または `status_changed:<status>` マッチャーのリスト。空または省略時は action 専用 |
+| `run` | あり | プラグインディレクトリを cwd として `bash -c` 経由で実行されるシェルコマンド |
+| `build` | なし | install/update 時に一度だけ実行されるシェルコマンド（dispatch 時には実行されない） — [言語別ガイド](#言語別ガイド) を参照 |
+| `timeout` | なし | 期間文字列（`"30s"`、`"5m"`）。デフォルト `30s` |
+
+`config.yaml` はプラグインの有効/無効切り替えと dispatch タイミングの調整（下記）のみを行います — マニフェストのフィールドを重複して持つことはありません。
+
+### プラグインが受け取る情報
+
+環境変数:
+
+| 変数 | 説明 |
+|------|------|
+| `JIN_EVENT` | `status_changed` または `action` |
+| `JIN_SESSION_ID` | セッション ID |
+| `JIN_STATUS` | 現在のステータス |
+| `JIN_PREV_STATUS` | 直前のステータス（`action` 実行時は空） |
+| `JIN_AGENT_KIND` | アダプタの種類（`claude` など） |
+| `JIN_WORKDIR` | セッションの作業ディレクトリ |
+| `JIN_TMUX_PANE_ID` | tmux ペイン ID（判明している場合） |
+| `JIN_PLUGIN_API_VERSION` | このプラグインが宣言した `api_version` |
+| `JIN_PLUGIN_DEPTH` | チェーンの深さ — [制約](#制約) を参照 |
+| `JIN_SOCKET` | デーモンソケットのパス。プラグインが呼び出す `jin` CLI はこれを自動的に読み取ります |
+| `JIN_BIN` | デーモン自身の `jin` バイナリの絶対パス。PATH 上の `jin` は新しいサブコマンドを持たない古いインストールである可能性があるため、素の `jin` より `"${JIN_BIN:-jin}"` を優先してください |
+
+同じデータは **stdin に JSON としても** 書き込まれます（フィールドは同一、snake_case）。
+
+この薄いペイロード以上の情報が必要な場合は、jindaiko に問い合わせます:
+
+```bash
+jin session info "$JIN_SESSION_ID" --json    # full session details
+jin session send "$JIN_SESSION_ID" "..."     # send a prompt
+jin session result "$JIN_SESSION_ID" --json  # structured transcript entries
+jin pane popup "$JIN_SESSION_ID" -- <cmd>    # tmux popup over the session's pane
+jin pane split "$JIN_SESSION_ID" -- <cmd>
+jin pane capture "$JIN_SESSION_ID"
+jin pane send-keys "$JIN_SESSION_ID" <keys>
+```
+
+**互換性の契約**: 見覚えのない環境変数・JSON フィールド・CLI フラグはエラーではなく無視すべきものとして扱ってください。jindaiko はバージョンを上げずにこのサーフェスへ追加することはあっても、同一 `api_version` 内で削除・改名することはありません。
+
+### インストール / 更新 / 削除 / 一覧
+
+```bash
+# From a git source (github.com/, gitlab.com/, self-hosted, ssh URLs, ...)
+jin plugin install github.com/owner/repo          # default branch
+jin plugin install github.com/owner/repo@v1.2.0   # pinned to a tag/branch/SHA
+
+# From a local directory, symlinked in place (development)
+jin plugin install --link ./my-plugin
+
+jin plugin update <name>
+jin plugin remove <name>
+jin plugin list          # NAME / API / STATE / SOURCE; --json for scripting
+```
+
+git からの install/update では、何かに触れる前にマニフェスト（`name`、`on`、`run`、`build`）と解決したコミット SHA を表示し、確認を求めます（`--yes` でスキップ可）。承認されたコミット SHA は `plugins.lock.yaml` に記録されるため、以降の `install`/`update` が確認時と異なるコミットへ黙って進むことはありません。`--link` したプラグインはこの確認をスキップします — ローカルパスをリンクすること自体が信頼の意思表示であり、jindaiko はリンクされたプラグインに対して `build:` を実行しません。
+
+### 言語別ガイド
+
+- **Shell / 単一ファイル** — clone してそのまま実行できます。`build:` は不要です。
+- **Node.js / TypeScript** — `dist/`（esbuild 等）にバンドルしてコミットしてください。ランタイムでの依存解決（bun/deno）も動作しますが、dispatch は fail-open のため初回 dispatch 時のネットワーク取得が黙って失敗することがあります — 事前ビルド済みバンドルの方が予測可能です。
+- **Go / Rust などのコンパイル言語** — `build:` で install/update 時にコンパイルし、ユーザーのプラットフォーム/アーキテクチャに合わせたバイナリを生成してください（`go.sum` / `Cargo.lock` は再現性のために有用です）。`build:` は install/update ごとに宣言済みの単一コマンドとして一度だけ実行されます。jindaiko は依存解決やツールチェーンの検出を代行しないため、必要なものはプラグイン自身の README に明記してください。非ゼロ終了した場合 install/update はアトミックに失敗し（中途半端な状態は残りません）、出力は `~/.local/state/jindaiko/plugin-logs/<name>-build.log` に保存されます。jindaiko はデフォルトでビルド環境に `npm_config_ignore_scripts=true` を注入します（サプライチェーン対策で、自分の `build:` コマンド内で上書き可能）。ビルド自体はサンドボックス化されておらず、ユーザー自身の権限で実行されます。
+
+### 制約
+
+- **永続プロセスは不可。** jindaiko はイベント/アクションごとにプラグインを起動し、終了後は破棄します。長時間稼働するデーモンを `run:` に組み込まないでください。常駐プロセスが必要な場合は自分で起動し（手動、または systemd user unit として）、プラグイン自体はそこへの薄いクライアント（例: `curl`）にとどめてください。
+- **ポップアップは `JIN_*` 環境変数を継承しません。** `jin pane popup` / `jin pane split` は tmux が新規に spawn したプロセスでコマンドを実行するため、ポップアップに必要なデータはコマンドライン引数として渡してください（またはコマンド文字列内の env 代入プレフィックスとして。例: `jin pane popup "$JIN_SESSION_ID" -- "JIN_BIN=$JIN_BIN inner.sh --id $JIN_SESSION_ID"`）。
+- **Fail-open。** エラー・タイムアウト・ハングしたプラグインがセッションのステータスパイプラインをブロックすることはありません — ログに記録され、パイプラインは処理を続行します。タイムアウトのデフォルトは 30s（マニフェストの `timeout:`）。
+- **ループの残存リスク。** jindaiko は同一の (plugin, session, event) の短時間内での繰り返し dispatch をデバウンスし（デフォルト 3s、下記の `plugins.debounce`）、プラグインが別のプラグイン実行を 1 ホップを超えて連鎖させることを拒否します（`JIN_PLUGIN_DEPTH`）。ただしどちらも *遅い* ピンポン（例: プラグインが送信したプロンプトへの応答が数秒後に同じプラグインを再トリガーする）は捕捉できません — これを避けるのはプラグイン作者の責任です。
+
+### 設定（`~/.config/jindaiko/config.yaml`）
+
+```yaml
+plugins:
+  enabled: true          # デフォルト true。false にすると全プラグインのディスパッチを無効化
+  disabled: ["notifier"] # 個別プラグインを名前で無効化
+  build_timeout: 300  # 秒。install/update 時のビルドステップ（デフォルト 300）
+  debounce: 3          # 秒。ディスパッチのデバウンス窓（デフォルト 3）
+```
+
+### API 互換性
+
+プラグインは単一の `api_version` 整数を宣言します。jindaiko は `[min, current]` のウィンドウをサポートします（現行 v1 では両方とも `1`）。チェックは install/update 時（fail-closed — ウィンドウ外のプラグインは何も書き込まれる前に拒否されます）と、dispatch のたびに再度行われます（fail-open — 互換性のないインストール済みプラグインはスキップされ、一度だけログに記録され、`jin plugin list` で `incompatible` と表示されます。`jin plugin run` は `jin plugin update <name>` を促します）。
+
+### プラグインのデバッグ
+
+```bash
+export JIN_DEBUG=1
+tail -f ~/.local/state/jindaiko/plugin-debug.log        # ディスパッチャーの判断ログ
+tail -f ~/.local/state/jindaiko/plugin-logs/<name>.log  # プラグイン自身の stdout/stderr
+```
+
 ## デバッグ
 
 ```bash
@@ -431,7 +558,7 @@ tail -f ~/.local/state/jindaiko/daemon-debug.log
 
 ## 必要要件
 
-- Go 1.21+
+- Go 1.24.5+
 - tmux 3.3+
 - Claude Code CLI がインストールされていること
 

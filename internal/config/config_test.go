@@ -184,6 +184,65 @@ func TestManager_GetWorktreeConfig_PreservesUserValues(t *testing.T) {
 	}
 }
 
+// --- DefaultPluginsConfig ---
+
+func TestDefaultPluginsConfig(t *testing.T) {
+	cfg := DefaultPluginsConfig()
+	if cfg.Enabled == nil || !*cfg.Enabled {
+		t.Errorf("Enabled default = %v, want true", cfg.Enabled)
+	}
+	if cfg.Disabled != nil {
+		t.Errorf("Disabled default = %v, want nil", cfg.Disabled)
+	}
+	if cfg.BuildTimeout != 300 {
+		t.Errorf("BuildTimeout default = %d, want 300", cfg.BuildTimeout)
+	}
+	if cfg.Debounce != 3 {
+		t.Errorf("Debounce default = %d, want 3", cfg.Debounce)
+	}
+}
+
+// --- Manager.GetPluginsConfig ---
+
+func TestManager_GetPluginsConfig_FillsDefaults(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	got := m.GetPluginsConfig()
+	if got.Enabled == nil || !*got.Enabled {
+		t.Errorf("Enabled = %v, want true", got.Enabled)
+	}
+	if got.BuildTimeout != 300 {
+		t.Errorf("BuildTimeout = %d, want 300", got.BuildTimeout)
+	}
+	if got.Debounce != 3 {
+		t.Errorf("Debounce = %d, want 3", got.Debounce)
+	}
+}
+
+func TestManager_GetPluginsConfig_PreservesUserValues(t *testing.T) {
+	disabled := false
+	m := &Manager{config: &Config{
+		Plugins: PluginsConfig{
+			Enabled:      &disabled,
+			Disabled:     []string{"notifier"},
+			BuildTimeout: 600,
+			Debounce:     10,
+		},
+	}}
+	got := m.GetPluginsConfig()
+	if got.Enabled == nil || *got.Enabled {
+		t.Errorf("Enabled = %v, want false", got.Enabled)
+	}
+	if len(got.Disabled) != 1 || got.Disabled[0] != "notifier" {
+		t.Errorf("Disabled = %v, want [notifier]", got.Disabled)
+	}
+	if got.BuildTimeout != 600 {
+		t.Errorf("BuildTimeout = %d, want 600", got.BuildTimeout)
+	}
+	if got.Debounce != 10 {
+		t.Errorf("Debounce = %d, want 10", got.Debounce)
+	}
+}
+
 // --- Manager.GetDefaultAgent ---
 
 func TestManager_GetDefaultAgent_DefaultsToClaude(t *testing.T) {

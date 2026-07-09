@@ -11,10 +11,13 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/takaaki-s/jindaiko/internal/agent"
 	"github.com/takaaki-s/jindaiko/internal/config"
 	"github.com/takaaki-s/jindaiko/internal/debug"
+	"github.com/takaaki-s/jindaiko/internal/paths"
+	"github.com/takaaki-s/jindaiko/internal/plugin"
 	"github.com/takaaki-s/jindaiko/internal/session"
 	"github.com/takaaki-s/jindaiko/internal/tmux"
 	"github.com/takaaki-s/jindaiko/internal/transcript"
@@ -39,6 +42,7 @@ type Server struct {
 	manager    *session.Manager
 	configMgr  *config.Manager
 	stateMgr   *config.StateManager
+	pluginDisp *plugin.EventDispatcher
 	listener   net.Listener
 	createMu   sync.Mutex // Mutual exclusion for session creation
 }
@@ -97,11 +101,18 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir string) (*Server, er
 	}
 	mgr.SetHookRunner(hookRunner)
 
+	pluginCfg := configMgr.GetPluginsConfig()
+	pluginReg := plugin.NewRegistry(paths.Plugins(), stateDir, pluginCfg)
+	pluginDisp := plugin.NewDispatcher(pluginReg, paths.Plugins(), stateDir, socketPath,
+		time.Duration(pluginCfg.Debounce)*time.Second)
+	mgr.SetPluginDispatcher(pluginDisp)
+
 	return &Server{
 		socketPath: socketPath,
 		manager:    mgr,
 		configMgr:  configMgr,
 		stateMgr:   stateMgr,
+		pluginDisp: pluginDisp,
 	}, nil
 }
 
@@ -205,6 +216,16 @@ func (s *Server) handleRequest(req *Request) Response {
 		return s.handleSetDescription(req.Data)
 	case "agent-signal":
 		return s.handleAgentSignal(req.Data)
+	case "pane-popup":
+		return s.handlePanePopup(req.Data)
+	case "pane-split":
+		return s.handlePaneSplit(req.Data)
+	case "pane-capture":
+		return s.handlePaneCapture(req.Data)
+	case "pane-send-keys":
+		return s.handlePaneSendKeys(req.Data)
+	case "plugin-run":
+		return s.handlePluginRun(req.Data)
 	default:
 		return Response{Success: false, Error: fmt.Sprintf("unknown action: %s", req.Action)}
 	}
@@ -630,6 +651,154 @@ func (s *Server) handleRemoveDirHistory(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 	if err := s.stateMgr.RemoveDirHistory(req.Path); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	return Response{Success: true}
+}
+
+// PanePopupRequest is the request payload for the "pane-popup" action.
+type PanePopupRequest struct {
+	ID     string `json:"id"`
+	Cmd    string `json:"cmd"`
+	Title  string `json:"title,omitempty"`
+	Width  string `json:"width,omitempty"`
+	Height string `json:"height,omitempty"`
+}
+
+func (s *Server) handlePanePopup(data json.RawMessage) Response {
+	var req PanePopupRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	if req.ID == "" {
+		return Response{Success: false, Error: "id is required"}
+	}
+	if req.Cmd == "" {
+		return Response{Success: false, Error: "cmd is required"}
+	}
+	if err := s.manager.PanePopup(req.ID, req.Cmd, req.Title, req.Width, req.Height); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	return Response{Success: true}
+}
+
+// PaneSplitRequest is the request payload for the "pane-split" action. Cmd is
+// optional: an empty split just opens a shell in the new pane.
+type PaneSplitRequest struct {
+	ID         string `json:"id"`
+	Cmd        string `json:"cmd,omitempty"`
+	Horizontal bool   `json:"horizontal,omitempty"`
+	Percent    int    `json:"percent,omitempty"`
+}
+
+func (s *Server) handlePaneSplit(data json.RawMessage) Response {
+	var req PaneSplitRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	if req.ID == "" {
+		return Response{Success: false, Error: "id is required"}
+	}
+	if err := s.manager.PaneSplit(req.ID, req.Cmd, req.Horizontal, req.Percent); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	return Response{Success: true}
+}
+
+// PaneCaptureRequest is the request payload for the "pane-capture" action.
+type PaneCaptureRequest struct {
+	ID   string `json:"id"`
+	ANSI bool   `json:"ansi,omitempty"`
+}
+
+// PaneCaptureResponse is the response payload for the "pane-capture" action.
+type PaneCaptureResponse struct {
+	Content string `json:"content"`
+}
+
+func (s *Server) handlePaneCapture(data json.RawMessage) Response {
+	var req PaneCaptureRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	if req.ID == "" {
+		return Response{Success: false, Error: "id is required"}
+	}
+	content, err := s.manager.PaneCapture(req.ID, req.ANSI)
+	if err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	respData, _ := json.Marshal(PaneCaptureResponse{Content: content})
+	return Response{Success: true, Data: respData}
+}
+
+// PaneSendKeysRequest is the request payload for the "pane-send-keys" action.
+type PaneSendKeysRequest struct {
+	ID      string `json:"id"`
+	Keys    string `json:"keys"`
+	Literal bool   `json:"literal,omitempty"`
+}
+
+func (s *Server) handlePaneSendKeys(data json.RawMessage) Response {
+	var req PaneSendKeysRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	if req.ID == "" {
+		return Response{Success: false, Error: "id is required"}
+	}
+	if req.Keys == "" {
+		return Response{Success: false, Error: "keys is required"}
+	}
+	if err := s.manager.PaneSendKeys(req.ID, req.Keys, req.Literal); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	return Response{Success: true}
+}
+
+// PluginRunRequest is the request payload for the "plugin-run" action. It runs
+// one plugin on demand against a session's current snapshot, bypassing matcher
+// and debounce. Depth carries the caller CLI's JIN_PLUGIN_DEPTH so the
+// dispatcher can reject a plugin that tries to chain another plugin run.
+type PluginRunRequest struct {
+	Plugin    string `json:"plugin"`
+	SessionID string `json:"session_id"`
+	Depth     int    `json:"depth,omitempty"`
+}
+
+// handlePluginRun checks Plugin/SessionID and the dispatcher before touching the
+// session store, so validation errors never depend on manager state. A success
+// Response only means the run was accepted — the plugin executes asynchronously
+// and its outcome is followed through the plugin log.
+func (s *Server) handlePluginRun(data json.RawMessage) Response {
+	var req PluginRunRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Response{Success: false, Error: err.Error()}
+	}
+	if req.Plugin == "" {
+		return Response{Success: false, Error: "plugin is required"}
+	}
+	if req.SessionID == "" {
+		return Response{Success: false, Error: "session_id is required"}
+	}
+	if s.pluginDisp == nil {
+		return Response{Success: false, Error: "plugins are not enabled"}
+	}
+
+	sess, ok := s.manager.Get(req.SessionID)
+	if !ok {
+		return Response{Success: false, Error: fmt.Sprintf("session not found: %s", req.SessionID)}
+	}
+
+	ev := plugin.Event{
+		Name:       "action",
+		SessionID:  sess.ID,
+		Status:     string(sess.Status),
+		AgentKind:  sess.AgentKind,
+		WorkDir:    sess.WorkDir,
+		TmuxPaneID: sess.TmuxPaneID,
+	}
+	if err := s.pluginDisp.RunAction(req.Plugin, ev, req.Depth); err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}
 	return Response{Success: true}

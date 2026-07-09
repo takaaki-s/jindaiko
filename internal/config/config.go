@@ -61,10 +61,19 @@ type WorktreeConfig struct {
 	HookTimeout   int    `mapstructure:"hook_timeout,omitempty"`   // seconds, 0 = default(300)
 }
 
+// PluginsConfig represents settings for the plugin dispatcher.
+type PluginsConfig struct {
+	Enabled      *bool    `mapstructure:"enabled"`       // nil = default(true)
+	Disabled     []string `mapstructure:"disabled"`      // plugin names to skip dispatch for
+	BuildTimeout int      `mapstructure:"build_timeout"` // seconds, 0 = default(300)
+	Debounce     int      `mapstructure:"debounce"`      // seconds, 0 = default(3)
+}
+
 // Config represents the application-wide configuration
 type Config struct {
 	Keybindings  KeybindingsConfig `mapstructure:"keybindings,omitempty"`   // Keybinding settings
 	Worktree     WorktreeConfig    `mapstructure:"worktree,omitempty"`      // Git worktree session settings
+	Plugins      PluginsConfig     `mapstructure:"plugins,omitempty"`       // Plugin dispatcher settings
 	Env          map[string]string `mapstructure:"-"`                       // Custom environment variables (loaded separately to preserve key case)
 	DefaultAgent string            `mapstructure:"default_agent,omitempty"` // Adapter used when `jin session new` omits --agent (empty ⇒ "claude")
 }
@@ -110,6 +119,7 @@ func NewManager(dataDir string) (*Manager, error) {
 func defaultConfig() *Config {
 	return &Config{
 		Worktree: DefaultWorktreeConfig(),
+		Plugins:  DefaultPluginsConfig(),
 	}
 }
 
@@ -125,6 +135,17 @@ func DefaultWorktreeConfig() WorktreeConfig {
 		DefaultBranch: "",
 		HookEnabled:   &tru,
 		HookTimeout:   300,
+	}
+}
+
+// DefaultPluginsConfig returns the default plugin dispatcher configuration.
+func DefaultPluginsConfig() PluginsConfig {
+	tru := true
+	return PluginsConfig{
+		Enabled:      &tru,
+		Disabled:     nil,
+		BuildTimeout: 300,
+		Debounce:     3,
 	}
 }
 
@@ -226,6 +247,26 @@ func (m *Manager) GetWorktreeConfig() WorktreeConfig {
 	}
 	if cfg.HookTimeout == 0 {
 		cfg.HookTimeout = defaults.HookTimeout
+	}
+	return cfg
+}
+
+// GetPluginsConfig returns the plugin dispatcher configuration, filling unset
+// fields from DefaultPluginsConfig so callers can rely on non-empty defaults.
+func (m *Manager) GetPluginsConfig() PluginsConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cfg := m.config.Plugins
+	defaults := DefaultPluginsConfig()
+	if cfg.Enabled == nil {
+		cfg.Enabled = defaults.Enabled
+	}
+	if cfg.BuildTimeout == 0 {
+		cfg.BuildTimeout = defaults.BuildTimeout
+	}
+	if cfg.Debounce == 0 {
+		cfg.Debounce = defaults.Debounce
 	}
 	return cfg
 }

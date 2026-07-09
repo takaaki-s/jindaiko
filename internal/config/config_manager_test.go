@@ -229,6 +229,57 @@ func TestConfigManager_GetWorktreeConfig_FromYAML(t *testing.T) {
 	}
 }
 
+func TestConfigManager_GetPluginsConfig_NoSectionUsesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := "worktree:\n  branch_prefix: topic/\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	m, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	pl := m.GetPluginsConfig()
+	if pl.Enabled == nil || !*pl.Enabled {
+		t.Errorf("Enabled = %v, want true", pl.Enabled)
+	}
+	if pl.BuildTimeout != 300 {
+		t.Errorf("BuildTimeout = %d, want 300", pl.BuildTimeout)
+	}
+	if pl.Debounce != 3 {
+		t.Errorf("Debounce = %d, want 3", pl.Debounce)
+	}
+}
+
+func TestConfigManager_GetPluginsConfig_FromYAML(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := "plugins:\n  enabled: false\n  disabled: [notifier]\n  build_timeout: 60\n  debounce: 5\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	m, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	pl := m.GetPluginsConfig()
+	if pl.Enabled == nil || *pl.Enabled {
+		t.Errorf("Enabled = %v, want false", pl.Enabled)
+	}
+	if len(pl.Disabled) != 1 || pl.Disabled[0] != "notifier" {
+		t.Errorf("Disabled = %v, want [notifier]", pl.Disabled)
+	}
+	if pl.BuildTimeout != 60 {
+		t.Errorf("BuildTimeout = %d, want 60", pl.BuildTimeout)
+	}
+	if pl.Debounce != 5 {
+		t.Errorf("Debounce = %d, want 5", pl.Debounce)
+	}
+}
+
 func TestConfigManager_Reload_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	m, err := NewManager(dir)

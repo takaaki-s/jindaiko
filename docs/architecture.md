@@ -51,6 +51,25 @@ common cases are:
 - `Stop` → StatusIdle + task-complete notification
 - `Notification(permission_prompt)` → StatusPermission + permission notification
 
+## Plugin Event Flow
+
+Every status transition `HandleHookEvent` commits also fans out to installed
+plugins, asynchronously and fail-open (a stuck or failing plugin never blocks
+the status pipeline):
+
+```
+session.Manager.HandleHookEvent()  (status actually changed)
+  → plugin.Dispatcher.Publish(Event{status_changed, ...})   (returns immediately)
+    → for each matching, enabled plugin: exec.ExecPlugin()  (background goroutine,
+                                                               debounced, JIN_* env + stdin JSON)
+```
+
+`jin plugin run <name> --session <id>` takes a separate, synchronous-trigger
+path (`Dispatcher.RunAction`) that skips matcher/debounce but shares the same
+`ExecPlugin` runner. See `internal/plugin/` (`manifest.go`, `dispatcher.go`,
+`exec.go`) and [ipc-protocol.md](ipc-protocol.md) for the `plugin-run` /
+`pane-*` actions plugins use as their CLI-facing API.
+
 ## Agent Adapters
 
 Every session records an `AgentKind` (`"claude"` today; more later). The
@@ -90,16 +109,18 @@ The `Name` field was retired in favour of `Description` + `DescriptionLocked`. E
 ## Package Dependency
 
 ```
-cmd/jin/cmd/       → daemon (client), config, session (types only), tui, tmux,
+cmd/jin/cmd/       → daemon (client), config, session (types only), tui, tmux, plugin,
                        _ agent/register (blank import so kinds are registered)
                       │
-daemon/            → session, config, notify, tmux, agent (registry Lookup)
+daemon/            → session, config, notify, tmux, agent (registry Lookup), plugin
                       │
-session/           → config, tmux, notify, transcript   (no import of agent/*)
+session/           → config, tmux, notify, transcript, plugin (Dispatcher seam only)
                       │
 agent/             → session (borrows Agent + supporting types via aliases)
 agent/claude/      → agent, session, transcript, debug   (CC-specific adapter)
 agent/register/    → agent, agent/claude (init-time Register)
+                      │
+plugin/            → config (PluginsConfig), debug   (no import of tmux/ or session/)
                       │
 tui/               → daemon (client), config, session (Info type)
                       │
@@ -107,10 +128,19 @@ config/            → (external: viper)
 tmux/              → (external: tmux CLI)
 notify/            → (external: OS notification)
 transcript/        → (file I/O: ~/.claude/projects/)
+paths/             → (XDG dirs: config/state/data/runtime)
 ```
 
 config is a foundational package referenced by many others.
 The session package is the core domain with the most business logic.
+
+`session/` depends only on `plugin.Dispatcher`, the small interface it
+publishes events through (`internal/plugin/interfaces.go`) — the concrete
+`plugin.EventDispatcher` is constructed and injected by `daemon/` at startup
+(`Manager.SetPluginDispatcher`), the same seam pattern used for `tmux.Runner`.
+`plugin/` itself never imports `tmux/` or `session/`: pane operations a
+plugin requests go through `jin pane` (daemon IPC → `session.Manager`), not
+through the plugin package directly.
 
 ## File Storage
 
@@ -118,15 +148,25 @@ jindaiko follows the [XDG Base Directory Specification](https://specifications.f
 
 ```
 $XDG_CONFIG_HOME/jindaiko/        (default: ~/.config/jindaiko)
-  └─ config.yaml                 ... User settings (keybindings)
+  └─ config.yaml                 ... User settings (keybindings, plugins config)
 
 $XDG_STATE_HOME/jindaiko/         (default: ~/.local/state/jindaiko)
   ├─ state.yaml                  ... Persistent state (StateManager)
   ├─ sessions/
   │   └─ {uuid}.json             ... Session persistence data
   ├─ hooks-settings.json         ... Generated Claude Code hooks settings
+  ├─ plugins.lock.yaml           ... Installed-plugin ledger (source, ref, commit SHA, linked)
+  ├─ plugin-logs/
+  │   ├─ {name}.log              ... Per-plugin dispatch/run output (append-only)
+  │   └─ {name}-build.log        ... Per-plugin install/update build output
   ├─ daemon-debug.log            ... Daemon debug log
-  └─ hook-debug.log              ... Hook debug log
+  ├─ hook-debug.log              ... Hook debug log
+  └─ plugin-debug.log            ... Plugin dispatcher debug log
+
+$XDG_DATA_HOME/jindaiko/          (default: ~/.local/share/jindaiko)
+  └─ plugins/
+      └─ {name}/                 ... Installed plugin (git clone, or symlink for --link)
+          └─ jin-plugin.yaml     ... Plugin manifest
 
 $XDG_RUNTIME_DIR/jindaiko/        (fallback: $TMPDIR/jindaiko-<uid>)
   └─ daemon.sock                 ... Unix domain socket

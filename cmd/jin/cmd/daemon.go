@@ -130,5 +130,8 @@ func getSocketPath() string {
 	if socketPathFlag != "" {
 		return socketPathFlag
 	}
+	if s := os.Getenv("JIN_SOCKET"); s != "" {
+		return s
+	}
 	return paths.Socket()
 }

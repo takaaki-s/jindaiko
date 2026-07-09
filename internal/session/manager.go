@@ -16,6 +16,7 @@ import (
 	"github.com/takaaki-s/jindaiko/internal/debug"
 	"github.com/takaaki-s/jindaiko/internal/git"
 	"github.com/takaaki-s/jindaiko/internal/notify"
+	"github.com/takaaki-s/jindaiko/internal/plugin"
 	"github.com/takaaki-s/jindaiko/internal/tmux"
 	"github.com/takaaki-s/jindaiko/internal/transcript"
 	"github.com/takaaki-s/jindaiko/internal/worktreehook"
@@ -43,6 +44,7 @@ type Manager struct {
 	configMgr      *config.Manager
 	tmuxClient     tmux.Runner // tmux client for session management
 	hookRunner     worktreehook.Runner
+	pluginDisp     plugin.Dispatcher
 	gitClient      *git.Client
 	agentResolver  AgentResolver // resolves AgentKind → Agent adapter (owns Layer C enhancer via Description())
 	mu             sync.RWMutex
@@ -61,6 +63,14 @@ func (m *Manager) SetHookRunner(r worktreehook.Runner) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hookRunner = r
+}
+
+// SetPluginDispatcher installs the plugin event dispatcher. A nil dispatcher
+// disables plugin event publishing.
+func (m *Manager) SetPluginDispatcher(d plugin.Dispatcher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pluginDisp = d
 }
 
 // SetTmuxSocketName overrides the tmux socket name used by ensureTmuxClient's
@@ -564,6 +574,99 @@ func (m *Manager) SendPrompt(id, prompt string) error {
 	return nil
 }
 
+// paneTargetLocked resolves a session's tmux target: the recorded pane ID when
+// available, else the window.pane fallback. It reads session fields directly
+// and takes no lock, so callers arrange safe access themselves (PaneTarget
+// holds the read lock; captureOutputTmux reads at startup like pre-refactor).
+func paneTargetLocked(session *Session) (string, error) {
+	if session.TmuxPaneID != "" {
+		return session.TmuxPaneID, nil
+	}
+	if session.TmuxWindowName != "" {
+		return tmux.WindowTarget(session.TmuxWindowName, 0), nil
+	}
+	return "", fmt.Errorf("session has no tmux pane")
+}
+
+// PaneTarget resolves the tmux target for a session by ID.
+func (m *Manager) PaneTarget(id string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	sess, ok := m.sessions[id]
+	if !ok {
+		return "", fmt.Errorf("session not found: %s", id)
+	}
+	return paneTargetLocked(sess)
+}
+
+// PanePopup opens a tmux popup running cmd for the session, anchored to its
+// pane and started in the session's working directory.
+func (m *Manager) PanePopup(id, cmd, title, width, height string) error {
+	if m.tmuxClient == nil {
+		return fmt.Errorf("tmux is not available")
+	}
+	m.mu.RLock()
+	sess, ok := m.sessions[id]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("session not found: %s", id)
+	}
+	target, err := paneTargetLocked(sess)
+	workDir := sess.WorkDir
+	m.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	return m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+		Target: target,
+		Cmd:    cmd,
+		Title:  title,
+		Width:  width,
+		Height: height,
+		Dir:    workDir,
+	})
+}
+
+// PaneSplit splits the session's pane and runs cmd in the new pane.
+func (m *Manager) PaneSplit(id, cmd string, horizontal bool, percent int) error {
+	if m.tmuxClient == nil {
+		return fmt.Errorf("tmux is not available")
+	}
+	target, err := m.PaneTarget(id)
+	if err != nil {
+		return err
+	}
+	return m.tmuxClient.SplitWindow(target, horizontal, percent, cmd)
+}
+
+// PaneCapture returns the visible contents of the session's pane.
+func (m *Manager) PaneCapture(id string, ansi bool) (string, error) {
+	if m.tmuxClient == nil {
+		return "", fmt.Errorf("tmux is not available")
+	}
+	target, err := m.PaneTarget(id)
+	if err != nil {
+		return "", err
+	}
+	return m.tmuxClient.CapturePane(target, ansi)
+}
+
+// PaneSendKeys sends keys to the session's pane. When literal is true the keys
+// are typed verbatim; otherwise they are interpreted as tmux key names.
+func (m *Manager) PaneSendKeys(id, keys string, literal bool) error {
+	if m.tmuxClient == nil {
+		return fmt.Errorf("tmux is not available")
+	}
+	target, err := m.PaneTarget(id)
+	if err != nil {
+		return err
+	}
+	if literal {
+		return m.tmuxClient.SendKeysLiteral(target, keys)
+	}
+	return m.tmuxClient.SendKeys(target, keys)
+}
+
 // SetStatusWithError updates the status and error message of a session
 func (m *Manager) SetStatusWithError(id string, status Status, errMsg string) {
 	m.mu.Lock()
@@ -1011,10 +1114,12 @@ func (m *Manager) captureOutputTmux(session *Session) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	// Use pane ID (%N) if available; falls back to window.pane index.
-	// Pane IDs are stable even when join-pane reorders pane indices.
-	target := session.TmuxPaneID
-	if target == "" {
+	// Use pane ID (%N) when available (stable across join-pane reordering),
+	// else the window.pane index. paneTargetLocked only errors when both are
+	// unset, which a monitored session shouldn't hit; fall back to the bare
+	// window target to preserve the pre-refactor poll behavior.
+	target, err := paneTargetLocked(session)
+	if err != nil {
 		target = tmux.WindowTarget(session.TmuxWindowName, 0)
 	}
 	lastTrackedPath := ""
@@ -1291,6 +1396,13 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 		session.LastOutputTime = time.Now()
 	}
 
+	// Snapshot everything the post-unlock code needs. Reading session.* after
+	// Unlock would race with concurrent mutators, so the plugin event is built
+	// from these copies only.
+	newStatus := session.Status
+	workDir := session.WorkDir
+	tmuxPaneID := session.TmuxPaneID
+	pluginDisp := m.pluginDisp
 	m.mu.Unlock()
 
 	// CwdChanged: immediately check git branch outside the lock
@@ -1299,10 +1411,10 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 	}
 
 	// Persist status/CWD/session-started changes and send notifications
-	if oldStatus != session.Status || cwdChanged || sessionStarted {
+	if oldStatus != newStatus || cwdChanged || sessionStarted {
 		_ = m.store.Save(session)
-		if oldStatus != session.Status {
-			debugLog("[HOOK] Session %s: %s -> %s (hook: %s)", sessionName, oldStatus, session.Status, eventName)
+		if oldStatus != newStatus {
+			debugLog("[HOOK] Session %s: %s -> %s (hook: %s)", sessionName, oldStatus, newStatus, eventName)
 		}
 		if cwdChanged {
 			debugLog("[HOOK] Session %s: CWD updated to %s", sessionName, cwd)
@@ -1318,6 +1430,18 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 		case NotifyPermission:
 			m.notifier.NotifyPermission(sessionID, sessionName)
 		}
+	}
+
+	if pluginDisp != nil && updOK && oldStatus != newStatus {
+		pluginDisp.Publish(plugin.Event{
+			Name:       plugin.EventStatusChanged,
+			SessionID:  sessionID,
+			Status:     string(newStatus),
+			PrevStatus: string(oldStatus),
+			AgentKind:  kind,
+			WorkDir:    workDir,
+			TmuxPaneID: tmuxPaneID,
+		})
 	}
 
 	// Layer C: opportunistically upgrade the description. Runs on three events

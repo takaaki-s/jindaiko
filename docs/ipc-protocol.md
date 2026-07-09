@@ -40,6 +40,11 @@ type Response struct {
 | `result` | `ResultRequest` | Fetch structured transcript entries (orchestration) |
 | `set-description` | `SetDescriptionRequest` | Update session description (empty resets to auto-generated) |
 | `agent-signal` | `AgentSignalRequest` | Deliver an out-of-band status signal from an agent adapter (currently only `kind="hook"` is wired) |
+| `pane-popup` | `PanePopupRequest` | Open a tmux popup over a session's pane, running a command |
+| `pane-split` | `PaneSplitRequest` | Split a session's pane, optionally running a command in the new pane |
+| `pane-capture` | `PaneCaptureRequest` | Capture the visible contents of a session's pane |
+| `pane-send-keys` | `PaneSendKeysRequest` | Send keys to a session's pane (literal text or tmux key names) |
+| `plugin-run` | `PluginRunRequest` | Run a plugin on demand for a session (bypasses matcher/debounce; async) |
 
 ## Request Types
 
@@ -120,6 +125,56 @@ type ResultResponse struct {
     AgentSessionID string             `json:"agent_session_id,omitempty"` // adapter-side session id (Claude Code UUID etc.)
     Entries        []transcript.Entry `json:"entries"`
     Truncated      bool               `json:"truncated,omitempty"`
+}
+
+// PanePopupRequest opens a tmux popup anchored to the session's pane, running
+// Cmd in the session's working directory. The popup process does not inherit
+// JIN_* environment variables.
+type PanePopupRequest struct {
+    ID     string `json:"id"`
+    Cmd    string `json:"cmd"`
+    Title  string `json:"title,omitempty"`  // tmux 3.3+
+    Width  string `json:"width,omitempty"`  // e.g. "80%"
+    Height string `json:"height,omitempty"` // e.g. "80%"
+}
+
+// PaneSplitRequest splits the session's pane. Cmd is optional; an empty split
+// just opens a shell in the new pane.
+type PaneSplitRequest struct {
+    ID         string `json:"id"`
+    Cmd        string `json:"cmd,omitempty"`
+    Horizontal bool   `json:"horizontal,omitempty"` // true = left-right split
+    Percent    int    `json:"percent,omitempty"`    // size of the new pane, e.g. 30 for 30%
+}
+
+// PaneCaptureRequest captures the visible contents of the session's pane.
+type PaneCaptureRequest struct {
+    ID   string `json:"id"`
+    ANSI bool   `json:"ansi,omitempty"` // include ANSI escape sequences
+}
+
+// PaneCaptureResponse is the response payload for the "pane-capture" action.
+type PaneCaptureResponse struct {
+    Content string `json:"content"`
+}
+
+// PaneSendKeysRequest sends keys to the session's pane. When Literal is true
+// the keys are typed verbatim; otherwise they are interpreted as tmux key
+// names (e.g. "Enter", "C-c").
+type PaneSendKeysRequest struct {
+    ID      string `json:"id"`
+    Keys    string `json:"keys"`
+    Literal bool   `json:"literal,omitempty"`
+}
+
+// PluginRunRequest runs one plugin on demand against a session's current
+// snapshot, bypassing matcher and debounce. Depth carries the caller CLI's
+// JIN_PLUGIN_DEPTH so the dispatcher can reject a plugin that tries to chain
+// another plugin run. Success means the run was accepted; it executes async.
+type PluginRunRequest struct {
+    Plugin    string `json:"plugin"`
+    SessionID string `json:"session_id"`
+    Depth     int    `json:"depth,omitempty"`
 }
 ```
 

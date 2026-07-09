@@ -5,6 +5,7 @@
 //
 //	config:  $HOME/.config/jindaiko
 //	state:   $HOME/.local/state/jindaiko
+//	data:    $HOME/.local/share/jindaiko
 //	runtime: os.TempDir()/jindaiko-<uid>
 //
 // The remote-host default socket path is fixed at ~/.local/state/jindaiko/daemon.sock
@@ -70,6 +71,20 @@ func stateOrEmpty() (string, bool) {
 // Sessions returns the directory holding per-session JSON files.
 func Sessions() string {
 	return filepath.Join(State(), "sessions")
+}
+
+// Data returns the directory for user-installed data files
+// ($XDG_DATA_HOME/jindaiko, default ~/.local/share/jindaiko).
+func Data() string {
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		return filepath.Join(d, appName)
+	}
+	return filepath.Join(mustHome(), ".local", "share", appName)
+}
+
+// Plugins returns the directory holding installed plugins.
+func Plugins() string {
+	return filepath.Join(Data(), "plugins")
 }
 
 // runtime returns the directory for ephemeral runtime files

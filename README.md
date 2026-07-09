@@ -255,8 +255,14 @@ $XDG_STATE_HOME/jindaiko/       (default: ~/.local/state/jindaiko)
 ├── state.yaml                 # State file (last used repository, etc.)
 ├── sessions/                  # Session data
 ├── hooks-settings.json        # Generated hooks settings (auto-managed)
+├── plugins.lock.yaml          # Installed-plugin ledger (see Plugins below)
+├── plugin-logs/               # Per-plugin dispatch/run and build output
 ├── daemon-debug.log           # Daemon debug log (when JIN_DEBUG=1)
-└── hook-debug.log             # Hook debug log (when JIN_DEBUG=1)
+├── hook-debug.log             # Hook debug log (when JIN_DEBUG=1)
+└── plugin-debug.log           # Plugin dispatcher debug log (when JIN_DEBUG=1)
+
+$XDG_DATA_HOME/jindaiko/        (default: ~/.local/share/jindaiko)
+└── plugins/                   # Installed plugins (see Plugins below)
 
 $XDG_RUNTIME_DIR/jindaiko/      (fallback: $TMPDIR/jindaiko-<uid>)
 └── daemon.sock                # Daemon socket
@@ -444,6 +450,177 @@ If the script exists but isn't trusted (or changed since it was trusted), the ho
 ### On failure
 
 If the hook exits non-zero or times out, the worktree and its branch are rolled back and `jin session new` fails with a non-zero exit code. The hook's stdout/stderr are kept at `~/.local/state/jindaiko/hook-logs/<session-id>.log` for troubleshooting, even after a rollback.
+
+## Plugins
+
+jindaiko can run your own shell-executable plugins in reaction to session
+status changes, or on demand. A plugin is a directory with a manifest and an
+entry-point script; jindaiko never inspects what the script does, only when
+it runs and what environment it gets.
+
+### Two ways a plugin runs
+
+- **Event listener** — subscribes to `status_changed` via the manifest's
+  `on:` matcher. Good for notifications, logging, CI triggers — anything
+  non-interactive.
+- **Action** — launched explicitly with `jin plugin run <name> --session
+  <selector>`. Good for interactive workflows (e.g. a popup-based diff review
+  UI). Set `on: []` to make a plugin action-only.
+
+Both entry points run the same `run:` command with the same environment;
+only the trigger differs.
+
+### Manifest (`jin-plugin.yaml`)
+
+Place this file at the root of the plugin directory:
+
+```yaml
+name: notifier
+api_version: 1
+on: ["status_changed:idle", "status_changed:permission"]
+run: ./notify.sh                 # relative to the plugin's own directory
+build: go build -o bin/plugin .  # optional; runs once, at install/update only
+timeout: 30s                     # optional; default 30s
+```
+
+| Field | Required | Description |
+|-------|----------|--------------|
+| `name` | Yes | `[a-z0-9][a-z0-9-]*`; must match the directory name jindaiko installs it under |
+| `api_version` | Yes | A single integer, not a range — see [API compatibility](#api-compatibility) |
+| `on` | No | List of `status_changed` or `status_changed:<status>` matchers. Empty or omitted = action-only |
+| `run` | Yes | Shell command, run via `bash -c` with the plugin directory as cwd |
+| `build` | No | Shell command run once at install/update time (never at dispatch) — see [Language-specific guidance](#language-specific-guidance) |
+| `timeout` | No | Duration string (`"30s"`, `"5m"`); default `30s` |
+
+`config.yaml` only enables/disables plugins and tunes dispatch timing (below) — it never duplicates manifest fields.
+
+### What a plugin receives
+
+Environment variables:
+
+| Variable | Description |
+|----------|--------------|
+| `JIN_EVENT` | `status_changed` or `action` |
+| `JIN_SESSION_ID` | Session ID |
+| `JIN_STATUS` | Current status |
+| `JIN_PREV_STATUS` | Previous status (empty for an `action` run) |
+| `JIN_AGENT_KIND` | Adapter kind (`claude`, ...) |
+| `JIN_WORKDIR` | Session's working directory |
+| `JIN_TMUX_PANE_ID` | tmux pane ID, if known |
+| `JIN_PLUGIN_API_VERSION` | The `api_version` this plugin declared |
+| `JIN_PLUGIN_DEPTH` | Chain depth — see [Constraints](#constraints) |
+| `JIN_SOCKET` | Daemon socket path; the `jin` CLI a plugin invokes picks this up automatically |
+| `JIN_BIN` | Absolute path of the daemon's own `jin` binary. Prefer `"${JIN_BIN:-jin}"` over a bare `jin` — a `jin` found on PATH may be an older install that lacks newer subcommands |
+
+The same data is also written to **stdin as JSON** (same fields, snake_case).
+
+For anything beyond this thin payload, call back into jindaiko:
+
+```bash
+jin session info "$JIN_SESSION_ID" --json    # full session details
+jin session send "$JIN_SESSION_ID" "..."     # send a prompt
+jin session result "$JIN_SESSION_ID" --json  # structured transcript entries
+jin pane popup "$JIN_SESSION_ID" -- <cmd>    # tmux popup over the session's pane
+jin pane split "$JIN_SESSION_ID" -- <cmd>
+jin pane capture "$JIN_SESSION_ID"
+jin pane send-keys "$JIN_SESSION_ID" <keys>
+```
+
+**Compatibility contract**: treat any environment variable, JSON field, or CLI
+flag you don't recognize as something to ignore, not an error. jindaiko only
+adds to this surface without a version bump; it never removes or renames
+within an `api_version`.
+
+### Install / update / remove / list
+
+```bash
+# From a git source (github.com/, gitlab.com/, self-hosted, ssh URLs, ...)
+jin plugin install github.com/owner/repo          # default branch
+jin plugin install github.com/owner/repo@v1.2.0   # pinned to a tag/branch/SHA
+
+# From a local directory, symlinked in place (development)
+jin plugin install --link ./my-plugin
+
+jin plugin update <name>
+jin plugin remove <name>
+jin plugin list          # NAME / API / STATE / SOURCE; --json for scripting
+```
+
+A git install/update shows the manifest (`name`, `on`, `run`, `build`) and the
+commit SHA it resolved to, and asks for confirmation (`--yes` to skip) before
+touching anything; the approved commit SHA is recorded in
+`plugins.lock.yaml`, so a later `install`/`update` never silently lands on a
+different commit than the one you saw. A `--link`ed plugin skips this —
+linking a local path is itself the trust decision, and jindaiko never runs
+`build:` for a linked plugin.
+
+### Language-specific guidance
+
+- **Shell / single file** — clone-and-run, no `build:` needed.
+- **Node.js / TypeScript** — bundle to `dist/` (esbuild etc.) and commit the
+  bundle; resolving dependencies at runtime (bun/deno) works too, but that
+  first-dispatch network fetch can fail silently since dispatch is fail-open
+  — a pre-built bundle is more predictable.
+- **Go / Rust / other compiled languages** — use `build:` to compile on
+  install/update so the binary matches the user's platform/arch (and
+  `go.sum` / `Cargo.lock` give reproducibility). `build:` runs exactly once
+  per install/update as a single declared command; jindaiko does not resolve
+  dependencies or detect a toolchain for you — document what's required in
+  your plugin's own README. A non-zero exit fails the install/update
+  atomically (nothing is left half-installed), with output kept at
+  `~/.local/state/jindaiko/plugin-logs/<name>-build.log`. jindaiko injects
+  `npm_config_ignore_scripts=true` into the build environment by default (a
+  supply-chain guard you can override inside your own `build:` command); the
+  build itself runs with your own user privileges — it is not sandboxed.
+
+### Constraints
+
+- **No persistent processes.** jindaiko runs a plugin per event/action and
+  tears it down; don't build a long-running daemon into `run:`. If you need
+  one, run it yourself (manually, or as a systemd user unit) and keep the
+  plugin a thin per-event client to it (e.g. `curl`).
+- **Popups don't inherit `JIN_*` env vars.** `jin pane popup` / `jin pane
+  split` run their command in a process tmux spawns fresh — pass any data
+  the popup needs as arguments on its command line (or as env-assignment
+  prefixes in the command string, e.g.
+  `jin pane popup "$JIN_SESSION_ID" -- "JIN_BIN=$JIN_BIN inner.sh --id $JIN_SESSION_ID"`),
+  not as inherited env vars.
+- **Fail-open.** A plugin that errors, times out, or hangs never blocks a
+  session's status pipeline — it's logged and the pipeline moves on. Timeout
+  defaults to 30s (`timeout:` in the manifest).
+- **Loop residual risk.** jindaiko debounces repeated dispatch of the same
+  (plugin, session, event) within a short window (default 3s,
+  `plugins.debounce` below) and rejects a plugin chaining another plugin run
+  beyond one hop (`JIN_PLUGIN_DEPTH`). Neither catches a *slow* ping-pong
+  (e.g. a plugin that sends a prompt whose eventual response re-triggers the
+  same plugin a few seconds later) — avoiding that is on the plugin author.
+
+### Config (`~/.config/jindaiko/config.yaml`)
+
+```yaml
+plugins:
+  enabled: true          # default true; false disables all plugin dispatch
+  disabled: ["notifier"] # disable individual plugins by name
+  build_timeout: 300  # seconds, install/update build step (default 300)
+  debounce: 3          # seconds, dispatch debounce window (default 3)
+```
+
+### API compatibility
+
+Plugins declare a single `api_version` integer; jindaiko supports a window
+`[min, current]` (v1 today: both are `1`). Checked at install/update
+(fail-closed — a plugin outside the window is rejected before anything is
+written) and again at every dispatch (fail-open — an incompatible installed
+plugin is skipped, logged once, and shown as `incompatible` in `jin plugin
+list`, with `jin plugin run` pointing you at `jin plugin update <name>`).
+
+### Debugging a plugin
+
+```bash
+export JIN_DEBUG=1
+tail -f ~/.local/state/jindaiko/plugin-debug.log        # dispatcher decisions
+tail -f ~/.local/state/jindaiko/plugin-logs/<name>.log  # a plugin's own stdout/stderr
+```
 
 ## Debugging
 

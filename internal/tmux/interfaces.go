@@ -15,4 +15,7 @@ type Runner interface {
 	GetPaneCurrentPath(target string) (string, error)
 	SendKeys(target, keys string) error
 	SendKeysLiteral(target, text string) error
+	DisplayPopup(opts DisplayPopupOptions) error
+	SplitWindow(target string, horizontal bool, percent int, shellCmd string) error
+	CapturePane(target string, ansi bool) (string, error)
 }

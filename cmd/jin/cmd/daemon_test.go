@@ -4,7 +4,44 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/takaaki-s/jindaiko/internal/paths"
 )
+
+func TestGetSocketPath(t *testing.T) {
+	t.Run("flag takes precedence", func(t *testing.T) {
+		orig := socketPathFlag
+		socketPathFlag = "/tmp/flag.sock"
+		defer func() { socketPathFlag = orig }()
+		t.Setenv("JIN_SOCKET", "/tmp/env.sock")
+
+		if got := getSocketPath(); got != "/tmp/flag.sock" {
+			t.Errorf("getSocketPath() = %q, want %q", got, "/tmp/flag.sock")
+		}
+	})
+
+	t.Run("env used when flag unset", func(t *testing.T) {
+		orig := socketPathFlag
+		socketPathFlag = ""
+		defer func() { socketPathFlag = orig }()
+		t.Setenv("JIN_SOCKET", "/tmp/env.sock")
+
+		if got := getSocketPath(); got != "/tmp/env.sock" {
+			t.Errorf("getSocketPath() = %q, want %q", got, "/tmp/env.sock")
+		}
+	})
+
+	t.Run("falls back to paths.Socket when neither set", func(t *testing.T) {
+		orig := socketPathFlag
+		socketPathFlag = ""
+		defer func() { socketPathFlag = orig }()
+		t.Setenv("JIN_SOCKET", "")
+
+		if got := getSocketPath(); got != paths.Socket() {
+			t.Errorf("getSocketPath() = %q, want %q", got, paths.Socket())
+		}
+	})
+}
 
 func TestRenderDaemonStatusJSON(t *testing.T) {
 	t.Run("running", func(t *testing.T) {

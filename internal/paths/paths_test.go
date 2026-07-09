@@ -67,6 +67,37 @@ func TestState_FallsBackToHomeLocalState(t *testing.T) {
 	}
 }
 
+func TestData_UsesXDGWhenSet(t *testing.T) {
+	withEnv(t, "XDG_DATA_HOME", "/tmp/cc-data")
+
+	got := Data()
+	want := filepath.Join("/tmp/cc-data", "jindaiko")
+	if got != want {
+		t.Errorf("Data() = %q, want %q", got, want)
+	}
+}
+
+func TestData_FallsBackToHomeLocalShare(t *testing.T) {
+	withEnv(t, "XDG_DATA_HOME", "")
+	withEnv(t, "HOME", "/tmp/cc-home")
+
+	got := Data()
+	want := filepath.Join("/tmp/cc-home", ".local", "share", "jindaiko")
+	if got != want {
+		t.Errorf("Data() = %q, want %q", got, want)
+	}
+}
+
+func TestPlugins_IsUnderData(t *testing.T) {
+	withEnv(t, "XDG_DATA_HOME", "/tmp/cc-data")
+
+	got := Plugins()
+	want := filepath.Join("/tmp/cc-data", "jindaiko", "plugins")
+	if got != want {
+		t.Errorf("Plugins() = %q, want %q", got, want)
+	}
+}
+
 func TestSessions_IsUnderState(t *testing.T) {
 	withEnv(t, "XDG_STATE_HOME", "/tmp/cc-state")
 

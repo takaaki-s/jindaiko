@@ -313,3 +313,79 @@ func (c *Client) RemoveDirHistory(path string) error {
 	}
 	return nil
 }
+
+// PanePopup opens a tmux popup running cmd for the session, anchored to its
+// pane and started in the session's working directory.
+func (c *Client) PanePopup(id, cmd, title, width, height string) error {
+	data, _ := json.Marshal(PanePopupRequest{ID: id, Cmd: cmd, Title: title, Width: width, Height: height})
+	resp, err := c.send(Request{Action: "pane-popup", Data: data})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return errors.New(resp.Error)
+	}
+	return nil
+}
+
+// PaneSplit splits the session's pane and runs cmd in the new pane. An empty
+// cmd just opens a shell in the new pane.
+func (c *Client) PaneSplit(id, cmd string, horizontal bool, percent int) error {
+	data, _ := json.Marshal(PaneSplitRequest{ID: id, Cmd: cmd, Horizontal: horizontal, Percent: percent})
+	resp, err := c.send(Request{Action: "pane-split", Data: data})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return errors.New(resp.Error)
+	}
+	return nil
+}
+
+// PaneCapture returns the visible contents of the session's pane.
+func (c *Client) PaneCapture(id string, ansi bool) (string, error) {
+	data, _ := json.Marshal(PaneCaptureRequest{ID: id, ANSI: ansi})
+	resp, err := c.send(Request{Action: "pane-capture", Data: data})
+	if err != nil {
+		return "", err
+	}
+	if !resp.Success {
+		return "", errors.New(resp.Error)
+	}
+	var out PaneCaptureResponse
+	if err := json.Unmarshal(resp.Data, &out); err != nil {
+		return "", err
+	}
+	return out.Content, nil
+}
+
+// PaneSendKeys sends keys to the session's pane. When literal is true the keys
+// are typed verbatim; otherwise they are interpreted as tmux key names.
+func (c *Client) PaneSendKeys(id, keys string, literal bool) error {
+	data, _ := json.Marshal(PaneSendKeysRequest{ID: id, Keys: keys, Literal: literal})
+	resp, err := c.send(Request{Action: "pane-send-keys", Data: data})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return errors.New(resp.Error)
+	}
+	return nil
+}
+
+// PluginRun runs a plugin on demand against a session's current snapshot,
+// bypassing matcher and debounce. depth is the caller's JIN_PLUGIN_DEPTH,
+// forwarded so the dispatcher can reject a plugin that tries to chain another
+// plugin run. It returns once the run is accepted; the plugin executes
+// asynchronously on the daemon.
+func (c *Client) PluginRun(pluginName, sessionID string, depth int) error {
+	data, _ := json.Marshal(PluginRunRequest{Plugin: pluginName, SessionID: sessionID, Depth: depth})
+	resp, err := c.send(Request{Action: "plugin-run", Data: data})
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return errors.New(resp.Error)
+	}
+	return nil
+}

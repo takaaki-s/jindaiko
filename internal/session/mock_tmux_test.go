@@ -1,6 +1,10 @@
 package session
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/takaaki-s/jindaiko/internal/tmux"
+)
 
 // mockCall records a method invocation on mockTmuxRunner.
 type mockCall struct {
@@ -15,6 +19,7 @@ type mockTmuxRunner struct {
 	deadPanes map[string]bool   // pane dead status (IsPaneDead return value)
 	paneIDs   map[string]string // session name -> pane ID (GetPaneID return value)
 	panePaths map[string]string // target -> current path (GetPaneCurrentPath return value)
+	captured  map[string]string // target -> content (CapturePane return value)
 
 	calls []mockCall // recorded calls for assertion
 }
@@ -25,6 +30,7 @@ func newMockTmuxRunner() *mockTmuxRunner {
 		deadPanes: make(map[string]bool),
 		paneIDs:   make(map[string]string),
 		panePaths: make(map[string]string),
+		captured:  make(map[string]string),
 	}
 }
 
@@ -98,6 +104,21 @@ func (m *mockTmuxRunner) SendKeys(target, keys string) error {
 func (m *mockTmuxRunner) SendKeysLiteral(target, text string) error {
 	m.record("SendKeysLiteral", target, text)
 	return nil
+}
+
+func (m *mockTmuxRunner) DisplayPopup(opts tmux.DisplayPopupOptions) error {
+	m.record("DisplayPopup", opts.Target, opts.Cmd, opts.Dir)
+	return nil
+}
+
+func (m *mockTmuxRunner) SplitWindow(target string, horizontal bool, percent int, shellCmd string) error {
+	m.record("SplitWindow", target, shellCmd)
+	return nil
+}
+
+func (m *mockTmuxRunner) CapturePane(target string, ansi bool) (string, error) {
+	m.record("CapturePane", target)
+	return m.captured[target], nil
 }
 
 // hasCalledWith returns true if the mock recorded a call to the given method
