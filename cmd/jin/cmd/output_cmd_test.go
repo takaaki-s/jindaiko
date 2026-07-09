@@ -5,8 +5,30 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/takaaki-s/jindaiko/internal/session"
 	"github.com/takaaki-s/jindaiko/internal/transcript"
 )
+
+func TestTranscriptWorkDir(t *testing.T) {
+	t.Run("prefers CurrentWorkDir when set", func(t *testing.T) {
+		info := &session.Info{
+			WorkDir:        "/original/launch",
+			CurrentWorkDir: "/actual/worktree",
+		}
+		got := transcriptWorkDir(info)
+		if got != "/actual/worktree" {
+			t.Errorf("got %q, want %q", got, "/actual/worktree")
+		}
+	})
+
+	t.Run("falls back to WorkDir when CurrentWorkDir is empty", func(t *testing.T) {
+		info := &session.Info{WorkDir: "/original/launch"}
+		got := transcriptWorkDir(info)
+		if got != "/original/launch" {
+			t.Errorf("got %q, want %q", got, "/original/launch")
+		}
+	})
+}
 
 func TestRenderOutputJSON(t *testing.T) {
 	t.Run("outputs single message as JSON", func(t *testing.T) {

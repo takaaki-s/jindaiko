@@ -1118,3 +1118,129 @@ func TestReader_ReadAITitle(t *testing.T) {
 		}
 	})
 }
+
+// --- glob fallback for GetLastMessage / GetLastMessages / GetConversation ---
+//
+// The bug motivating these tests: sessions frequently cd into a subdir or
+// worktree, so info.WorkDir (the launch dir) points at one projects/<dir>/
+// while the JSONL Claude Code actually writes lives under another. The old
+// implementations built an exact path from workDir and returned nil when it
+// missed, surfacing as "no messages found in transcript" from `jin session
+// output`. findTranscriptPath (already used by ReadEntries) globs by
+// sessionID across all projects dirs, so wiring these helpers through it
+// fixes the miss.
+
+func TestGetLastMessage_GlobFallback_WhenWorkDirMismatches(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := &Reader{claudeDir: tmpDir}
+
+	// Write the transcript under the ACTUAL dir Claude landed in (say, a
+	// worktree the agent cd'd into after start).
+	actualDir := "/actual/worktree"
+	sessionID := "sess-mismatch"
+	writeJSONL(t, r.getTranscriptPath(actualDir, sessionID), []transcriptEntry{
+		{
+			Type: "assistant",
+			Message: msgObject{
+				Role:    "assistant",
+				Content: []any{map[string]any{"type": "text", "text": "hello from the real dir"}},
+			},
+			Timestamp: "2024-01-01T00:00:00Z",
+		},
+	})
+
+	// Query with the WRONG dir (matches the old bug: info.WorkDir before cd).
+	msg, err := r.GetLastMessage("/original/launch/dir", sessionID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected fallback to find the transcript by sessionID glob, got nil")
+	}
+	if msg.Content != "hello from the real dir" {
+		t.Errorf("Content = %q, want %q", msg.Content, "hello from the real dir")
+	}
+}
+
+func TestGetLastMessages_GlobFallback_WhenWorkDirMismatches(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := &Reader{claudeDir: tmpDir}
+
+	actualDir := "/actual/worktree"
+	sessionID := "sess-mismatch-lm"
+	writeJSONL(t, r.getTranscriptPath(actualDir, sessionID), []transcriptEntry{
+		{
+			Type:      "user",
+			Message:   msgObject{Role: "user", Content: "u1"},
+			Timestamp: "2024-01-01T00:00:00Z",
+		},
+		{
+			Type: "assistant",
+			Message: msgObject{
+				Role:    "assistant",
+				Content: []any{map[string]any{"type": "text", "text": "a1"}},
+			},
+			Timestamp: "2024-01-01T00:00:01Z",
+		},
+	})
+
+	msgs, err := r.GetLastMessages("/original/launch/dir", sessionID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msgs == nil {
+		t.Fatal("expected fallback to find the transcript by sessionID glob, got nil")
+	}
+	if msgs.User == nil || msgs.User.Content != "u1" {
+		t.Errorf("User = %+v, want content=%q", msgs.User, "u1")
+	}
+	if msgs.Assistant == nil || msgs.Assistant.Content != "a1" {
+		t.Errorf("Assistant = %+v, want content=%q", msgs.Assistant, "a1")
+	}
+}
+
+func TestGetConversation_GlobFallback_WhenWorkDirMismatches(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := &Reader{claudeDir: tmpDir}
+
+	actualDir := "/actual/worktree"
+	sessionID := "sess-mismatch-conv"
+	writeJSONL(t, r.getTranscriptPath(actualDir, sessionID), []transcriptEntry{
+		{
+			Type:      "user",
+			Message:   msgObject{Role: "user", Content: "q"},
+			Timestamp: "2024-01-01T00:00:00Z",
+		},
+		{
+			Type: "assistant",
+			Message: msgObject{
+				Role:    "assistant",
+				Content: []any{map[string]any{"type": "text", "text": "a"}},
+			},
+			Timestamp: "2024-01-01T00:00:01Z",
+		},
+	})
+
+	msgs, err := r.GetConversation("/original/launch/dir", sessionID, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages via glob fallback, got %d", len(msgs))
+	}
+}
+
+func TestGetLastMessage_ReturnsNilWhenTruelyMissing(t *testing.T) {
+	// When no transcript file exists anywhere, GetLastMessage should return
+	// (nil, nil) — this is the contract output_cmd relies on to produce its
+	// "no plain-text messages yet" error.
+	tmpDir := t.TempDir()
+	r := &Reader{claudeDir: tmpDir}
+	msg, err := r.GetLastMessage("/nowhere", "no-such-session")
+	if err != nil {
+		t.Fatalf("expected (nil, nil), got err=%v", err)
+	}
+	if msg != nil {
+		t.Fatalf("expected nil message, got %+v", msg)
+	}
+}

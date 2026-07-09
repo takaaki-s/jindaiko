@@ -66,38 +66,60 @@ func NewReader() *Reader {
 }
 
 // GetLastMessage returns the last user or assistant message from the transcript
-// workDir: the working directory of the session
+// workDir: the working directory of the session (may be empty; a glob fallback locates the JSONL by sessionID)
 // sessionID: the Claude Code session ID (UUID format)
+// Returns (nil, nil) when no transcript file exists (yet).
 func (r *Reader) GetLastMessage(workDir, sessionID string) (*Message, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
 
-	transcriptPath := r.getTranscriptPath(workDir, sessionID)
-	return r.readLastMessage(transcriptPath)
+	path, err := r.findTranscriptPath(workDir, sessionID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return r.readLastMessage(path)
 }
 
 // GetLastMessages returns the last user and assistant messages from the transcript
-// workDir: the working directory of the session
+// workDir: the working directory of the session (may be empty; a glob fallback locates the JSONL by sessionID)
 // sessionID: the Claude Code session ID (UUID format)
+// Returns (nil, nil) when no transcript file exists (yet).
 func (r *Reader) GetLastMessages(workDir, sessionID string) (*LastMessages, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
 
-	transcriptPath := r.getTranscriptPath(workDir, sessionID)
-	return r.readLastMessages(transcriptPath)
+	path, err := r.findTranscriptPath(workDir, sessionID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return r.readLastMessages(path)
 }
 
 // GetConversation returns the last N user/assistant message pairs from the transcript.
+// workDir may be empty: a glob fallback locates the JSONL by sessionID.
 // lastN specifies the number of message pairs to return.
+// Returns (nil, nil) when no transcript file exists (yet).
 func (r *Reader) GetConversation(workDir, sessionID string, lastN int) ([]Message, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
 
-	transcriptPath := r.getTranscriptPath(workDir, sessionID)
-	return r.readConversation(transcriptPath, lastN)
+	path, err := r.findTranscriptPath(workDir, sessionID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return r.readConversation(path, lastN)
 }
 
 // readConversation reads the transcript and returns the last N*2 user/assistant messages.
