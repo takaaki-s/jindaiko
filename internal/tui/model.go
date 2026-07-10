@@ -38,8 +38,10 @@ type KeyMap struct {
 	Refresh       key.Binding
 	Quit          key.Binding
 	Help          key.Binding
-	PrevPage      key.Binding
-	NextPage      key.Binding
+	PrevPage      key.Binding // Scroll one screen up (viewport)
+	NextPage      key.Binding // Scroll one screen down (viewport)
+	Home          key.Binding // Jump to first session
+	End           key.Binding // Jump to last session
 	Search        key.Binding
 	Vscode        key.Binding
 	Notifications key.Binding
@@ -91,12 +93,20 @@ func NewKeyMap(cfg config.KeybindingsConfig) KeyMap {
 			key.WithHelp(strings.Join(cfg.Help, "/"), "help"),
 		),
 		PrevPage: key.NewBinding(
-			key.WithKeys("left", "h"),
-			key.WithHelp("←/h", "prev page"),
+			key.WithKeys("pgup", "left", "h", "ctrl+b"),
+			key.WithHelp("←/h/PgUp", "scroll up"),
 		),
 		NextPage: key.NewBinding(
-			key.WithKeys("right", "l"),
-			key.WithHelp("→/l", "next page"),
+			key.WithKeys("pgdown", "right", "l", "ctrl+f"),
+			key.WithHelp("→/l/PgDn", "scroll down"),
+		),
+		Home: key.NewBinding(
+			key.WithKeys("home", "g"),
+			key.WithHelp("g/Home", "first session"),
+		),
+		End: key.NewBinding(
+			key.WithKeys("end", "G"),
+			key.WithHelp("G/End", "last session"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys(cfg.Search...),
@@ -143,8 +153,11 @@ type Model struct {
 	// Config manager (used for remote session attach)
 	configMgr *config.Manager
 
-	// Pagination
-	currentPage int // Current page (0-indexed)
+	// Viewport scrolling. Line offset of the topmost visible row in the
+	// scrollable card area (0 = top). Adjusted by cursor movement and by
+	// PageUp/PageDown/Home/End; clamped whenever the underlying content
+	// changes (session list, window resize).
+	scrollOffset int
 
 	// Delete confirmation
 	confirmDelete          bool   // Whether delete confirmation is active
@@ -236,64 +249,145 @@ func NewModelWithTmux(client *daemon.Client, tc, innerTC *tmux.Client, tuiPaneID
 	return m
 }
 
-// getItemsPerPage calculates how many items fit on one page
-func (m *Model) getItemsPerPage() int {
-	// Subtract header lines (title, stats, separator, footer)
-	// Header: 3 lines, Footer: 2 lines (page info + help)
-	availableLines := m.height - 8
+// contentAreaLines returns the number of lines available for the scrollable
+// card area — the pane height minus the fixed header rows (STATS + blank,
+// plus search bar / error / warning when active).
+func (m *Model) contentAreaLines() int {
+	// Pane holds (m.height - 1) rows (the extra row is the outer help line).
+	avail := m.height - 1
+	// STATS row (always shown unless there are literally no sessions).
+	if len(m.sessions) > 0 {
+		avail--
+	}
+	// Blank separator row between header and cards.
+	avail--
 	if m.searching {
-		availableLines-- // search bar takes 1 line
+		avail-- // search input row
 	}
-	// Reserve space for fleet group headers (always shown when sessions exist).
-	if n := m.fleetGroupCount(); n >= 1 {
-		availableLines -= n
+	if m.err != nil {
+		avail -= 2 // "Error: ..." + blank
 	}
-	availableLines = max(availableLines, 4)
-	// Each session takes ~4 lines (name + status + meta + time)
-	items := availableLines / 4
-	items = max(items, 1)
-	return items
+	if m.warning != "" {
+		avail -= 2 // "⚠ ..." + blank
+	}
+	return max(avail, 3)
 }
 
-// fleetGroupCount returns the number of distinct fleet groups in m.sessions.
-func (m *Model) fleetGroupCount() int {
-	seen := make(map[string]bool)
-	for _, s := range m.sessions {
-		seen[s.Fleet] = true
-	}
-	return len(seen)
+// pageScrollLines returns how many lines PageUp / PageDown scrolls the
+// viewport — one visible page worth of cards, minus one line of overlap so
+// the user keeps a reference row across the jump.
+func (m *Model) pageScrollLines() int {
+	return max(m.contentAreaLines()-1, 1)
 }
 
-// getTotalPages calculates the total number of pages
-func (m *Model) getTotalPages() int {
+// cardHeight returns the number of terminal rows a single session card
+// occupies in the current renderSession layout, including the trailing
+// blank-line spacer. Kept in sync with renderSession by construction — if
+// the layout changes there, update the counts here in the same commit.
+func (m *Model) cardHeight(sess session.Info) int {
+	if m.deletingIDs[sess.ID] {
+		// Deleting: name + "⟳ deleting..." + trailing blank
+		return 3
+	}
+	// Base: name + status/meta + trailing blank
+	h := 3
+	if sess.LastUserMessage != "" {
+		h++
+	}
+	if sess.LastAssistantMessage != "" {
+		h++
+	}
+	return h
+}
+
+// sessionCardTop returns the line offset (within the scrollable card area,
+// 0 = first row of the first fleet header or card) where the session at
+// display-index `idx` starts, and its height. Returns (-1, 0) if idx is
+// out of range.
+func (m *Model) sessionCardTop(idx int) (top, height int) {
 	sessions := m.getDisplaySessions()
-	if len(sessions) == 0 {
-		return 1
+	if idx < 0 || idx >= len(sessions) {
+		return -1, 0
 	}
-	itemsPerPage := m.getItemsPerPage()
-	totalPages := (len(sessions) + itemsPerPage - 1) / itemsPerPage
-	totalPages = max(totalPages, 1)
-	return totalPages
+	targetID := sessions[idx].ID
+	groups := groupSessionsByFleet(sessions)
+	showHeaders := len(groups) >= 1
+	line := 0
+	for _, g := range groups {
+		if showHeaders {
+			line++ // fleet header row
+		}
+		for _, sess := range g.Sessions {
+			h := m.cardHeight(sess)
+			if sess.ID == targetID {
+				return line, h
+			}
+			line += h
+		}
+	}
+	return -1, 0
 }
 
-// getPageSessions returns sessions for the current page
+// totalCardLines returns the total number of lines the scrollable card
+// area currently spans (all cards + fleet headers), used to clamp
+// scrollOffset so we cannot scroll past the last card.
+func (m *Model) totalCardLines() int {
+	sessions := m.getDisplaySessions()
+	groups := groupSessionsByFleet(sessions)
+	showHeaders := len(groups) >= 1
+	total := 0
+	for _, g := range groups {
+		if showHeaders {
+			total++
+		}
+		for _, sess := range g.Sessions {
+			total += m.cardHeight(sess)
+		}
+	}
+	return total
+}
+
+// adjustScrollForCursor moves scrollOffset so the current cursor's card is
+// fully visible in the content area. Called after any cursor movement.
+func (m *Model) adjustScrollForCursor() {
+	top, height := m.sessionCardTop(m.cursor)
+	if top < 0 {
+		m.scrollOffset = 0
+		return
+	}
+	avail := m.contentAreaLines()
+	bottom := top + height
+	if top < m.scrollOffset {
+		m.scrollOffset = top
+	} else if bottom > m.scrollOffset+avail {
+		m.scrollOffset = bottom - avail
+	}
+	m.clampScroll()
+}
+
+// clampScroll bounds scrollOffset into [0, max(0, totalCardLines-avail)].
+// Call after any change that shrinks or grows the content (session list
+// change, filter toggle, window resize).
+func (m *Model) clampScroll() {
+	max := m.totalCardLines() - m.contentAreaLines()
+	if max < 0 {
+		max = 0
+	}
+	if m.scrollOffset > max {
+		m.scrollOffset = max
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+}
+
+// getPageSessions is retained as a thin alias for getDisplaySessions so the
+// large existing call-site set (kill / delete / vscode / handleSelectSession
+// / skipDeletingSessions / …) keeps compiling — cursor is now an index into
+// the full display list rather than a per-page slice. Prefer
+// getDisplaySessions() directly for new code.
 func (m *Model) getPageSessions() []session.Info {
-	sessions := m.getDisplaySessions()
-	if len(sessions) == 0 {
-		return nil
-	}
-	itemsPerPage := m.getItemsPerPage()
-	start := m.currentPage * itemsPerPage
-	end := start + itemsPerPage
-	if start >= len(sessions) {
-		start = 0
-		m.currentPage = 0
-		end = itemsPerPage
-	}
-	if end > len(sessions) {
-		end = len(sessions)
-	}
-	return sessions[start:end]
+	return m.getDisplaySessions()
 }
 
 // getDisplaySessions returns the sessions to display:
@@ -611,6 +705,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.tmuxClient.ResizePaneWidth(m.tuiPaneID, minTUIWidth)
 			}
 		}
+		// Content area height depends on m.height, so re-clamp scroll and
+		// re-follow the cursor.
+		m.adjustScrollForCursor()
 		// Detect resize completion after ZoomPane
 		// WindowSizeMsg arrived = pane size is finalized → clear processingMsg and redraw
 		if m.waitingForResize {
@@ -784,8 +881,8 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searching = false
 				m.searchInput.Reset()
 				m.filteredSessions = nil
-				m.currentPage = 0
 				m.cursor = 0
+				m.scrollOffset = 0
 				return m, nil
 
 			case "up":
@@ -793,6 +890,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor--
 					m.skipDeletingSessions(-1)
 				}
+				m.adjustScrollForCursor()
 				return m, nil
 
 			case "down":
@@ -801,24 +899,20 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 					m.skipDeletingSessions(1)
 				}
+				m.adjustScrollForCursor()
 				return m, nil
 
 			case "enter":
 				return m.handleSelectSession()
 
-			case "left":
-				if m.currentPage > 0 {
-					m.currentPage--
-					m.cursor = 0
-				}
+			case "pgup", "left":
+				m.scrollOffset -= m.pageScrollLines()
+				m.clampScroll()
 				return m, nil
 
-			case "right":
-				totalPages := m.getTotalPages()
-				if m.currentPage < totalPages-1 {
-					m.currentPage++
-					m.cursor = 0
-				}
+			case "pgdown", "right":
+				m.scrollOffset += m.pageScrollLines()
+				m.clampScroll()
 				return m, nil
 			}
 
@@ -828,8 +922,8 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput, cmd = m.searchInput.Update(msg)
 			if m.searchInput.Value() != oldQuery {
 				m.applySearchFilter()
-				m.currentPage = 0
 				m.cursor = 0
+				m.scrollOffset = 0
 			}
 			return m, cmd
 		}
@@ -844,6 +938,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor--
 				m.skipDeletingSessions(-1)
 			}
+			m.adjustScrollForCursor()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Down):
@@ -852,6 +947,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m.skipDeletingSessions(1)
 			}
+			m.adjustScrollForCursor()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Enter):
@@ -862,8 +958,8 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput.Reset()
 			m.searchInput.Focus()
 			m.filteredSessions = m.sessions
-			m.currentPage = 0
 			m.cursor = 0
+			m.scrollOffset = 0
 			return m, textinput.Blink
 
 		case key.Matches(msg, m.keys.New):
@@ -924,18 +1020,28 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.PrevPage):
-			if m.currentPage > 0 {
-				m.currentPage--
-				m.cursor = 0
-			}
+			m.scrollOffset -= m.pageScrollLines()
+			m.clampScroll()
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextPage):
-			totalPages := m.getTotalPages()
-			if m.currentPage < totalPages-1 {
-				m.currentPage++
-				m.cursor = 0
+			m.scrollOffset += m.pageScrollLines()
+			m.clampScroll()
+			return m, nil
+
+		case key.Matches(msg, m.keys.Home):
+			m.cursor = 0
+			m.skipDeletingSessions(1)
+			m.adjustScrollForCursor()
+			return m, nil
+
+		case key.Matches(msg, m.keys.End):
+			pageSessions := m.getPageSessions()
+			if len(pageSessions) > 0 {
+				m.cursor = len(pageSessions) - 1
+				m.skipDeletingSessions(-1)
 			}
+			m.adjustScrollForCursor()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Vscode):
@@ -993,11 +1099,10 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput.Reset()
 			m.filteredSessions = nil
 
-			itemsPerPage := m.getItemsPerPage()
 			for i, s := range m.sessions {
 				if s.ID == m.focusSessionID {
-					m.currentPage = i / itemsPerPage
-					m.cursor = i % itemsPerPage
+					m.cursor = i
+					m.adjustScrollForCursor()
 					m.currentSessionID = "" // Force reset to execute switchToSession
 					m.switchToSession(s.ID)
 					break
@@ -1010,6 +1115,9 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(displaySessions) && m.cursor > 0 {
 			m.cursor = len(displaySessions) - 1
 		}
+		// Session list changed: clamp scroll so we cannot land past the last
+		// card, and ensure the cursor's card stays in view.
+		m.adjustScrollForCursor()
 		// Reconnect to session at cursor after delete/kill
 		if m.needsReswitch || deleteCompleted {
 			m.needsReswitch = false
@@ -1139,14 +1247,17 @@ func (m Model) View() string {
 		return m.renderDeleteConfirm()
 	}
 
-	boxWidth := m.width - 2
-	boxWidth = max(boxWidth, 20)
-	boxHeight := m.height - 3
-	boxHeight = max(boxHeight, 5)
-	boxStyle := createBoxStyle(boxWidth, boxHeight, m.focused)
-	box := boxStyle.Render(m.renderListContent(boxWidth - 4))
+	paneWidth := m.width
+	paneWidth = max(paneWidth, 20)
+	paneHeight := m.height - 1
+	paneHeight = max(paneHeight, 5)
+	// Content sits inside 1-column horizontal padding on each side.
+	contentWidth := paneWidth - 2
+	contentWidth = max(contentWidth, 16)
+	paneStyle := createPaneStyle(paneWidth, paneHeight, m.focused)
+	pane := paneStyle.Render(m.renderListContent(contentWidth))
 	helpLine := m.renderHelpLine()
-	return box + "\n" + helpLine
+	return pane + "\n" + helpLine
 }
 
 // renderProcessingView renders a processing indicator.
@@ -1191,14 +1302,14 @@ func (m *Model) skipDeletingSessions(dir int) {
 	}
 }
 
-// renderDeleteConfirm renders a delete confirmation dialog as a box overlay.
+// renderDeleteConfirm renders a delete confirmation dialog as a pane overlay.
 func (m Model) renderDeleteConfirm() string {
-	boxWidth := m.width - 2
-	boxWidth = max(boxWidth, 20)
-	boxHeight := m.height - 3
-	boxHeight = max(boxHeight, 5)
+	paneWidth := m.width
+	paneWidth = max(paneWidth, 20)
+	paneHeight := m.height - 1
+	paneHeight = max(paneHeight, 5)
 
-	contentWidth := boxWidth - 4 // padding inside box
+	contentWidth := paneWidth - 2 // horizontal padding inside pane
 	var lines []string
 
 	warnStyle := lipgloss.NewStyle().Foreground(warningColor).Bold(true)
@@ -1237,48 +1348,35 @@ func (m Model) renderDeleteConfirm() string {
 	}
 
 	content := strings.Join(lines, "\n")
-	placed := lipgloss.Place(contentWidth, boxHeight, lipgloss.Center, lipgloss.Center, content)
+	placed := lipgloss.Place(contentWidth, paneHeight, lipgloss.Center, lipgloss.Center, content)
 
-	boxStyle := createBoxStyle(boxWidth, boxHeight, m.focused)
-	return boxStyle.Render(placed)
+	paneStyle := createPaneStyle(paneWidth, paneHeight, m.focused)
+	return paneStyle.Render(placed)
 }
 
-// renderListContent renders the session list content
+// renderListContent renders the session list content.
+//
+// Layout:
+//
+//	[STATS row]        <- fixed header (top of pane, not scrolled)
+//	[blank spacer]     <- fixed header
+//	[search / err / warn ...]
+//	[scrollable card area]  <- windowed by m.scrollOffset
+//
+// The "sessions" title is rendered on the tmux pane-border above via the
+// pane's @session_name option, so the content area starts directly with
+// the STATS row.
 func (m Model) renderListContent(contentWidth int) string {
 	var content strings.Builder
 
-	// Header line: title + current time
-	ts := titleStyle
-	if !m.focused {
-		ts = ts.Foreground(secondaryColor)
-	}
-	title := ts.Render("jindaiko")
-	currentTime := time.Now().Format("15:04:05")
-	timeDisplay := fmt.Sprintf("[ %s ]", currentTime)
-
-	titleLen := lipgloss.Width(title)
-	timeLen := len(timeDisplay)
-	headerSpacing := contentWidth - titleLen - timeLen
-	headerSpacing = max(headerSpacing, 2)
-
-	content.WriteString(title)
-	content.WriteString(strings.Repeat(" ", headerSpacing))
-	content.WriteString(timeStyle.Render(timeDisplay))
-	content.WriteString("\n")
-
-	// STATS line
+	// --- Fixed header (never scrolled) ---
 	statusSummary := buildStatusSummary(m.sessions)
 	if statusSummary != "" {
-		content.WriteString("STATS: ")
 		content.WriteString(statusSummary)
 		content.WriteString("\n")
 	}
-
-	// Separator
-	content.WriteString(strings.Repeat("-", contentWidth))
 	content.WriteString("\n")
 
-	// Search bar
 	if m.searching {
 		matchCount := len(m.getDisplaySessions())
 		content.WriteString("/")
@@ -1286,20 +1384,16 @@ func (m Model) renderListContent(contentWidth int) string {
 		content.WriteString(helpStyle.Render(fmt.Sprintf(" (%d)", matchCount)))
 		content.WriteString("\n")
 	}
-
-	// Error message
 	if m.err != nil {
 		content.WriteString(lipgloss.NewStyle().Foreground(errorColor).Render(fmt.Sprintf("Error: %v", m.err)))
 		content.WriteString("\n\n")
 	}
-
-	// Non-fatal warning (e.g. hook not allowlisted). Dismissed on next key press.
 	if m.warning != "" {
 		content.WriteString(lipgloss.NewStyle().Foreground(warningColor).Render(fmt.Sprintf("⚠ %s", m.warning)))
 		content.WriteString("\n\n")
 	}
 
-	// Sessions list
+	// --- Scrollable card area ---
 	displaySessions := m.getDisplaySessions()
 	if len(displaySessions) == 0 {
 		content.WriteString("\n")
@@ -1309,43 +1403,46 @@ func (m Model) renderListContent(contentWidth int) string {
 			content.WriteString(helpStyle.Render("No sessions. Press 'n' to create one."))
 		}
 		content.WriteString("\n")
-	} else {
-		pageSessions := m.getPageSessions()
-		groups := groupSessionsByFleet(pageSessions)
-		showHeaders := len(groups) >= 1
+		return content.String()
+	}
 
-		// Build ID-to-cursor-index mapping for correct selection highlighting
-		idToIdx := make(map[string]int, len(pageSessions))
-		for i, sess := range pageSessions {
-			idToIdx[sess.ID] = i
+	// Build the full card content into a separate buffer so we can slice it
+	// by lines and expose only the visible window (no per-page arithmetic).
+	var cards strings.Builder
+	groups := groupSessionsByFleet(displaySessions)
+	showHeaders := len(groups) >= 1
+	idToIdx := make(map[string]int, len(displaySessions))
+	for i, sess := range displaySessions {
+		idToIdx[sess.ID] = i
+	}
+	for _, group := range groups {
+		if showHeaders {
+			cards.WriteString(renderFleetHeader(group.Name, contentWidth))
 		}
-
-		for _, group := range groups {
-			if showHeaders {
-				content.WriteString(renderFleetHeader(group.Name, contentWidth))
-			}
-			for _, sess := range group.Sessions {
-				idx := idToIdx[sess.ID]
-				viewed := sess.ID == m.currentSessionID
-				content.WriteString(m.renderSession(sess, idx == m.cursor, viewed, contentWidth))
-			}
+		for _, sess := range group.Sessions {
+			idx := idToIdx[sess.ID]
+			viewed := sess.ID == m.currentSessionID
+			cards.WriteString(m.renderSession(sess, idx == m.cursor, viewed, contentWidth))
 		}
 	}
 
-	// Page info
-	totalPages := m.getTotalPages()
-	if totalPages > 1 {
-		content.WriteString("\n")
-		pageInfo := fmt.Sprintf("Page %d/%d", m.currentPage+1, totalPages)
-		pageInfoStyled := helpStyle.Render(pageInfo)
-		pageInfoLen := lipgloss.Width(pageInfoStyled)
-		leftPad := (contentWidth - pageInfoLen) / 2
-		if leftPad > 0 {
-			content.WriteString(strings.Repeat(" ", leftPad))
-		}
-		content.WriteString(pageInfoStyled)
+	// Slice by lines and take a window starting at scrollOffset. The
+	// content area size is computed the same way adjustScrollForCursor
+	// does, so the two stay in agreement.
+	lines := strings.Split(cards.String(), "\n")
+	avail := m.contentAreaLines()
+	start := m.scrollOffset
+	if start < 0 {
+		start = 0
 	}
-
+	if start > len(lines) {
+		start = len(lines)
+	}
+	end := start + avail
+	if end > len(lines) {
+		end = len(lines)
+	}
+	content.WriteString(strings.Join(lines[start:end], "\n"))
 	return content.String()
 }
 
@@ -1362,12 +1459,21 @@ func (m Model) renderHelpLine() string {
 	return helpStyle.Render(" ? help  / search")
 }
 
-// renderSession renders a single session in 1-line format with optional output preview
-// Format: >name (branch)                    STATUS    Last Active
+// renderSession renders a single session as a card.
 //
-//	details...
+// Two orthogonal indicators:
+//
+//   - selected → blue cursor bar '▎' running down every card line
+//   - viewed   → subdued row background across every card line
+//
+// The two indicators compose freely: a card can be selected, viewed, both,
+// or neither. Roles are visually separate (bar = pointer, background =
+// current location) so users never have to disambiguate a single glyph.
+//
+// A blank line follows every card (no background) so cards read as
+// visually separate blocks even when a run of them is highlighted.
 func (m Model) renderSession(sess session.Info, selected bool, viewed bool, width int) string {
-	// Deleting sessions: dim rendering, not selectable
+	// Deleting sessions: dim rendering, not selectable.
 	if m.deletingIDs[sess.ID] {
 		var b strings.Builder
 		name := truncateString(sess.Description, width-2)
@@ -1377,63 +1483,74 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 		b.WriteString("  ")
 		b.WriteString(deletingStyle.Render(name))
 		b.WriteString("\n")
-		b.WriteString("  ├─ ")
+		b.WriteString("    ")
 		b.WriteString(deletingStyle.Render("⟳ deleting..."))
-		b.WriteString("\n")
-		b.WriteString("  ├─\n")
-		b.WriteString("  └─ ")
-		b.WriteString(deletingStyle.Render(timeAgo(sess.LastActiveAt)))
-		b.WriteString("\n")
+		b.WriteString("\n\n")
 		return b.String()
 	}
 
+	_, statusLabel, statusStyle := getStatusDisplay(sess.Status)
+
+	// withBg composes any inline style with the viewed row background when
+	// the card is being displayed on the right. Applying the background per
+	// styled segment (rather than wrapping the whole line) sidesteps ANSI
+	// reset artifacts between segments — every visible cell carries the bg
+	// SGR codes so the background stays continuous.
+	withBg := func(s lipgloss.Style) lipgloss.Style {
+		if viewed {
+			return s.Background(viewedRowBg)
+		}
+		return s
+	}
+	bgOnly := withBg(lipgloss.NewStyle())
+	padBg := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		if viewed {
+			return bgOnly.Render(strings.Repeat(" ", n))
+		}
+		return strings.Repeat(" ", n)
+	}
+
+	// Cursor bar column (2 cols): blue '▎' on selected cards, blank otherwise.
+	// The bar repeats on every subsequent line so the eye can trace it down
+	// the whole card.
+	var cursorBar string
+	if selected {
+		cursorBar = withBg(selectedItemStyle).Render("▎ ")
+	} else {
+		cursorBar = padBg(2)
+	}
+
+	// The inner lead prefix carried by every non-header line: cursor bar (2)
+	// + 2-column nesting indent = 4 columns total.
+	innerLead := cursorBar + padBg(2)
+
 	var b strings.Builder
 
-	statusIcon, statusLabel, statusStyle := getStatusDisplay(sess.Status)
+	// --- Line 1: cursor + name ---
+	nameAvail := width - 2 // cursor col
+	nameAvail = max(nameAvail, 8)
 
-	// Use LastActiveAt if available, otherwise CreatedAt
-	var lastActiveTime time.Time
-	if !sess.LastActiveAt.IsZero() {
-		lastActiveTime = sess.LastActiveAt
-	} else {
-		lastActiveTime = sess.CreatedAt
-	}
-	timeStr := timeAgo(lastActiveTime)
-
-	// --- Line 1: cursor + session name ---
-	availableForName := width - 2 // cursor(2)
-	name := truncateString(sess.Description, availableForName)
+	name := truncateString(sess.Description, nameAvail)
 	if sess.DescriptionLocked && sess.Description != "" {
 		name += "*"
 	}
-
-	// renderLine renders a line with selected or viewed style (full-width background).
-	// Must only be called when selected || viewed is true.
-	renderLine := func(line string) {
-		if selected {
-			b.WriteString(selectedItemStyle.Render(padLine(line, width)))
-		} else if viewed {
-			b.WriteString(viewedItemStyle.Render(padLine(line, width)))
-		} else {
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
-	}
-
+	var nameStyled string
 	if selected {
-		renderLine("> " + name)
-	} else if viewed {
-		renderLine("▎ " + name)
+		nameStyled = withBg(selectedItemStyle).Render(name)
 	} else {
-		b.WriteString("  ")
-		b.WriteString(sessionNameStyle.Render(name))
-		b.WriteString("\n")
+		nameStyled = withBg(sessionNameStyle).Render(name)
 	}
+	nameW := lipgloss.Width(nameStyled)
 
-	// Meta line: prefer the current git branch — Description already carries
-	// the repo/worktree identity, so the workdir path is redundant when we
-	// have a branch. For non-git sessions the branch is empty and we fall
-	// back to the short workdir so the user still sees where they are.
+	b.WriteString(cursorBar)
+	b.WriteString(nameStyled)
+	b.WriteString(padBg(width - 2 - nameW))
+	b.WriteString("\n")
+
+	// --- Line 2: colored dot + STATUS + branch/workdir ---
 	metaStr := sess.CurrentBranch
 	if metaStr == "" {
 		displayDir := sess.CurrentWorkDir
@@ -1448,76 +1565,57 @@ func (m Model) renderSession(sess session.Info, selected bool, viewed bool, widt
 		}
 	}
 
-	statusStr := statusIcon + " " + statusLabel
-	indent := "  ├─ "
-	indentWidth := 5
+	statusCluster := withBg(statusStyle).Render("● " + statusLabel)
+	statusClusterW := lipgloss.Width(statusCluster)
 
-	// Truncate metadata if needed
-	availableForMeta := width - indentWidth
-	if availableForMeta > 0 && runewidth.StringWidth(metaStr) > availableForMeta {
-		metaStr = truncateString(metaStr, availableForMeta)
-	}
-
-	// --- Line 2: status (icon + label) ---
-	if selected || viewed {
-		renderLine(indent + statusStr)
-	} else {
-		b.WriteString(indent)
-		b.WriteString(statusStyle.Render(statusStr))
-		b.WriteString("\n")
-	}
-
-	// --- Line 3: git branch (falls back to short workdir for non-git dirs) ---
+	b.WriteString(innerLead)
+	b.WriteString(statusCluster)
+	usedW := 4 + statusClusterW
 	if metaStr != "" {
-		if selected || viewed {
-			renderLine(indent + metaStr)
-		} else {
-			b.WriteString(indent)
-			b.WriteString(helpStyle.Render(metaStr))
-			b.WriteString("\n")
+		const gapW = 3
+		metaAvail := width - usedW - gapW
+		if metaAvail > 0 {
+			if runewidth.StringWidth(metaStr) > metaAvail {
+				metaStr = truncateString(metaStr, metaAvail)
+			}
+			metaStyled := withBg(helpStyle).Render(metaStr)
+			b.WriteString(padBg(gapW))
+			b.WriteString(metaStyled)
+			usedW += gapW + lipgloss.Width(metaStyled)
 		}
 	}
+	b.WriteString(padBg(width - usedW))
+	b.WriteString("\n")
 
 	// --- Line 3: last user message ---
 	if sess.LastUserMessage != "" {
-		prefix := "  ├─ 👤 "
-		pWidth := lipgloss.Width(prefix)
-		msgWidth := width - pWidth
+		iconPrefix := "👤 "
+		msgWidth := width - 4 - lipgloss.Width(iconPrefix)
 		msgWidth = max(msgWidth, 10)
 		msgStr := truncateString(sess.LastUserMessage, msgWidth)
-
-		if selected || viewed {
-			renderLine(prefix + msgStr)
-		} else {
-			b.WriteString("  ├─ " + helpStyle.Render("👤 "+msgStr))
-			b.WriteString("\n")
-		}
+		msgStyled := withBg(helpStyle).Render(iconPrefix + msgStr)
+		b.WriteString(innerLead)
+		b.WriteString(msgStyled)
+		b.WriteString(padBg(width - 4 - lipgloss.Width(msgStyled)))
+		b.WriteString("\n")
 	}
 
 	// --- Line 4: last assistant message ---
 	if sess.LastAssistantMessage != "" {
-		prefix := "  ├─ 🤖 "
-		pWidth := lipgloss.Width(prefix)
-		msgWidth := width - pWidth
+		iconPrefix := "🤖 "
+		msgWidth := width - 4 - lipgloss.Width(iconPrefix)
 		msgWidth = max(msgWidth, 10)
 		msgStr := truncateStringFromEnd(sess.LastAssistantMessage, msgWidth)
-
-		if selected || viewed {
-			renderLine(prefix + msgStr)
-		} else {
-			b.WriteString("  ├─ " + helpStyle.Render("🤖 "+msgStr))
-			b.WriteString("\n")
-		}
-	}
-
-	// --- Last line: time ---
-	if selected || viewed {
-		renderLine("  └─ " + timeStr)
-	} else {
-		b.WriteString("  └─ " + timeStyle.Render(timeStr))
+		msgStyled := withBg(helpStyle).Render(iconPrefix + msgStr)
+		b.WriteString(innerLead)
+		b.WriteString(msgStyled)
+		b.WriteString(padBg(width - 4 - lipgloss.Width(msgStyled)))
 		b.WriteString("\n")
 	}
 
+	// Trailing blank spacer between cards — no background, so cards read
+	// as visually distinct blocks even when consecutive rows are highlighted.
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -1647,27 +1745,31 @@ func countStatuses(sessions []session.Info) statusCounts {
 func buildStatusSummary(sessions []session.Info) string {
 	counts := countStatuses(sessions)
 
+	// Each cluster: "● N Label" colored by its status style; separated by a
+	// dim middle dot. The colored dot replaces the earlier `*` / `>` / `o`
+	// ASCII glyphs for a more modern, uniform look.
 	var parts []string
 	if counts.thinking > 0 {
-		parts = append(parts, thinkingStyle.Render(fmt.Sprintf("*%d Thinking", counts.thinking)))
+		parts = append(parts, thinkingStyle.Render(fmt.Sprintf("● %d Thinking", counts.thinking)))
 	}
 	if counts.permission > 0 {
-		parts = append(parts, permissionStyle.Render(fmt.Sprintf("?%d Permission", counts.permission)))
+		parts = append(parts, permissionStyle.Render(fmt.Sprintf("● %d Permission", counts.permission)))
 	}
 	if counts.running > 0 {
-		parts = append(parts, runningStyle.Render(fmt.Sprintf(">%d Running", counts.running)))
+		parts = append(parts, runningStyle.Render(fmt.Sprintf("● %d Running", counts.running)))
 	}
 	if counts.creating > 0 {
-		parts = append(parts, creatingStyle.Render(fmt.Sprintf("+%d Creating", counts.creating)))
+		parts = append(parts, creatingStyle.Render(fmt.Sprintf("● %d Creating", counts.creating)))
 	}
 	if counts.idle > 0 {
-		parts = append(parts, idleStyle.Render(fmt.Sprintf("o%d Idle", counts.idle)))
+		parts = append(parts, idleStyle.Render(fmt.Sprintf("● %d Idle", counts.idle)))
 	}
 
 	if len(parts) == 0 {
 		return ""
 	}
-	return strings.Join(parts, " ")
+	sep := lipgloss.NewStyle().Foreground(dimColor).Render("  ·  ")
+	return strings.Join(parts, sep)
 }
 
 // getStatusDisplay returns icon, label, and style for a given status
@@ -1736,17 +1838,14 @@ func groupSessionsByFleet(sessions []session.Info) []fleetGroup {
 }
 
 // renderFleetHeader renders a fleet group header line.
+// Uppercased, muted, letter-spaced name — no dashes; whitespace groups items.
 func renderFleetHeader(name string, width int) string {
-	label := " " + name + " "
-	labelWidth := lipgloss.Width(label)
-
-	// ── fleet-name ──────
-	leftDash := "── "
-	rightDashCount := max(width-lipgloss.Width(leftDash)-labelWidth, 1)
-	rightDash := strings.Repeat("─", rightDashCount)
-
-	headerStyle := lipgloss.NewStyle().Foreground(secondaryColor)
-	return headerStyle.Render(leftDash+label+rightDash) + "\n"
+	_ = width // width kept for API parity; layout no longer depends on it
+	label := strings.ToUpper(name)
+	headerStyle := lipgloss.NewStyle().
+		Foreground(secondaryColor).
+		Bold(true)
+	return headerStyle.Render(label) + "\n"
 }
 
 // wrapText wraps text to fit within the specified width

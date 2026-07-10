@@ -12,32 +12,31 @@ var (
 	dimColor       = lipgloss.Color("#414868") // Dark gray
 	purpleColor    = lipgloss.Color("#bb9af7") // Purple (thinking)
 	cyanColor      = lipgloss.Color("#7dcfff") // Cyan (running)
-	// Title style (for header inside box)
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(primaryColor)
 
-	// Help style (outside box)
+	// Help style (outside pane)
 	helpStyle = lipgloss.NewStyle().
 			Foreground(secondaryColor)
 
-	// Item styles
+	// Selected item style: the "cursor" — a bold, blue vertical bar '▎'
+	// spanning every line of the card, and a bold, blue name on line 1.
 	selectedItemStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("255")).
-				Background(primaryColor)
+				Foreground(primaryColor)
 
-	// Viewed item style (session currently shown in right pane)
-	viewedItemStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#24283b"))
+	// Viewed background: the session currently shown in the display pane
+	// gets a subtle full-row background reverse across every card line.
+	// AdaptiveColor auto-picks a subdued shade for light and dark terminal
+	// themes (lipgloss queries the terminal background via OSC 11 on start).
+	// Chosen to be perceptibly present without stealing attention from the
+	// selection cursor.
+	viewedRowBg = lipgloss.AdaptiveColor{
+		Light: "#dfe1e6",
+		Dark:  "#292e42",
+	}
 
 	// Session name style
 	sessionNameStyle = lipgloss.NewStyle().
 				Bold(true)
-
-	// Time style
-	timeStyle = lipgloss.NewStyle().
-			Foreground(dimColor)
 
 	// Status styles - Tokyo Night inspired
 	thinkingStyle = lipgloss.NewStyle().
@@ -63,21 +62,17 @@ var (
 
 	deletingStyle = lipgloss.NewStyle().
 			Foreground(secondaryColor)
-
-	// Box border style
-	boxBorderColor = primaryColor
 )
 
-// createBoxStyle creates a box style with specified width and height.
-// When focused is false, the border color is dimmed to indicate the pane is inactive.
-func createBoxStyle(width, height int, focused bool) lipgloss.Style {
-	borderColor := boxBorderColor
-	if !focused {
-		borderColor = dimColor
-	}
+// createPaneStyle wraps content with 1-column horizontal padding and a fixed
+// height so the help line stays at the bottom. No border is drawn — tmux
+// already draws the pane divider, so an extra border would be redundant.
+// The focused flag is currently unused; focus is conveyed through the title
+// color in the header instead.
+func createPaneStyle(width, height int, _ bool) lipgloss.Style {
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
 		Width(width).
-		Height(height)
+		Height(height).
+		MaxHeight(height).
+		Padding(0, 1)
 }

@@ -8,9 +8,18 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/takaaki-s/jindaiko/internal/config"
 	"github.com/takaaki-s/jindaiko/internal/session"
 )
+
+// Force TrueColor output during tests so styling assertions (e.g. the
+// presence of a background SGR sequence on viewed cards) are reliable
+// regardless of the CI environment's TTY detection.
+func init() {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+}
 
 // --- truncateString ---
 
@@ -691,196 +700,124 @@ func TestBuildStatusSummary(t *testing.T) {
 	})
 }
 
-// --- getItemsPerPage ---
+// --- cardHeight ---
 
-func TestGetItemsPerPage(t *testing.T) {
+func TestCardHeight(t *testing.T) {
+	m := Model{deletingIDs: map[string]bool{"deleting-id": true}}
+
 	tests := []struct {
-		name      string
-		height    int
-		searching bool
-		wantMin   int // items should be at least this
+		name string
+		sess session.Info
+		want int
 	}{
 		{
-			name:   "tall terminal",
-			height: 40,
-			// availableLines = 40 - 8 = 32, items = 32/4 = 8
+			name: "base card (name + status + spacer)",
+			sess: session.Info{ID: "s1", Description: "s"},
+			want: 3,
 		},
 		{
-			name:   "short terminal",
-			height: 10,
-			// availableLines = 10 - 8 = 2, clamped to 4, items = 4/4 = 1
+			name: "with user message",
+			sess: session.Info{ID: "s2", Description: "s", LastUserMessage: "hi"},
+			want: 4,
 		},
 		{
-			name:      "with search bar",
-			height:    40,
-			searching: true,
-			// availableLines = 40 - 8 - 1 = 31, items = 31/4 = 7
+			name: "with both messages",
+			sess: session.Info{ID: "s3", Description: "s", LastUserMessage: "hi", LastAssistantMessage: "yo"},
+			want: 5,
 		},
 		{
-			name:   "very short terminal",
-			height: 5,
-			// availableLines = 5 - 8 = -3, clamped to 4, items = 4/4 = 1
+			name: "deleting card",
+			sess: session.Info{ID: "deleting-id", Description: "s"},
+			want: 3,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := Model{
-				height:    tt.height,
-				searching: tt.searching,
-			}
-			got := m.getItemsPerPage()
-			if got < 1 {
-				t.Errorf("getItemsPerPage() = %d, should be at least 1", got)
-			}
-			// Verify calculation (no sessions in test → fleetGroupCount=0 → no header subtraction)
-			availableLines := tt.height - 8
-			if tt.searching {
-				availableLines--
-			}
-			availableLines = max(availableLines, 4)
-			expected := availableLines / 4
-			expected = max(expected, 1)
-			if got != expected {
-				t.Errorf("getItemsPerPage() = %d, want %d (height=%d, searching=%v)",
-					got, expected, tt.height, tt.searching)
+			if got := m.cardHeight(tt.sess); got != tt.want {
+				t.Errorf("cardHeight() = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
-// --- getTotalPages ---
+// --- viewport scroll ---
 
-func TestGetTotalPages(t *testing.T) {
-	tests := []struct {
-		name        string
-		numSessions int
-		height      int
-		wantPages   int
-	}{
-		{
-			name:        "no sessions",
-			numSessions: 0,
-			height:      40,
-			wantPages:   1,
-		},
-		{
-			name:        "fewer sessions than page size",
-			numSessions: 3,
-			height:      40,
-			// itemsPerPage = (40-8)/4 = 32/4 = 8, totalPages = ceil(3/8) = 1
-			wantPages: 1,
-		},
-		{
-			name:        "exactly one page",
-			numSessions: 7,
-			height:      40,
-			// fleetGroupCount=1 → availableLines=40-8-1=31, itemsPerPage=31/4=7, totalPages=ceil(7/7)=1
-			wantPages: 1,
-		},
-		{
-			name:        "two pages",
-			numSessions: 9,
-			height:      40,
-			// fleetGroupCount=1 → itemsPerPage=7, totalPages=ceil(9/7)=2
-			wantPages: 2,
-		},
-		{
-			name:        "many sessions short terminal",
-			numSessions: 10,
-			height:      12,
-			// itemsPerPage = max((12-8),4)/4 = 4/4 = 1, totalPages = ceil(10/1) = 10
-			wantPages: 10,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sessions := make([]session.Info, tt.numSessions)
-			for i := range sessions {
-				sessions[i] = session.Info{ID: string(rune('a' + i)), Description: "s"}
-			}
-			m := Model{
-				sessions: sessions,
-				height:   tt.height,
-			}
-			got := m.getTotalPages()
-			if got != tt.wantPages {
-				t.Errorf("getTotalPages() = %d, want %d", got, tt.wantPages)
-			}
-		})
-	}
-}
-
-// --- getPageSessions ---
-
-func TestGetPageSessions(t *testing.T) {
-	// Create 10 sessions named s0..s9
+// TestAdjustScrollForCursor verifies the viewport follows the cursor.
+// The available content area for these tests is small so we can watch the
+// scroll offset track the cursor's card position.
+func TestAdjustScrollForCursor(t *testing.T) {
+	// 10 base cards (3 lines each) + 1 fleet header = 31 lines total.
 	sessions := make([]session.Info, 10)
 	for i := range sessions {
-		sessions[i] = session.Info{ID: string(rune('0' + i)), Description: "s" + string(rune('0'+i))}
+		sessions[i] = session.Info{ID: string(rune('0' + i)), Description: "s"}
 	}
 
-	t.Run("first page", func(t *testing.T) {
-		m := Model{
+	newModel := func(cursor int) *Model {
+		m := &Model{
 			sessions:    sessions,
-			height:      40, // fleetGroupCount=1 → itemsPerPage=(40-8-1)/4=7
-			currentPage: 0,
+			height:      10, // contentAreaLines() → 10-1-1-1 = 7 usable
+			cursor:      cursor,
+			deletingIDs: map[string]bool{},
 		}
-		got := m.getPageSessions()
-		if len(got) != 7 {
-			t.Fatalf("getPageSessions() page 0 len = %d, want 7", len(got))
-		}
-		if got[0].Description != "s0" {
-			t.Errorf("first item Name = %q, want %q", got[0].Description, "s0")
-		}
-		if got[6].Description != "s6" {
-			t.Errorf("last item Name = %q, want %q", got[6].Description, "s6")
+		return m
+	}
+
+	t.Run("cursor on first card keeps scroll at 0", func(t *testing.T) {
+		m := newModel(0)
+		m.adjustScrollForCursor()
+		if m.scrollOffset != 0 {
+			t.Errorf("scrollOffset = %d, want 0 (cursor on first card)", m.scrollOffset)
 		}
 	})
 
-	t.Run("second page", func(t *testing.T) {
-		m := Model{
-			sessions:    sessions,
-			height:      40,
-			currentPage: 1,
-		}
-		got := m.getPageSessions()
-		if len(got) != 3 {
-			t.Fatalf("getPageSessions() page 1 len = %d, want 3", len(got))
-		}
-		if got[0].Description != "s7" {
-			t.Errorf("first item Name = %q, want %q", got[0].Description, "s7")
-		}
-		if got[2].Description != "s9" {
-			t.Errorf("last item Name = %q, want %q", got[2].Description, "s9")
+	t.Run("cursor below viewport scrolls down", func(t *testing.T) {
+		m := newModel(4)
+		// Card 4 top = 1 (fleet header) + 4*3 = 13. avail = 7. Bottom = 16.
+		// Should scroll so bottom = scrollOffset + avail → scrollOffset = 9.
+		m.adjustScrollForCursor()
+		if m.scrollOffset != 9 {
+			t.Errorf("scrollOffset = %d, want 9 (cursor below fold)", m.scrollOffset)
 		}
 	})
 
-	t.Run("page beyond range resets to page 0", func(t *testing.T) {
-		m := Model{
-			sessions:    sessions,
-			height:      40,
-			currentPage: 99,
-		}
-		got := m.getPageSessions()
-		if len(got) != 7 {
-			t.Fatalf("getPageSessions() beyond range len = %d, want 7", len(got))
-		}
-		if got[0].Description != "s0" {
-			t.Errorf("first item Name = %q, want %q", got[0].Description, "s0")
+	t.Run("cursor at end anchors scroll to last visible page", func(t *testing.T) {
+		m := newModel(9)
+		m.adjustScrollForCursor()
+		// Last card top = 1 + 9*3 = 28, height = 3, bottom = 31.
+		// scrollOffset = 31 - 7 = 24. clampScroll bounds by totalCardLines(31) - avail(7) = 24.
+		if m.scrollOffset != 24 {
+			t.Errorf("scrollOffset = %d, want 24 (cursor at end)", m.scrollOffset)
 		}
 	})
 
-	t.Run("empty sessions", func(t *testing.T) {
-		m := Model{
-			sessions:    nil,
-			height:      40,
-			currentPage: 0,
+	t.Run("clampScroll bounds within [0, total-avail]", func(t *testing.T) {
+		m := newModel(0)
+		m.scrollOffset = 999
+		m.clampScroll()
+		if m.scrollOffset != 24 {
+			t.Errorf("clampScroll from overshoot = %d, want 24", m.scrollOffset)
 		}
-		got := m.getPageSessions()
-		if got != nil {
-			t.Errorf("getPageSessions() with no sessions should return nil, got %v", got)
+		m.scrollOffset = -50
+		m.clampScroll()
+		if m.scrollOffset != 0 {
+			t.Errorf("clampScroll from negative = %d, want 0", m.scrollOffset)
 		}
 	})
+}
+
+// TestGetPageSessions_ViewportAlias documents the current alias behavior:
+// after the viewport migration, getPageSessions returns the entire display
+// list rather than a per-page slice.
+func TestGetPageSessions_ViewportAlias(t *testing.T) {
+	sessions := make([]session.Info, 20)
+	for i := range sessions {
+		sessions[i] = session.Info{ID: string(rune('0' + i%10)), Description: "s"}
+	}
+	m := Model{sessions: sessions, height: 10}
+	got := m.getPageSessions()
+	if len(got) != len(sessions) {
+		t.Errorf("getPageSessions() len = %d, want %d (all sessions)", len(got), len(sessions))
+	}
 }
 
 // --- applySearchFilter ---
@@ -1261,7 +1198,11 @@ func TestDeleteConfirmMoveCursorToNextSession(t *testing.T) {
 
 // --- renderSession ---
 
-func TestRenderSession_ViewedState(t *testing.T) {
+// TestRenderSession_Indicators verifies the two orthogonal indicators:
+//   - selected → blue '▎' cursor bar on every card line
+//   - viewed   → subdued row background across every card line (detectable
+//     via presence of an ANSI SGR bg code in the rendered output)
+func TestRenderSession_Indicators(t *testing.T) {
 	sess := session.Info{
 		ID:          "test-id",
 		Description: "test-session",
@@ -1270,39 +1211,22 @@ func TestRenderSession_ViewedState(t *testing.T) {
 	m := Model{}
 	width := 40
 
+	// The SGR sequence "\x1b[48" is the prefix for any background color set
+	// (48;5;n for 256-color, 48;2;R;G;B for truecolor). Its presence is a
+	// reliable signal that the viewed background was applied.
+	const bgSGR = "\x1b[48"
+
 	tests := []struct {
-		name           string
-		selected       bool
-		viewed         bool
-		wantPrefix     string
-		dontWantPrefix string
+		name        string
+		selected    bool
+		viewed      bool
+		wantBar     bool
+		wantViewBg  bool
 	}{
-		{
-			name:           "selected but not viewed shows cursor marker",
-			selected:       true,
-			viewed:         false,
-			wantPrefix:     "> ",
-			dontWantPrefix: "▎",
-		},
-		{
-			name:           "selected and viewed shows cursor marker",
-			selected:       true,
-			viewed:         true,
-			wantPrefix:     "> ",
-			dontWantPrefix: "▎",
-		},
-		{
-			name:       "viewed only shows viewed marker",
-			selected:   false,
-			viewed:     true,
-			wantPrefix: "▎",
-		},
-		{
-			name:           "neither selected nor viewed shows plain",
-			selected:       false,
-			viewed:         false,
-			dontWantPrefix: "▎",
-		},
+		{name: "neither", selected: false, viewed: false, wantBar: false, wantViewBg: false},
+		{name: "selected only", selected: true, viewed: false, wantBar: true, wantViewBg: false},
+		{name: "viewed only", selected: false, viewed: true, wantBar: false, wantViewBg: true},
+		{name: "selected and viewed", selected: true, viewed: true, wantBar: true, wantViewBg: true},
 	}
 
 	for _, tt := range tests {
@@ -1313,11 +1237,13 @@ func TestRenderSession_ViewedState(t *testing.T) {
 				t.Fatal("renderSession returned empty string")
 			}
 			firstLine := lines[0]
-			if tt.wantPrefix != "" && !strings.Contains(firstLine, tt.wantPrefix) {
-				t.Errorf("first line %q should contain %q", firstLine, tt.wantPrefix)
+			hasBar := strings.Contains(firstLine, "▎")
+			if hasBar != tt.wantBar {
+				t.Errorf("cursor bar present = %v, want %v (line: %q)", hasBar, tt.wantBar, firstLine)
 			}
-			if tt.dontWantPrefix != "" && strings.Contains(firstLine, tt.dontWantPrefix) {
-				t.Errorf("first line %q should not contain %q", firstLine, tt.dontWantPrefix)
+			hasViewBg := strings.Contains(firstLine, bgSGR)
+			if hasViewBg != tt.wantViewBg {
+				t.Errorf("viewed background present = %v, want %v (line: %q)", hasViewBg, tt.wantViewBg, firstLine)
 			}
 		})
 	}

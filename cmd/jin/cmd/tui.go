@@ -16,6 +16,28 @@ import (
 
 const envJinTmux = "JIN_TMUX"
 
+// Pane border styling — kept in sync with the TUI's Tokyo Night palette so
+// the outer tmux frame reads as one design with the inner session list.
+// Active pane uses bright blue + bold, inactive uses a muted gray. The
+// session-name label on the display pane is bolded when present.
+const (
+	activePaneBorderStyle   = "fg=#7aa2f7,bold"
+	inactivePaneBorderStyle = "fg=#414868"
+	paneBorderFormat        = "#{?#{@session_name}, #[bold]#{@session_name}#[nobold] ,}"
+	// tuiPaneBorderLabel is the pane-border-format text shown on the TUI (left)
+	// pane. Kept short since the user already knows they're in jindaiko.
+	tuiPaneBorderLabel = "sessions"
+)
+
+// applyPaneBorderStyle applies the modern pane-border styling to the outer
+// tmux server. Safe to call multiple times (idempotent).
+func applyPaneBorderStyle(tc *tmux.Client) {
+	_ = tc.SetOption("pane-active-border-style", activePaneBorderStyle, true)
+	_ = tc.SetOption("pane-border-style", inactivePaneBorderStyle, true)
+	_ = tc.SetOption("pane-border-status", "top", true)
+	_ = tc.SetOption("pane-border-format", paneBorderFormat, true)
+}
+
 var tuiCmd = &cobra.Command{
 	Use:     "ui",
 	Aliases: []string{"tui"},
@@ -106,6 +128,9 @@ func createAndAttachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 	_ = tc.SetupAutoCleanDeadPanes() // Safety net: auto-kill untagged dead panes
 	if tuiPaneID != "" {
 		_ = tc.TagManagedPane(tuiPaneID) // TUI pane survives exit
+		// Label the TUI pane's top border via the shared @session_name option
+		// (same mechanism the display pane uses for the current session name).
+		_ = tc.SetPaneOption(tuiPaneID, "@session_name", tuiPaneBorderLabel)
 	}
 	_ = tc.SetOption("status", "off", true) // Hide tmux status bar
 	_ = tc.SetOption("mouse", "on", true)
@@ -113,11 +138,10 @@ func createAndAttachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 	_ = tc.SetOption("set-clipboard", "on", true)     // Enable clipboard via OSC 52 for copy-mode
 	_ = tc.SetOption("allow-passthrough", "on", true) // Allow OSC 52 passthrough from inner tmux
 
-	// Pane border: color and session name display
-	_ = tc.SetOption("pane-active-border-style", "fg=green", true)
-	_ = tc.SetOption("pane-border-style", "fg=colour240", true)
-	_ = tc.SetOption("pane-border-status", "top", true)
-	_ = tc.SetOption("pane-border-format", "#{?#{@session_name}, #{@session_name} ,}", true)
+	// Pane border: Tokyo Night palette matched to the TUI, bold on active for
+	// unambiguous focus indication (tmux default green was too subtle and
+	// clashed with the rest of the palette).
+	applyPaneBorderStyle(tc)
 
 	// prefix=None: prevent outer tmux from capturing user keystrokes
 	_ = tc.SetOption("prefix", "None", true)
@@ -167,8 +191,9 @@ func reattachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 	_ = tc.SetOption("focus-events", "on", true)      // Ensure focus reporting is enabled
 	_ = tc.SetOption("set-clipboard", "on", true)     // Enable clipboard via OSC 52 for copy-mode
 	_ = tc.SetOption("allow-passthrough", "on", true) // Allow OSC 52 passthrough from inner tmux
-	_ = tc.SetOption("pane-border-status", "top", true)
-	_ = tc.SetOption("pane-border-format", "#{?#{@session_name}, #{@session_name} ,}", true)
+	// Re-apply pane border styling in case the outer tmux server was restarted
+	// or the options were tampered with between sessions.
+	applyPaneBorderStyle(tc)
 
 	tuiPaneID := tc.GetEnvironment(tmux.SessionName, "JIN_TUI_PANE")
 
@@ -177,6 +202,9 @@ func reattachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 			// TUI pane exists but dead → respawn it
 			_ = tc.RespawnPane(tuiPaneID, tuiInnerCmd)
 		}
+		// Re-apply the border label in case the outer tmux server was
+		// restarted between sessions and cleared the per-pane option.
+		_ = tc.SetPaneOption(tuiPaneID, "@session_name", tuiPaneBorderLabel)
 		// Select TUI pane
 		_ = tc.SelectPane(tuiPaneID)
 	} else {
