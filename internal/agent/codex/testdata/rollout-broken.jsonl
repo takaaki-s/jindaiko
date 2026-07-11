@@ -1,0 +1,5 @@
+{"timestamp":"2026-07-11T06:25:43.150Z","type":"session_meta","payload":{"session_id":"01900000-0000-7000-8000-000000000123","id":"01900000-0000-7000-8000-000000000123","cwd":"/tmp/broken"}}
+{"broken JSON here — half a line
+{"timestamp":"2026-07-11T06:25:43.160Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>skipped</environment_context>"}]}}
+{invalid
+{"timestamp":"2026-07-11T06:25:43.162Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"prompt after broken lines"}]}}

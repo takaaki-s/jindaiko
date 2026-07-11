@@ -1,0 +1,11 @@
+{"timestamp":"2026-07-11T06:25:43.150Z","type":"session_meta","payload":{"session_id":"01900000-0000-7000-8000-000000000abc","id":"01900000-0000-7000-8000-000000000abc","timestamp":"2026-07-11T06:25:10.729Z","cwd":"/tmp/example","originator":"codex-tui","cli_version":"0.144.1","source":"cli","model_provider":"openai","base_instructions":{"text":"REDACTED-TEST-PLACEHOLDER"},"git":{"commit_hash":"deadbeef","branch":"main","repository_url":"git@example.com:example/example.git"}}}
+{"timestamp":"2026-07-11T06:25:43.150Z","type":"event_msg","payload":{"type":"task_started","turn_id":"01900000-0000-7000-8000-0000000abcde","started_at":1783751143,"model_context_window":353400,"collaboration_mode_kind":"default"}}
+{"timestamp":"2026-07-11T06:25:43.160Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"REDACTED-DEVELOPER-INSTRUCTIONS-PLACEHOLDER"}]}}
+{"timestamp":"2026-07-11T06:25:43.160Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/tmp/example</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-07-11T06:25:43.161Z","type":"world_state","payload":{"note":"skipped-by-parser"}}
+{"timestamp":"2026-07-11T06:25:43.161Z","type":"turn_context","payload":{"note":"skipped-by-parser"}}
+{"timestamp":"2026-07-11T06:25:43.162Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello, echo the current date"}]}}
+{"timestamp":"2026-07-11T06:25:43.500Z","type":"event_msg","payload":{"type":"user_message","turn_id":"01900000-0000-7000-8000-0000000abcde"}}
+{"timestamp":"2026-07-11T06:25:44.100Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll check the environment's current date."}]}}
+{"timestamp":"2026-07-11T06:25:45.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Second user prompt, must NOT be returned by FirstUserPrompt"}]}}
+{"timestamp":"2026-07-11T06:25:46.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"01900000-0000-7000-8000-0000000abcde"}}
