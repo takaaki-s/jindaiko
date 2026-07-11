@@ -1,0 +1,90 @@
+package codex
+
+import (
+	"fmt"
+	"strings"
+)
+
+// managedEvents is the Codex hook event set jind-ai injects on every spawn.
+// The order matches 02_design.md §3.4's mapping table; SpawnCommand emits
+// one -c per entry, and status.go's Interpret must recognise the same set.
+var managedEvents = []string{
+	"SessionStart",
+	"UserPromptSubmit",
+	"PreToolUse",
+	"PostToolUse",
+	"PermissionRequest",
+	"Stop",
+}
+
+// hookTimeoutMillis is the Codex-side per-hook execution budget (§3.3). The
+// value is generous because `jin hook` needs to reach the daemon socket and
+// wait for a response — the median case is <100 ms, but a transiently busy
+// daemon can push into the seconds.
+const hookTimeoutMillis = 10000
+
+// HookArgs builds the `--enable hooks` flag plus one `-c 'hooks.X=[...]'`
+// pair per managedEvent, ready to be appended to `codex` when spawning a
+// jind-ai session.
+//
+// The returned slice is meant to be joined with spaces and spliced into the
+// SpawnPlan.Command string. Each -c value is wrapped in shell single quotes
+// so the space in `"execPath hook"` cannot leak out into argv splitting;
+// Manager's outer `'` escape then handles the wrapping-around-wrapping.
+// Single quotes that would otherwise break the shell grouping are encoded
+// as `'` in the TOML string so they never reach the shell parser.
+//
+// Returns nil when execPath is empty — the caller (SpawnCommand) then
+// spawns `codex` without hooks so the session still starts. Status will
+// only reflect running/idle via pane-death detection, but the operator
+// gets a working prompt rather than a spawn failure.
+func HookArgs(execPath string) []string {
+	if execPath == "" {
+		return nil
+	}
+	escaped := tomlEscapeForShell(execPath)
+	args := []string{"--enable", "hooks"}
+	for _, ev := range managedEvents {
+		val := fmt.Sprintf(
+			`hooks.%s=[{hooks=[{type="command",command="%s hook",timeout=%d}]}]`,
+			ev, escaped, hookTimeoutMillis,
+		)
+		args = append(args, "-c", "'"+val+"'")
+	}
+	return args
+}
+
+// tomlEscapeForShell returns s in a form safe to embed inside a TOML basic
+// string that itself lives inside a shell single-quoted context.
+//
+//   - single quote → the six-character sequence backslash-u-0-0-2-7
+//     (TOML unicode escape). The shell never sees a real single quote,
+//     so the outer `-c '...'` grouping stays intact even for exotic
+//     install paths.
+//   - `"` → `\"` (TOML basic string terminator).
+//   - `\` → `\\` (TOML escape lead-in).
+//
+// Everything else — spaces, unicode, control chars — is left as-is. Spaces
+// are fine because the outer shell single quotes group them, and unicode
+// bytes pass through both shell (which is byte-transparent inside `'...'`)
+// and TOML (which accepts UTF-8 basic strings verbatim).
+func tomlEscapeForShell(s string) string {
+	if !strings.ContainsAny(s, `'"\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\'':
+			b.WriteString("\\u0027")
+		case '"':
+			b.WriteString("\\\"")
+		case '\\':
+			b.WriteString("\\\\")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

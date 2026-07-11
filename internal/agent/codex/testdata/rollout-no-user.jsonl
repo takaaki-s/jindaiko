@@ -1,0 +1,3 @@
+{"timestamp":"2026-07-11T06:25:43.150Z","type":"session_meta","payload":{"session_id":"01900000-0000-7000-8000-000000000456","id":"01900000-0000-7000-8000-000000000456","cwd":"/tmp/no-user"}}
+{"timestamp":"2026-07-11T06:25:43.160Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"dev only"}]}}
+{"timestamp":"2026-07-11T06:25:43.161Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>only pseudo user</environment_context>"}]}}

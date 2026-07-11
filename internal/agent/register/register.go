@@ -11,8 +11,10 @@ package register
 import (
 	"github.com/takaaki-s/jind-ai/internal/agent"
 	"github.com/takaaki-s/jind-ai/internal/agent/claude"
+	"github.com/takaaki-s/jind-ai/internal/agent/codex"
 )
 
 func init() {
 	agent.Register(claude.New())
+	agent.Register(codex.New())
 }
