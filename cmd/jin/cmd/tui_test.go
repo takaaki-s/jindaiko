@@ -245,3 +245,43 @@ func TestApplyActionPanelBinding_MultipleKeys(t *testing.T) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
 	}
 }
+
+func TestApplySessionFilterBinding_BindsAllKeys(t *testing.T) {
+	fb := &fakeBinder{}
+	yaml := "keybindings:\n  search: [\"/\"]\n"
+	applySessionFilterBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
+	want := [][]string{
+		{"/", "display-popup", "-w", "70%", "-h", "70%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
+	}
+	if !reflect.DeepEqual(fb.calls, want) {
+		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
+	}
+}
+
+func TestApplySessionFilterBinding_NilConfigMgr_NoOp(t *testing.T) {
+	fb := &fakeBinder{}
+	applySessionFilterBinding(fb, nil, "/usr/local/bin/jin")
+	if len(fb.calls) != 0 {
+		t.Errorf("expected 0 BindKey calls, got %d: %v", len(fb.calls), fb.calls)
+	}
+}
+
+func TestApplySessionFilterBinding_EmptySelfBin_NoOp(t *testing.T) {
+	fb := &fakeBinder{}
+	applySessionFilterBinding(fb, mgrWithYAML(t, ""), "")
+	if len(fb.calls) != 0 {
+		t.Errorf("expected 0 BindKey calls, got %d: %v", len(fb.calls), fb.calls)
+	}
+}
+
+func TestApplySessionFilterBinding_EmptyKeySkip(t *testing.T) {
+	fb := &fakeBinder{}
+	yaml := "keybindings:\n  search: [\"\", \"ctrl+p\"]\n"
+	applySessionFilterBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
+	want := [][]string{
+		{"ctrl+p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
+	}
+	if !reflect.DeepEqual(fb.calls, want) {
+		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
+	}
+}

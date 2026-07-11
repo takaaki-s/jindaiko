@@ -39,7 +39,7 @@ jin ui --agent codex   # transient default; ends when TUI exits
 - **TUI**: Interactive terminal UI for listing, monitoring, and operating sessions
 - **Attach/Detach**: Quickly switch between sessions (`Ctrl+]` to detach)
 - **Real-time status tracking**: Live display of working directory, branch, and latest message
-- **Search & Paging**: Incremental search by session name, directory, or branch
+- **Session filter & Paging**: `/` opens a fuzzy-search popup over session name, directory, branch, fleet, and agent kind
 - **Desktop notifications**: OS notifications for permission requests and task completion (macOS / Linux)
 
 ## Installation
@@ -302,7 +302,7 @@ keybindings:
   kill: ["x"]
   delete: ["d"]
   refresh: ["r"]
-  search: ["/"]
+  search: ["/"]           # opens the session filter popup (fuzzy search)
   vscode: ["v"]
   notifications: ["!"]
   quit: ["q", "ctrl+c"]
@@ -378,7 +378,7 @@ Worktree creation itself is **offline** — the new branch is cut from your loca
 | `↓/j` | Move down |
 | `←/h` | Previous page |
 | `→/l` | Next page |
-| `/` | Search sessions (name, directory, branch) |
+| `/` | Open session filter (fuzzy popup) |
 | `Enter` | Attach to session |
 | `n` | Create new session |
 | `x` | Kill session |
@@ -429,6 +429,26 @@ keybindings:
 Keys must include a modifier (`M-`/`C-`) — a bare letter would be consumed as
 normal input by the agent in the right pane instead of reaching the outer
 tmux binding.
+
+### Outer tmux — session filter
+
+`/` (default) opens the session filter, a fuzzy-search popup for jumping
+straight to a session: type a few characters and press `Enter` to attach
+immediately. It's bound the same way as the action palette above — at the
+outer tmux (`jin-mgr`) root key table, so it fires from either pane. Matched
+fields are session description, working directory, current working
+directory, git branch, fleet, and agent kind (subsequence matching via
+[sahilm/fuzzy](https://github.com/sahilm/fuzzy), smart-case, ranked by
+score). `Esc` closes the popup without changing anything; `↑`/`↓` or
+`Ctrl+P`/`Ctrl+N` move the cursor.
+
+Override or disable the trigger the same way as `action_panel`:
+
+```yaml
+keybindings:
+  search: ["ctrl+p"]  # rebind to Ctrl+p
+  # search: []           # disable entirely (no bind-key issued)
+```
 
 ## Claude Code Hooks
 

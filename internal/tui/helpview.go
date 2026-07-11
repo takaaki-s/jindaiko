@@ -11,17 +11,23 @@ import (
 // HelpModel is a standalone Bubble Tea model for displaying keyboard shortcuts.
 // Designed to run inside a tmux popup and exits on any key press.
 type HelpModel struct {
-	keys               KeyMap
-	detachKeyHint      string
-	actionPanelKeyHint string
-	width              int
-	height             int
+	keys                 KeyMap
+	detachKeyHint        string
+	actionPanelKeyHint   string
+	sessionFilterKeyHint string
+	width                int
+	height               int
 }
 
-// NewHelpModel creates a new HelpModel with the given KeyMap, detach key hint,
-// and action panel key hint.
-func NewHelpModel(keys KeyMap, detachKeyHint, actionPanelKeyHint string) HelpModel {
-	return HelpModel{keys: keys, detachKeyHint: detachKeyHint, actionPanelKeyHint: actionPanelKeyHint}
+// NewHelpModel creates a new HelpModel with the given KeyMap and outer-tmux
+// binding hints (detach, action panel, session filter popup).
+func NewHelpModel(keys KeyMap, detachKeyHint, actionPanelKeyHint, sessionFilterKeyHint string) HelpModel {
+	return HelpModel{
+		keys:                 keys,
+		detachKeyHint:        detachKeyHint,
+		actionPanelKeyHint:   actionPanelKeyHint,
+		sessionFilterKeyHint: sessionFilterKeyHint,
+	}
 }
 
 func (m HelpModel) Init() tea.Cmd {
@@ -56,7 +62,6 @@ func (m HelpModel) View() string {
 	writeBinding(&b, keyStyle, descStyle, k.Down)
 	writeBinding(&b, keyStyle, descStyle, k.PrevPage)
 	writeBinding(&b, keyStyle, descStyle, k.NextPage)
-	writeBinding(&b, keyStyle, descStyle, k.Search)
 	b.WriteString("\n")
 
 	b.WriteString(sectionStyle.Render("Actions"))
@@ -77,6 +82,9 @@ func (m HelpModel) View() string {
 	writeBinding(&b, keyStyle, descStyle, k.Help)
 	if m.actionPanelKeyHint != "" {
 		writeShortcut(&b, keyStyle, descStyle, m.actionPanelKeyHint, "open action palette")
+	}
+	if m.sessionFilterKeyHint != "" {
+		writeShortcut(&b, keyStyle, descStyle, m.sessionFilterKeyHint, "session filter (fuzzy)")
 	}
 	b.WriteString("\n")
 

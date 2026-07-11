@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"os"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/takaaki-s/jind-ai/internal/action"
@@ -19,13 +17,8 @@ var actionPopupCmd = &cobra.Command{
 	Short:  "Internal: action palette for tmux popup",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Ensure SSH_AUTH_SOCK is available (tmux popup may not inherit it)
-		if os.Getenv("SSH_AUTH_SOCK") == "" {
-			if tc, err := tmux.NewMgrClient(); err == nil {
-				if sock := tc.GetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK"); sock != "" {
-					os.Setenv("SSH_AUTH_SOCK", sock)
-				}
-			}
+		if tc, err := tmux.NewMgrClient(); err == nil {
+			ensureSSHAuthSockFromTmux(tc)
 		}
 
 		configMgr, _ := config.NewManager(getConfigDir())

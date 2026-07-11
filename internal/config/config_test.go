@@ -387,3 +387,37 @@ func TestGetActionPanelKeys_MultipleKeys(t *testing.T) {
 		t.Errorf("GetActionPanelKeys() = %v, want %v", got, want)
 	}
 }
+
+// --- GetSessionFilterKeys ---
+// Same nil ↔ empty-slice semantics as GetActionPanelKeys, sourced from
+// keybindings.search (repurposed from the removed inline substring filter).
+
+func TestGetSessionFilterKeys_DefaultWhenNil(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	got := m.GetSessionFilterKeys()
+	want := []string{"/"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetSessionFilterKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestGetSessionFilterKeys_UserSet(t *testing.T) {
+	m := &Manager{config: &Config{
+		Keybindings: KeybindingsConfig{Search: []string{"ctrl+p"}},
+	}}
+	got := m.GetSessionFilterKeys()
+	want := []string{"ctrl+p"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetSessionFilterKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestGetSessionFilterKeys_ExplicitEmptyDisables(t *testing.T) {
+	m := &Manager{config: &Config{
+		Keybindings: KeybindingsConfig{Search: []string{}},
+	}}
+	got := m.GetSessionFilterKeys()
+	if len(got) != 0 {
+		t.Errorf("GetSessionFilterKeys() = %v, want empty slice", got)
+	}
+}

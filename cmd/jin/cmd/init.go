@@ -22,6 +22,7 @@ keybindings:
   kill: ["x"]
   delete: ["d"]
   refresh: ["r"]
+  # search: keys that open the session filter popup (fuzzy search).
   search: ["/"]
   vscode: ["v"]
   notifications: ["!"]

@@ -17,11 +17,15 @@ var helpPopupCmd = &cobra.Command{
 		var keybindings config.KeybindingsConfig
 		var detachKeyHint string
 		var actionPanelHint string
+		var sessionFilterHint string
 		if configMgr != nil {
 			keybindings = configMgr.GetKeybindings()
 			detachKeyHint = configMgr.GetDetachKeyHint()
 			if apk := configMgr.GetActionPanelKeys(); len(apk) > 0 {
 				actionPanelHint = action.FormatKeyHint(apk[0])
+			}
+			if sfk := configMgr.GetSessionFilterKeys(); len(sfk) > 0 {
+				sessionFilterHint = action.FormatKeyHint(sfk[0])
 			}
 		} else {
 			keybindings = config.DefaultKeybindings()
@@ -29,7 +33,7 @@ var helpPopupCmd = &cobra.Command{
 		}
 		keys := tui.NewKeyMap(keybindings)
 
-		model := tui.NewHelpModel(keys, detachKeyHint, actionPanelHint)
+		model := tui.NewHelpModel(keys, detachKeyHint, actionPanelHint, sessionFilterHint)
 		p := tea.NewProgram(model, tea.WithAltScreen())
 		_, err := p.Run()
 		return err

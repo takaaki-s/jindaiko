@@ -85,6 +85,24 @@ Common pitfalls and caveats that agents tend to fall into.
   → agent and fleet-step Esc-back short-circuit past it so the flow
   matches the pre-picker UX in single-adapter builds.
 
+## Session filter popup (TUI)
+
+- **`/` opens a tmux popup, it does not filter inline.** Unlike `vi` / `less`
+  / most other TUI apps where `/` starts an inline incremental search, jind-ai
+  binds `/` at the outer tmux (`jin-mgr`) root key table to launch the
+  session filter popup (`jin session-filter-popup`). Muscle memory from other
+  tools ("press `/`, type, see the list narrow in place") will instead pop
+  open a full-screen picker — this is intentional (see
+  [architecture.md](architecture.md#session-filter-popup)), not a bug.
+
+- **Requires tmux `display-popup` (tmux 3.2+).** The session filter shares
+  its launch mechanism with the action palette and notification history
+  popups — all three call `tmux display-popup -E`. On tmux 3.1 or older,
+  `display-popup` doesn't exist, so the outer-tmux `bind-key` for `/` fires
+  but the popup command errors out instead of opening. jind-ai's documented
+  minimum is tmux 3.3+ (see README's Requirements section), which already
+  covers this.
+
 ## Code Structure
 
 - **Debug logging uses `internal/debug.NewLogger`**.

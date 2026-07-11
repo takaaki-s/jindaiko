@@ -3,28 +3,29 @@
 ## Architecture
 
 BubbleTea (Elm Architecture) based TUI.
-The main screen (session list) is handled by `model.go`, while the create form, help, and notification history are launched as independent processes via tmux popup.
+The main screen (session list) is handled by `model.go`, while the create form, help, notification history, and session filter are launched as independent processes via tmux popup.
 
 ```
 internal/tui/
-├─ model.go       ... Main Model (session list), Update(), View() (~1430 lines)
-├─ createform.go  ... Session create form (for popup, ~540 lines)
-├─ dirpicker.go   ... Directory picker (used within createform, ~730 lines)
-├─ notifyview.go  ... Notification history view (for popup, ~180 lines)
-├─ helpview.go    ... Help view (for popup, ~100 lines)
-└─ styles.go      ... lipgloss style definitions (Tokyo Night color scheme)
+├─ model.go               ... Main Model (session list), Update(), View() (~1430 lines)
+├─ createform.go          ... Session create form (for popup, ~540 lines)
+├─ dirpicker.go           ... Directory picker (used within createform, ~730 lines)
+├─ notifyview.go          ... Notification history view (for popup, ~180 lines)
+├─ helpview.go            ... Help view (for popup, ~100 lines)
+├─ session_filter_model.go ... Session filter picker (for popup, sahilm/fuzzy)
+└─ styles.go              ... lipgloss style definitions (Tokyo Night color scheme)
 
 cmd/jin/cmd/
-├─ create_popup.go  ... jin create-popup (Hidden) → launches CreateFormModel
-├─ help_popup.go    ... jin help-popup (Hidden)   → launches HelpModel
-└─ notify_popup.go  ... jin notify-popup (Hidden) → launches NotifyModel
+├─ create_popup.go          ... jin create-popup (Hidden) → launches CreateFormModel
+├─ help_popup.go            ... jin help-popup (Hidden)   → launches HelpModel
+├─ notify_popup.go          ... jin notify-popup (Hidden) → launches NotifyModel
+└─ session_filter_popup.go  ... jin session-filter-popup (Hidden) → launches SessionFilterModel
 ```
 
 ## Model Structure
 
 `Model` in `model.go` holds the state of the session list screen:
 - Session list + cursor position + pagination
-- Search mode (filtering)
 - Confirmation dialog (Kill/Delete)
 - daemon.Client (for IPC communication)
 - tmux.Client (for popup launch and pane control)
@@ -37,7 +38,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     switch msg := msg.(type) {
     case tea.KeyMsg:
         // Delegates to updateListMode()
-        // Mode checks: confirmDelete/confirmKill/searching etc.
+        // Mode checks: confirmDelete/confirmKill etc.
     case tickMsg:
         // Periodic polling (daemon.Client.List())
         // Detect popup completion (via environment variables)
@@ -57,7 +58,6 @@ func (m Model) View() string {
 ### Main Screen (within model.go)
 
 - **Session list**: Default screen, status display + pagination
-- **Search mode**: Triggered by `/` key, incremental filtering by session name
 - **Confirmation dialog**: Shows confirmation message in help line for Kill/Delete
 
 ### Popup (launched as independent process via tmux popup)
@@ -65,8 +65,9 @@ func (m Model) View() string {
 - **Create form**: `CreateFormModel` in `createform.go` (WorkDir → Agent → Fleet → Worktree; Agent step is skipped when only one adapter is registered)
 - **Help**: `HelpModel` in `helpview.go` (keybind list)
 - **Notification history**: `NotifyModel` in `notifyview.go` (notification list + session selection)
+- **Session filter**: `SessionFilterModel` in `session_filter_model.go` (fuzzy session picker, see [Session Filter Popup](#session-filter-popup) below)
 
-After popup completion, results are returned to the parent TUI via environment variables (`JIN_CREATED_SESSION`, `JIN_NOTIFY_SESSION`). The parent TUI detects them during tickMsg polling.
+After popup completion, results are returned to the parent TUI via environment variables (`JIN_CREATED_SESSION`, `JIN_NOTIFY_SESSION`, `JIN_FOCUS_SESSION`). The parent TUI detects them during tickMsg polling.
 
 ## Styling
 
@@ -88,7 +89,9 @@ After popup completion, results are returned to the parent TUI via environment v
 Keybindings are retrieved from `config.GetKeybindings()`.
 Default values are defined in `config.DefaultKeybindings()`.
 Users can customize them in the `keybindings` section of `~/.config/jind-ai/config.yaml` (or wherever `$XDG_CONFIG_HOME/jind-ai/config.yaml` resolves to).
-`action_panel` (default `M-p`) is another outer-tmux root binding, same shape as `toggle_pane` below — see [Action Palette](#action-palette).
+`action_panel` (default `M-p`) and `search` (default `/`) are two more
+outer-tmux root bindings, same shape as `toggle_pane` below — see
+[Action Palette](#action-palette) and [Session Filter Popup](#session-filter-popup).
 
 ### Outer tmux — sidebar toggle
 
@@ -135,4 +138,35 @@ Override or disable the trigger the same way as `toggle_pane`:
 keybindings:
   action_panel: ["M-x"]  # rebind to Alt+x
   # action_panel: []       # disable entirely (no bind-key issued)
+```
+
+## Session Filter Popup
+
+The session filter is a fuzzy-search popup for jumping straight to a
+session: press `/` (default, configurable via `keybindings.search`), type a
+few characters, and hit `Enter` to attach. It replaced the old inline
+substring filter that used to live directly in the session list — like
+`action_panel`, it's bound at the outer tmux (`jin-mgr`) root key table, so
+`/` opens the popup from either the session list (left) or an attached
+agent (right) pane, not just from the list itself.
+
+- **Engine**: [sahilm/fuzzy](https://github.com/sahilm/fuzzy) subsequence
+  matching with smart-case and score-based ranking (`SessionFilterModel` in
+  `internal/tui/session_filter_model.go`). An empty query shows every
+  session in the daemon-provided order instead of ranking.
+- **Matched fields**: `Description`, `WorkDir`, `CurrentWorkDir`,
+  `CurrentBranch`, `Fleet`, and `AgentKind` — six fields per session, joined
+  into one haystack per row. Matched characters are underlined in the row.
+- **Selection**: `Enter` sets the picked session as the parent TUI's focus
+  and attaches immediately (the right pane switches to that session on the
+  next poll, ~250ms). `Esc` (or `Ctrl+C`) closes the popup without changing
+  parent TUI state.
+- **Navigation**: `↑`/`↓` or `Ctrl+P`/`Ctrl+N` move the cursor.
+
+Override or disable the trigger the same way as `toggle_pane`:
+
+```yaml
+keybindings:
+  search: ["ctrl+p"]  # rebind to Ctrl+p
+  # search: []          # disable entirely (no bind-key issued)
 ```

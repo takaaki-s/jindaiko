@@ -30,6 +30,41 @@ User
                                                    claude / claude --resume
 ```
 
+## Session Filter Popup
+
+Fuzzy session picker, launched as a tmux popup — same shape as the action
+palette (`jin action-popup`, see `cmd/jin/cmd/tui.go`'s
+`applyActionPanelBinding`/`applySessionFilterBinding` pair): a hidden CLI
+subcommand runs a standalone bubbletea program, and hands its result back to
+the parent TUI through an outer-tmux environment variable rather than direct
+IPC.
+
+```
+[outer tmux, user presses "/"]
+  → display-popup -E 'jin session-filter-popup'
+    → [popup process] jin session-filter-popup
+        ├─ daemon.Client.List() → []session.Info
+        ├─ bubbletea + sahilm/fuzzy (SessionFilterModel)
+        └─ on Enter: tmux env JIN_FOCUS_SESSION = selected session ID
+    → [parent TUI, next envTick (~250ms)]
+        consume("JIN_FOCUS_SESSION") → m.focusSessionID
+    → [parent TUI, next sessionsMsg]
+        switchToSession(id) → RespawnPane (immediate attach)
+```
+
+`Esc`/`Ctrl+C` dismisses the popup without writing `JIN_FOCUS_SESSION`, so a
+cancelled pick leaves the parent TUI's cursor and attached session
+untouched. Implementation: `internal/tui/session_filter_model.go`
+(`SessionFilterModel`, fuzzy ranking via
+[sahilm/fuzzy](https://github.com/sahilm/fuzzy)) +
+`cmd/jin/cmd/session_filter_popup.go` (CLI entry point). No new daemon IPC
+or persisted state — `daemon.Client.List()` is the same call the parent
+TUI's own polling already uses. `JIN_FOCUS_SESSION` shares the
+`focusSessionID → switchToSession` consume path already used by
+`JIN_CREATED_SESSION` / `JIN_NOTIFY_SESSION` (`internal/tui/model.go`); see
+[tui-guide.md](tui-guide.md#session-filter-popup) for keybindings and the
+matched-field list.
+
 ## Hook Flow (State Detection)
 
 ```

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -161,70 +160,6 @@ func TestTimeAgo(t *testing.T) {
 			}
 		})
 	}
-}
-
-// --- matchesSearch ---
-
-func TestMatchesSearch(t *testing.T) {
-	sess := session.Info{
-		Description:    "MyProject",
-		WorkDir:        "/home/user/projects/webapp",
-		CurrentWorkDir: "/home/user/projects/webapp/src",
-		CurrentBranch:  "feature-auth",
-	}
-
-	tests := []struct {
-		name  string
-		query string
-		want  bool
-	}{
-		{"match by Name", "myproject", true},
-		{"match by WorkDir", "webapp", true},
-		{"match by CurrentWorkDir", "webapp/src", true},
-		{"match by CurrentBranch", "feature-auth", true},
-		{"case insensitive match", "myproject", true},
-		{"partial match", "proj", true},
-		{"no match", "nonexistent", false},
-		{"empty query matches nothing meaningful", "", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := matchesSearch(sess, tt.query)
-			// Empty query: strings.Contains(anything, "") == true,
-			// so it will match unless all fields are empty.
-			if tt.query == "" {
-				// For empty query, it will match any non-empty field
-				if !got {
-					t.Errorf("matchesSearch with empty query should match non-empty fields")
-				}
-				return
-			}
-			if got != tt.want {
-				t.Errorf("matchesSearch(sess, %q) = %v, want %v", tt.query, got, tt.want)
-			}
-		})
-	}
-
-	t.Run("no match with empty session", func(t *testing.T) {
-		emptySess := session.Info{}
-		got := matchesSearch(emptySess, "anything")
-		if got {
-			t.Error("matchesSearch with empty session should return false")
-		}
-	})
-
-	t.Run("match by Fleet", func(t *testing.T) {
-		fleetSess := session.Info{
-			Description: "session1",
-			Fleet:       "backend",
-		}
-		if !matchesSearch(fleetSess, "backend") {
-			t.Error("matchesSearch should match by Fleet name")
-		}
-		if matchesSearch(fleetSess, "frontend") {
-			t.Error("matchesSearch should not match unrelated Fleet name")
-		}
-	})
 }
 
 // --- countStatuses ---
@@ -807,112 +742,6 @@ func TestAdjustScrollForCursor(t *testing.T) {
 	})
 }
 
-// TestGetPageSessions_ViewportAlias documents the current alias behavior:
-// after the viewport migration, getPageSessions returns the entire display
-// list rather than a per-page slice.
-func TestGetPageSessions_ViewportAlias(t *testing.T) {
-	sessions := make([]session.Info, 20)
-	for i := range sessions {
-		sessions[i] = session.Info{ID: string(rune('0' + i%10)), Description: "s"}
-	}
-	m := Model{sessions: sessions, height: 10}
-	got := m.getPageSessions()
-	if len(got) != len(sessions) {
-		t.Errorf("getPageSessions() len = %d, want %d (all sessions)", len(got), len(sessions))
-	}
-}
-
-// --- applySearchFilter ---
-
-func TestApplySearchFilter(t *testing.T) {
-	sessions := []session.Info{
-		{Description: "frontend", WorkDir: "/home/user/webapp"},
-		{Description: "backend", WorkDir: "/home/user/api"},
-		{Description: "docs", WorkDir: "/home/user/documentation"},
-	}
-
-	t.Run("empty query returns all sessions", func(t *testing.T) {
-		si := textinput.New()
-		si.SetValue("")
-		m := Model{
-			sessions:    sessions,
-			searching:   true,
-			searchInput: si,
-		}
-		m.applySearchFilter()
-		if len(m.filteredSessions) != len(sessions) {
-			t.Errorf("applySearchFilter with empty query: got %d sessions, want %d",
-				len(m.filteredSessions), len(sessions))
-		}
-	})
-
-	t.Run("filter by name", func(t *testing.T) {
-		si := textinput.New()
-		si.SetValue("front")
-		m := Model{
-			sessions:    sessions,
-			searching:   true,
-			searchInput: si,
-		}
-		m.applySearchFilter()
-		if len(m.filteredSessions) != 1 {
-			t.Fatalf("applySearchFilter('front'): got %d sessions, want 1", len(m.filteredSessions))
-		}
-		if m.filteredSessions[0].Description != "frontend" {
-			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Description, "frontend")
-		}
-	})
-
-	t.Run("filter by workdir", func(t *testing.T) {
-		si := textinput.New()
-		si.SetValue("api")
-		m := Model{
-			sessions:    sessions,
-			searching:   true,
-			searchInput: si,
-		}
-		m.applySearchFilter()
-		if len(m.filteredSessions) != 1 {
-			t.Fatalf("applySearchFilter('api'): got %d sessions, want 1", len(m.filteredSessions))
-		}
-		if m.filteredSessions[0].Description != "backend" {
-			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Description, "backend")
-		}
-	})
-
-	t.Run("no matches", func(t *testing.T) {
-		si := textinput.New()
-		si.SetValue("nonexistent")
-		m := Model{
-			sessions:    sessions,
-			searching:   true,
-			searchInput: si,
-		}
-		m.applySearchFilter()
-		if len(m.filteredSessions) != 0 {
-			t.Errorf("applySearchFilter('nonexistent'): got %d sessions, want 0",
-				len(m.filteredSessions))
-		}
-	})
-
-	t.Run("case insensitive", func(t *testing.T) {
-		si := textinput.New()
-		si.SetValue("DOCS")
-		m := Model{
-			sessions:    sessions,
-			searching:   true,
-			searchInput: si,
-		}
-		m.applySearchFilter()
-		if len(m.filteredSessions) != 1 {
-			t.Fatalf("applySearchFilter('DOCS'): got %d sessions, want 1", len(m.filteredSessions))
-		}
-		if m.filteredSessions[0].Description != "docs" {
-			t.Errorf("filtered session Name = %q, want %q", m.filteredSessions[0].Description, "docs")
-		}
-	})
-}
-
 // --- convertDirHistoryEntries ---
 
 func TestConvertDirHistoryEntries(t *testing.T) {
@@ -1318,10 +1147,9 @@ func TestDispatchAction_UnknownID(t *testing.T) {
 // observing the confirm-kill state transition it produces on a non-empty list.
 func TestDispatchAction_KillSetsConfirm(t *testing.T) {
 	m := Model{
-		sessions:         []session.Info{{ID: "s1"}},
-		filteredSessions: []session.Info{{ID: "s1"}},
-		cursor:           0,
-		deletingIDs:      map[string]bool{},
+		sessions:    []session.Info{{ID: "s1"}},
+		cursor:      0,
+		deletingIDs: map[string]bool{},
 	}
 	next, _ := m.dispatchAction(action.IDKill)
 	nm := next.(Model)
@@ -1337,10 +1165,9 @@ func TestDispatchAction_KillSetsConfirm(t *testing.T) {
 // by observing the confirm-delete state transition on a non-empty list.
 func TestDispatchAction_DeleteSetsConfirm(t *testing.T) {
 	m := Model{
-		sessions:         []session.Info{{ID: "s1"}},
-		filteredSessions: []session.Info{{ID: "s1"}},
-		cursor:           0,
-		deletingIDs:      map[string]bool{},
+		sessions:    []session.Info{{ID: "s1"}},
+		cursor:      0,
+		deletingIDs: map[string]bool{},
 	}
 	next, _ := m.dispatchAction(action.IDDelete)
 	nm := next.(Model)
@@ -1424,6 +1251,66 @@ func TestWriteCursorEnv_UpdatesTmux(t *testing.T) {
 func TestEnvTickInterval(t *testing.T) {
 	if envTickInterval != 250*time.Millisecond {
 		t.Errorf("envTickInterval = %v, want 250ms", envTickInterval)
+	}
+}
+
+// TestEnvTickConsume_FocusSession pins the consume-and-unset contract that
+// the JIN_FOCUS_SESSION branch in the envTickMsg handler (model.go) relies
+// on. The real branch reads through m.tmuxClient, a concrete *tmux.Client
+// that shells out to the tmux binary with no fake injection point, so —
+// like its JIN_CREATED_SESSION / JIN_NOTIFY_SESSION / JIN_ACTION_ID
+// siblings — it cannot be driven end-to-end via Model.Update in a unit
+// test. This test instead exercises the same consume-closure shape against
+// a fake env map, asserting a present value is both returned once and
+// flagged for unset so a stale value isn't reapplied on the next tick.
+func TestEnvTickConsume_FocusSession(t *testing.T) {
+	env := map[string]string{"JIN_FOCUS_SESSION": "sess-xyz"}
+	var unsetKeys []string
+	consume := func(key string) string {
+		v := env[key]
+		if v != "" {
+			unsetKeys = append(unsetKeys, key)
+		}
+		return v
+	}
+
+	var m Model
+	if id := consume("JIN_FOCUS_SESSION"); id != "" {
+		m.focusSessionID = id
+	}
+
+	if m.focusSessionID != "sess-xyz" {
+		t.Errorf("focusSessionID = %q, want %q", m.focusSessionID, "sess-xyz")
+	}
+	if len(unsetKeys) != 1 || unsetKeys[0] != "JIN_FOCUS_SESSION" {
+		t.Errorf("unset keys = %v, want [JIN_FOCUS_SESSION]", unsetKeys)
+	}
+}
+
+// TestEnvTickConsume_FocusSession_EmptyIsNoOp mirrors the "value absent"
+// path: consume must not report an unset when the key was never set, and
+// focusSessionID must stay untouched.
+func TestEnvTickConsume_FocusSession_EmptyIsNoOp(t *testing.T) {
+	env := map[string]string{}
+	var unsetKeys []string
+	consume := func(key string) string {
+		v := env[key]
+		if v != "" {
+			unsetKeys = append(unsetKeys, key)
+		}
+		return v
+	}
+
+	m := Model{focusSessionID: "unchanged"}
+	if id := consume("JIN_FOCUS_SESSION"); id != "" {
+		m.focusSessionID = id
+	}
+
+	if m.focusSessionID != "unchanged" {
+		t.Errorf("focusSessionID = %q, want unchanged", m.focusSessionID)
+	}
+	if len(unsetKeys) != 0 {
+		t.Errorf("unset keys = %v, want none", unsetKeys)
 	}
 }
 

@@ -90,6 +90,29 @@ func applyActionPanelBinding(tc actionPanelBinder, configMgr *config.Manager, se
 	}
 }
 
+// applySessionFilterBinding wires the outer tmux root bindings that launch
+// the session filter popup. Idempotent: re-issuing bind-key overwrites the
+// prior mapping. No-op when configMgr is nil, selfBin is empty, or the
+// user set Search to an explicit empty slice.
+func applySessionFilterBinding(tc actionPanelBinder, configMgr *config.Manager, selfBin string) {
+	if configMgr == nil || selfBin == "" {
+		return
+	}
+	popupCmd := fmt.Sprintf("'%s' session-filter-popup", selfBin)
+	for _, key := range configMgr.GetSessionFilterKeys() {
+		if key == "" {
+			continue
+		}
+		_ = tc.BindKey(key,
+			"display-popup",
+			"-w", "70%",
+			"-h", "70%",
+			"-T", " Session Filter ",
+			"-E", popupCmd,
+		)
+	}
+}
+
 var tuiCmd = &cobra.Command{
 	Use:     "ui",
 	Aliases: []string{"tui"},
@@ -256,6 +279,7 @@ func createAndAttachTmux(tc *tmux.Client, tuiInnerCmd, agentFlag string) error {
 	applyTogglePaneBinding(tc, configMgr, displayPaneID)
 	selfBin, _ := os.Executable()
 	applyActionPanelBinding(tc, configMgr, selfBin)
+	applySessionFilterBinding(tc, configMgr, selfBin)
 	// Propagate SSH_AUTH_SOCK to tmux session so popups can access it
 	if sshAuthSock := os.Getenv("SSH_AUTH_SOCK"); sshAuthSock != "" {
 		_ = tc.SetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK", sshAuthSock)
@@ -316,6 +340,7 @@ func reattachTmux(tc *tmux.Client, tuiInnerCmd, agentFlag string) error {
 	applyTogglePaneBinding(tc, configMgr, displayPaneID)
 	selfBin, _ := os.Executable()
 	applyActionPanelBinding(tc, configMgr, selfBin)
+	applySessionFilterBinding(tc, configMgr, selfBin)
 
 	return attachToSession(tc)
 }
