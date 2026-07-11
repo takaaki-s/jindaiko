@@ -241,6 +241,109 @@ func TestPaletteModel_ShortcutColWidth(t *testing.T) {
 	})
 }
 
+// TestPalette_FuzzySubsequenceMatch regresses the fuzzy vs substring
+// distinction: "hlp" is not a substring of "shortcuts help" but IS a
+// subsequence, so the fuzzy engine must include it. This is the whole
+// point of the R2 substring→fuzzy migration.
+func TestPalette_FuzzySubsequenceMatch(t *testing.T) {
+	core := []action.Action{
+		{ID: action.IDHelp, Kind: action.KindCore, Label: "shortcuts help", Shortcut: "?"},
+		{ID: action.IDNew, Kind: action.KindCore, Label: "new session", Shortcut: "n"},
+	}
+	m := NewPaletteModel(core, nil, "", "")
+	m = typeInto(t, m, "hlp")
+
+	ids := actionIDs(m.filtered)
+	found := false
+	for _, id := range ids {
+		if id == action.IDHelp {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("query 'hlp' did not match 'shortcuts help' (subsequence); got %v", ids)
+	}
+}
+
+// TestPalette_FuzzyMatchedIndexesPopulated verifies that a fuzzy hit
+// carries MatchedIndexes into the paletteRow so View() can highlight
+// hit runes. Without this, the label column renders as plain text and
+// the "fuzzy palette" is visually indistinguishable from substring.
+func TestPalette_FuzzyMatchedIndexesPopulated(t *testing.T) {
+	m := NewPaletteModel(sampleCore(), nil, "", "")
+	m = typeInto(t, m, "kill")
+
+	if len(m.filtered) == 0 {
+		t.Fatalf("expected at least one row for 'kill', got 0")
+	}
+	top := m.filtered[0]
+	if top.matchedIndexes == nil {
+		t.Errorf("top row matchedIndexes = nil, want populated")
+	}
+}
+
+// TestPalette_DescriptionMatchFiltersToLabelHighlights guards the
+// "haystack includes description, highlights only span label runes"
+// invariant. Description contributes to matching (so palette can find
+// "Fuzzy-filter and switch to a session" via 'fuzzy') but description-
+// region hit indices must not leak into the label column highlights.
+func TestPalette_DescriptionMatchFiltersToLabelHighlights(t *testing.T) {
+	core := []action.Action{
+		{
+			ID:          "core:custom",
+			Kind:        action.KindCore,
+			Label:       "session filter",
+			Description: "fuzzy-search sessions",
+			Shortcut:    "M-f",
+		},
+	}
+	m := NewPaletteModel(core, nil, "", "")
+	m = typeInto(t, m, "fuzzy")
+
+	if len(m.filtered) == 0 {
+		t.Fatalf("expected description-region match to include the action")
+	}
+	labelLen := len([]rune(core[0].Label))
+	for _, idx := range m.filtered[0].matchedIndexes {
+		if idx >= labelLen {
+			t.Errorf("label-column highlight index %d falls outside label rune range [0,%d)", idx, labelLen)
+		}
+	}
+}
+
+// TestPalette_EmptyQuery_ShowsAllInOrder is a stricter version of the
+// existing _ShowsAll test: after R2 the ordering must survive the fuzzy
+// path (FuzzyFilter short-circuits empty queries).
+func TestPalette_EmptyQuery_ShowsAllInOrder(t *testing.T) {
+	m := NewPaletteModel(sampleCore(), samplePlugins(), "", "")
+	ids := actionIDs(m.filtered)
+	wantHead := []string{action.IDNew, action.IDKill, action.IDRefresh, "<sep>"}
+	if len(ids) < len(wantHead) {
+		t.Fatalf("filtered rows too short: %v", ids)
+	}
+	for i, want := range wantHead {
+		if ids[i] != want {
+			t.Errorf("row %d ID = %q, want %q (full=%v)", i, ids[i], want, ids)
+		}
+	}
+}
+
+// TestPalette_SeparatorNotFuzzyFiltered verifies the separator row is
+// inserted based on both groups having matches, not by matching against
+// its own (nonexistent) label — a bug in fuzzy layer could otherwise let
+// a query like "sep" produce a bare separator.
+func TestPalette_SeparatorNotFuzzyFiltered(t *testing.T) {
+	m := NewPaletteModel(sampleCore(), samplePlugins(), "", "")
+	m = typeInto(t, m, "session") // matches core "new session"/"kill session", no plugin match
+	ids := actionIDs(m.filtered)
+	for i, id := range ids {
+		if id == "<sep>" {
+			t.Errorf("separator emitted at row %d without both groups having matches: %v", i, ids)
+		}
+	}
+}
+
 func TestPaletteModel_EscQuits(t *testing.T) {
 	m := NewPaletteModel(sampleCore(), samplePlugins(), "", "")
 

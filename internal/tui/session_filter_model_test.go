@@ -168,7 +168,7 @@ func TestBuildTarget_IncludesAllFields(t *testing.T) {
 }
 
 // TestApplyFilter_PopulatesMatchedIndexes regresses the "MatchedIndexes must
-// reach the UI layer" contract (02_design §8.2): renderMatchedLine relies on
+// reach the UI layer" contract (02_design §8.2): RenderMatchedLine relies on
 // filterRow.matchedIndexes to highlight fuzzy hits, so applyFilter must copy
 // sahilm/fuzzy's Match.MatchedIndexes into every row.
 func TestApplyFilter_PopulatesMatchedIndexes(t *testing.T) {
@@ -195,7 +195,7 @@ func TestApplyFilter_PopulatesMatchedIndexes(t *testing.T) {
 
 // TestApplyFilter_EmptyQuery_NoMatchedIndexes documents the empty-query
 // contract: with no query, all sessions pass through with matchedIndexes ==
-// nil so renderMatchedLine takes its fast (no-highlight) path.
+// nil so RenderMatchedLine takes its fast (no-highlight) path.
 func TestApplyFilter_EmptyQuery_NoMatchedIndexes(t *testing.T) {
 	m := NewSessionFilterModel(sampleSessions())
 	for i, row := range m.matches {
@@ -212,27 +212,27 @@ func TestApplyFilter_EmptyQuery_NoMatchedIndexes(t *testing.T) {
 // fuzzy highlights (target renders as plain text) with no test signal.
 func TestRenderMatchedLine_IncludesHighlightEscape(t *testing.T) {
 	style := lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("42"))
-	got := renderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, false)
+	got := RenderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, false)
 
 	if !strings.Contains(got, "\x1b[") {
-		t.Errorf("renderMatchedLine output has no ANSI escape (fuzzy highlight missing): %q", got)
+		t.Errorf("RenderMatchedLine output has no ANSI escape (fuzzy highlight missing): %q", got)
 	}
 }
 
 // TestRenderMatchedLine_SelectedSkipsHighlight regresses the "no fuzzy
 // underline on the selected row" invariant (want-4 rationale): the caller
 // wraps the selected row in cursorStyle, and the underline foreground would
-// clash with cursorStyle's background. renderMatchedLine must therefore
+// clash with cursorStyle's background. RenderMatchedLine must therefore
 // return plain text when selected=true.
 func TestRenderMatchedLine_SelectedSkipsHighlight(t *testing.T) {
 	style := lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("42"))
-	got := renderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, true)
+	got := RenderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, true)
 
 	if strings.Contains(got, "\x1b[") {
-		t.Errorf("renderMatchedLine(selected=true) produced ANSI escape: %q", got)
+		t.Errorf("RenderMatchedLine(selected=true) produced ANSI escape: %q", got)
 	}
 	if got != "feat/oauth" {
-		t.Errorf("renderMatchedLine(selected=true) = %q, want plain %q", got, "feat/oauth")
+		t.Errorf("RenderMatchedLine(selected=true) = %q, want plain %q", got, "feat/oauth")
 	}
 }
 

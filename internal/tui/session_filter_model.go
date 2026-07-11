@@ -7,7 +7,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-	"github.com/sahilm/fuzzy"
 	"github.com/takaaki-s/jind-ai/internal/session"
 )
 
@@ -126,27 +125,19 @@ func (m SessionFilterModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// applyFilter rebuilds m.matches from the current query. sahilm/fuzzy.Find
-// returns zero results for an empty pattern, so the empty-query case is
-// handled explicitly and preserves the caller-provided (daemon) order.
+// applyFilter rebuilds m.matches from the current query via FuzzyFilter,
+// which short-circuits empty queries to the caller-provided (daemon) order
+// and delegates non-empty queries to sahilm/fuzzy.
 func (m *SessionFilterModel) applyFilter() {
-	q := strings.TrimSpace(m.query)
 	m.matches = m.matches[:0]
-	if q == "" {
-		for i, sess := range m.sessions {
-			t := m.targets[i]
-			m.matches = append(m.matches, filterRow{sess: sess, target: t, targetRunes: []rune(t)})
-		}
-	} else {
-		for _, mt := range fuzzy.Find(q, m.targets) {
-			t := m.targets[mt.Index]
-			m.matches = append(m.matches, filterRow{
-				sess:           m.sessions[mt.Index],
-				target:         t,
-				targetRunes:    []rune(t),
-				matchedIndexes: mt.MatchedIndexes,
-			})
-		}
+	for _, mt := range FuzzyFilter(m.query, m.targets) {
+		t := m.targets[mt.Index]
+		m.matches = append(m.matches, filterRow{
+			sess:           m.sessions[mt.Index],
+			target:         t,
+			targetRunes:    []rune(t),
+			matchedIndexes: mt.MatchedIndexes,
+		})
 	}
 	if m.cursor < 0 || m.cursor >= len(m.matches) {
 		m.cursor = 0
@@ -244,7 +235,7 @@ func (m SessionFilterModel) View() string {
 			// skipped (underline foreground would clash with cursorStyle's
 			// background); the whole row is then wrapped in cursorStyle so
 			// the highlight covers uniformly (mirrors PaletteModel.View).
-			line := renderMatchedLine(row.targetRunes, row.matchedIndexes, rowWidth, matchStyle, i == m.cursor)
+			line := RenderMatchedLine(row.targetRunes, row.matchedIndexes, rowWidth, matchStyle, i == m.cursor)
 			if i == m.cursor {
 				pad := rowWidth - runewidth.StringWidth(line)
 				if pad < 0 {
@@ -265,79 +256,5 @@ func (m SessionFilterModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("Enter select  ↑↓ nav  Esc close"))
 
-	return b.String()
-}
-
-// renderMatchedLine renders target runes with matchedIndexes highlighted,
-// truncating with an ellipsis if the target exceeds maxWidth. Highlights
-// past the truncation boundary are dropped silently; we do not attempt to
-// scroll the target horizontally.
-//
-// matched is expected to be sorted ascending (sahilm/fuzzy guarantees this)
-// so we walk it with a two-pointer cursor instead of building a lookup map,
-// and coalesce runs of adjacent hits into a single style.Render call so a
-// contiguous match of N runes emits one SGR pair instead of N.
-func renderMatchedLine(target []rune, matched []int, maxWidth int, style lipgloss.Style, selected bool) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	// Truncate rune-wise. maxWidth here is a display width but the target
-	// haystack is mostly ASCII (agent id / branch / paths / description);
-	// for the popup a rune-count fallback is close enough and keeps the
-	// highlight index math simple. If East-Asian descriptions become
-	// common we can revisit.
-	visible := target
-	truncated := false
-	if len(visible) > maxWidth {
-		if maxWidth > 3 {
-			visible = visible[:maxWidth-3]
-			truncated = true
-		} else {
-			visible = visible[:maxWidth]
-		}
-	}
-
-	// Fast path: no highlights, or selected rows (which suppress the fuzzy
-	// underline to avoid clashing with the cursorStyle background).
-	if len(matched) == 0 || selected {
-		if truncated {
-			return string(visible) + "..."
-		}
-		return string(visible)
-	}
-
-	var b strings.Builder
-	j := 0 // cursor into matched
-	i := 0
-	for i < len(visible) {
-		// Advance j past any hits that fell outside visible.
-		for j < len(matched) && matched[j] < i {
-			j++
-		}
-		if j < len(matched) && matched[j] == i {
-			// Collect one contiguous run of hits.
-			runStart := i
-			for j < len(matched) && matched[j] == i && i < len(visible) {
-				i++
-				j++
-			}
-			b.WriteString(style.Render(string(visible[runStart:i])))
-			continue
-		}
-		// Collect one contiguous plain run up to the next hit (or end).
-		plainStart := i
-		next := len(visible)
-		if j < len(matched) && matched[j] < next {
-			next = matched[j]
-		}
-		if next > len(visible) {
-			next = len(visible)
-		}
-		i = next
-		b.WriteString(string(visible[plainStart:i]))
-	}
-	if truncated {
-		b.WriteString("...")
-	}
 	return b.String()
 }
