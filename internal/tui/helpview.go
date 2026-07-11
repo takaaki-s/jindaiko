@@ -11,15 +11,17 @@ import (
 // HelpModel is a standalone Bubble Tea model for displaying keyboard shortcuts.
 // Designed to run inside a tmux popup and exits on any key press.
 type HelpModel struct {
-	keys          KeyMap
-	detachKeyHint string
-	width         int
-	height        int
+	keys               KeyMap
+	detachKeyHint      string
+	actionPanelKeyHint string
+	width              int
+	height             int
 }
 
-// NewHelpModel creates a new HelpModel with the given KeyMap and detach key hint.
-func NewHelpModel(keys KeyMap, detachKeyHint string) HelpModel {
-	return HelpModel{keys: keys, detachKeyHint: detachKeyHint}
+// NewHelpModel creates a new HelpModel with the given KeyMap, detach key hint,
+// and action panel key hint.
+func NewHelpModel(keys KeyMap, detachKeyHint, actionPanelKeyHint string) HelpModel {
+	return HelpModel{keys: keys, detachKeyHint: detachKeyHint, actionPanelKeyHint: actionPanelKeyHint}
 }
 
 func (m HelpModel) Init() tea.Cmd {
@@ -73,6 +75,9 @@ func (m HelpModel) View() string {
 	writeBinding(&b, keyStyle, descStyle, k.Quit)
 	writeShortcut(&b, keyStyle, descStyle, m.detachKeyHint, "return to TUI pane")
 	writeBinding(&b, keyStyle, descStyle, k.Help)
+	if m.actionPanelKeyHint != "" {
+		writeShortcut(&b, keyStyle, descStyle, m.actionPanelKeyHint, "open action palette")
+	}
 	b.WriteString("\n")
 
 	b.WriteString(helpStyle.Render("Press any key to close"))

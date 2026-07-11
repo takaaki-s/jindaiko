@@ -332,3 +332,58 @@ func TestGetTogglePaneKeys_MultipleKeys(t *testing.T) {
 		t.Errorf("GetTogglePaneKeys() = %v, want %v", got, want)
 	}
 }
+
+// --- DefaultKeybindings ActionPanel ---
+
+func TestDefaultKeybindings_ActionPanel(t *testing.T) {
+	kb := DefaultKeybindings()
+	want := []string{"M-p"}
+	if !reflect.DeepEqual(kb.ActionPanel, want) {
+		t.Errorf("DefaultKeybindings().ActionPanel = %v, want %v", kb.ActionPanel, want)
+	}
+}
+
+// --- GetActionPanelKeys ---
+// The nil ↔ empty-slice distinction is load-bearing: nil means "user did not
+// set it, use default", explicit empty means "user disabled the feature".
+
+func TestGetActionPanelKeys_DefaultWhenNil(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	got := m.GetActionPanelKeys()
+	want := []string{"M-p"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetActionPanelKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestGetActionPanelKeys_UserSet(t *testing.T) {
+	m := &Manager{config: &Config{
+		Keybindings: KeybindingsConfig{ActionPanel: []string{"M-x"}},
+	}}
+	got := m.GetActionPanelKeys()
+	want := []string{"M-x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetActionPanelKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestGetActionPanelKeys_ExplicitEmptyDisables(t *testing.T) {
+	m := &Manager{config: &Config{
+		Keybindings: KeybindingsConfig{ActionPanel: []string{}},
+	}}
+	got := m.GetActionPanelKeys()
+	if len(got) != 0 {
+		t.Errorf("GetActionPanelKeys() = %v, want empty slice", got)
+	}
+}
+
+func TestGetActionPanelKeys_MultipleKeys(t *testing.T) {
+	m := &Manager{config: &Config{
+		Keybindings: KeybindingsConfig{ActionPanel: []string{"M-p", "M-x"}},
+	}}
+	got := m.GetActionPanelKeys()
+	want := []string{"M-p", "M-x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GetActionPanelKeys() = %v, want %v", got, want)
+	}
+}

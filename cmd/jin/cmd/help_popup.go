@@ -15,16 +15,20 @@ var helpPopupCmd = &cobra.Command{
 		configMgr, _ := config.NewManager(getConfigDir())
 		var keybindings config.KeybindingsConfig
 		var detachKeyHint string
+		var actionPanelHint string
 		if configMgr != nil {
 			keybindings = configMgr.GetKeybindings()
 			detachKeyHint = configMgr.GetDetachKeyHint()
+			if apk := configMgr.GetActionPanelKeys(); len(apk) > 0 {
+				actionPanelHint = apk[0]
+			}
 		} else {
 			keybindings = config.DefaultKeybindings()
 			detachKeyHint = "Ctrl+]"
 		}
 		keys := tui.NewKeyMap(keybindings)
 
-		model := tui.NewHelpModel(keys, detachKeyHint)
+		model := tui.NewHelpModel(keys, detachKeyHint, actionPanelHint)
 		p := tea.NewProgram(model, tea.WithAltScreen())
 		_, err := p.Run()
 		return err

@@ -101,3 +101,52 @@ func TestApplyTogglePaneBinding_EmptyKeyIsSkipped(t *testing.T) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
 	}
 }
+
+func TestApplyActionPanelBinding_DefaultKey(t *testing.T) {
+	fb := &fakeBinder{}
+	applyActionPanelBinding(fb, mgrWithYAML(t, ""), "/usr/local/bin/jin")
+	want := [][]string{
+		{"M-p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Action Palette ", "-E", "'/usr/local/bin/jin' action-popup"},
+	}
+	if !reflect.DeepEqual(fb.calls, want) {
+		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
+	}
+}
+
+func TestApplyActionPanelBinding_NoConfig(t *testing.T) {
+	fb := &fakeBinder{}
+	applyActionPanelBinding(fb, nil, "/usr/local/bin/jin")
+	if len(fb.calls) != 0 {
+		t.Errorf("expected 0 BindKey calls, got %d: %v", len(fb.calls), fb.calls)
+	}
+}
+
+func TestApplyActionPanelBinding_EmptySelfBin(t *testing.T) {
+	fb := &fakeBinder{}
+	applyActionPanelBinding(fb, mgrWithYAML(t, ""), "")
+	if len(fb.calls) != 0 {
+		t.Errorf("expected 0 BindKey calls, got %d: %v", len(fb.calls), fb.calls)
+	}
+}
+
+func TestApplyActionPanelBinding_ExplicitEmpty(t *testing.T) {
+	fb := &fakeBinder{}
+	yaml := "keybindings:\n  action_panel: []\n"
+	applyActionPanelBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
+	if len(fb.calls) != 0 {
+		t.Errorf("expected 0 BindKey calls when user set action_panel=[], got %d: %v", len(fb.calls), fb.calls)
+	}
+}
+
+func TestApplyActionPanelBinding_MultipleKeys(t *testing.T) {
+	fb := &fakeBinder{}
+	yaml := "keybindings:\n  action_panel: [\"M-p\", \"M-x\"]\n"
+	applyActionPanelBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
+	want := [][]string{
+		{"M-p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Action Palette ", "-E", "'/usr/local/bin/jin' action-popup"},
+		{"M-x", "display-popup", "-w", "70%", "-h", "70%", "-T", " Action Palette ", "-E", "'/usr/local/bin/jin' action-popup"},
+	}
+	if !reflect.DeepEqual(fb.calls, want) {
+		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
+	}
+}

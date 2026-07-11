@@ -60,6 +60,35 @@ func applyTogglePaneBinding(tc togglePaneBinder, configMgr *config.Manager, disp
 	}
 }
 
+// actionPanelBinder is the minimal tmux surface applyActionPanelBinding needs.
+// *tmux.Client satisfies it directly; tests inject a fake.
+type actionPanelBinder interface {
+	BindKey(key string, cmdArgs ...string) error
+}
+
+// applyActionPanelBinding wires the outer tmux root bindings that launch the
+// action palette popup. Idempotent: re-issuing bind-key overwrites the prior
+// mapping. No-op when configMgr is nil, selfBin is empty, or the user set
+// ActionPanel to an explicit empty slice.
+func applyActionPanelBinding(tc actionPanelBinder, configMgr *config.Manager, selfBin string) {
+	if configMgr == nil || selfBin == "" {
+		return
+	}
+	popupCmd := fmt.Sprintf("'%s' action-popup", selfBin)
+	for _, key := range configMgr.GetActionPanelKeys() {
+		if key == "" {
+			continue
+		}
+		_ = tc.BindKey(key,
+			"display-popup",
+			"-w", "70%",
+			"-h", "70%",
+			"-T", " Action Palette ",
+			"-E", popupCmd,
+		)
+	}
+}
+
 var tuiCmd = &cobra.Command{
 	Use:     "ui",
 	Aliases: []string{"tui"},
@@ -187,6 +216,8 @@ func createAndAttachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 		_ = tc.SetEnvironment(tmux.SessionName, "JIN_DISPLAY_PANE", displayPaneID)
 	}
 	applyTogglePaneBinding(tc, configMgr, displayPaneID)
+	selfBin, _ := os.Executable()
+	applyActionPanelBinding(tc, configMgr, selfBin)
 	// Propagate SSH_AUTH_SOCK to tmux session so popups can access it
 	if sshAuthSock := os.Getenv("SSH_AUTH_SOCK"); sshAuthSock != "" {
 		_ = tc.SetEnvironment(tmux.SessionName, "SSH_AUTH_SOCK", sshAuthSock)
@@ -244,6 +275,8 @@ func reattachTmux(tc *tmux.Client, tuiInnerCmd string) error {
 		_ = tc.RespawnPane(displayPaneID, tmux.PlaceholderCmd)
 	}
 	applyTogglePaneBinding(tc, configMgr, displayPaneID)
+	selfBin, _ := os.Executable()
+	applyActionPanelBinding(tc, configMgr, selfBin)
 
 	return attachToSession(tc)
 }

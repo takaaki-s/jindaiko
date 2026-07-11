@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/takaaki-s/jind-ai/internal/action"
 	"github.com/takaaki-s/jind-ai/internal/config"
 	"github.com/takaaki-s/jind-ai/internal/session"
 )
@@ -1247,4 +1249,170 @@ func TestRenderSession_Indicators(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- dispatchAction / currentCursorSessionID / writeCursorEnv ---
+//
+// Note: the tui package has no mock for *tmux.Client or *daemon.Client — both
+// are concrete structs with unexported fields, and expanding an interface just
+// for these tests would balloon this task well beyond R4. The tests below
+// cover the routing/guard logic reachable without live clients; the real
+// side-effect wiring (ZoomPane, SetEnvironment, PluginRun) is exercised by
+// the manual verification steps (see 03_todo.md V-006/V-008/V-009).
+
+// TestDispatchAction_CoreRouting_TogglePane verifies that IDTogglePane routes
+// to handleTogglePane and that the tmuxClient=nil guard keeps it a safe
+// no-op (the call the palette makes into an unwired Model).
+func TestDispatchAction_CoreRouting_TogglePane(t *testing.T) {
+	m := Model{deletingIDs: map[string]bool{}}
+	next, cmd := m.dispatchAction(action.IDTogglePane)
+	if cmd != nil {
+		t.Errorf("expected nil Cmd from toggle-pane on unwired model, got %T", cmd)
+	}
+	nm, ok := next.(Model)
+	if !ok {
+		t.Fatalf("expected Model, got %T", next)
+	}
+	if nm.err != nil {
+		t.Errorf("expected no err, got %v", nm.err)
+	}
+}
+
+// TestDispatchAction_PluginRouting verifies the plugin: prefix routes to
+// handlePluginRun and that the m.client=nil guard prevents any panic /
+// spurious m.err when the daemon is unavailable.
+func TestDispatchAction_PluginRouting(t *testing.T) {
+	m := Model{deletingIDs: map[string]bool{}}
+	next, cmd := m.dispatchAction(action.PluginIDPrefix + "notifier")
+	if cmd != nil {
+		t.Errorf("expected nil Cmd, got %T", cmd)
+	}
+	nm, ok := next.(Model)
+	if !ok {
+		t.Fatalf("expected Model, got %T", next)
+	}
+	if nm.err != nil {
+		t.Errorf("expected nil m.err on nil-client no-op, got %v", nm.err)
+	}
+}
+
+// TestDispatchAction_UnknownID guards the "silently ignore" contract — a
+// stale JIN_ACTION_ID env value must not wedge the TUI.
+func TestDispatchAction_UnknownID(t *testing.T) {
+	sentinel := errors.New("pre-existing error")
+	m := Model{deletingIDs: map[string]bool{}, err: sentinel}
+	next, cmd := m.dispatchAction("core:bogus")
+	if cmd != nil {
+		t.Errorf("expected nil Cmd for unknown id, got %T", cmd)
+	}
+	nm, ok := next.(Model)
+	if !ok {
+		t.Fatalf("expected Model, got %T", next)
+	}
+	if !errors.Is(nm.err, sentinel) {
+		t.Errorf("dispatchAction should not touch m.err on unknown id, got %v", nm.err)
+	}
+}
+
+// TestDispatchAction_KillSetsConfirm asserts IDKill routes to handleKill by
+// observing the confirm-kill state transition it produces on a non-empty list.
+func TestDispatchAction_KillSetsConfirm(t *testing.T) {
+	m := Model{
+		sessions:         []session.Info{{ID: "s1"}},
+		filteredSessions: []session.Info{{ID: "s1"}},
+		cursor:           0,
+		deletingIDs:      map[string]bool{},
+	}
+	next, _ := m.dispatchAction(action.IDKill)
+	nm := next.(Model)
+	if !nm.confirmKill {
+		t.Fatal("expected confirmKill to be true after IDKill dispatch")
+	}
+	if nm.killTargetID != "s1" {
+		t.Fatalf("killTargetID = %q, want %q", nm.killTargetID, "s1")
+	}
+}
+
+// TestDispatchAction_DeleteSetsConfirm asserts IDDelete routes to handleDelete
+// by observing the confirm-delete state transition on a non-empty list.
+func TestDispatchAction_DeleteSetsConfirm(t *testing.T) {
+	m := Model{
+		sessions:         []session.Info{{ID: "s1"}},
+		filteredSessions: []session.Info{{ID: "s1"}},
+		cursor:           0,
+		deletingIDs:      map[string]bool{},
+	}
+	next, _ := m.dispatchAction(action.IDDelete)
+	nm := next.(Model)
+	if !nm.confirmDelete {
+		t.Fatal("expected confirmDelete to be true after IDDelete dispatch")
+	}
+	if nm.deleteTargetID != "s1" {
+		t.Fatalf("deleteTargetID = %q, want %q", nm.deleteTargetID, "s1")
+	}
+}
+
+// TestDispatchAction_RefreshReturnsCmd asserts IDRefresh routes to handleRefresh
+// by observing the non-nil fetchSessions Cmd it returns.
+func TestDispatchAction_RefreshReturnsCmd(t *testing.T) {
+	m := Model{}
+	_, cmd := m.dispatchAction(action.IDRefresh)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd for IDRefresh (fetchSessions)")
+	}
+}
+
+func TestCurrentCursorSessionID_Cursor(t *testing.T) {
+	m := Model{
+		sessions: []session.Info{
+			{ID: "s1", Description: "one"},
+			{ID: "s2", Description: "two"},
+			{ID: "s3", Description: "three"},
+		},
+		cursor:      1,
+		deletingIDs: map[string]bool{},
+	}
+	if got := m.currentCursorSessionID(); got != "s2" {
+		t.Errorf("cursor=1 → %q, want %q", got, "s2")
+	}
+}
+
+func TestCurrentCursorSessionID_Deleting(t *testing.T) {
+	m := Model{
+		sessions: []session.Info{
+			{ID: "s1", Description: "one"},
+			{ID: "s2", Description: "two"},
+		},
+		cursor:      1,
+		deletingIDs: map[string]bool{"s2": true},
+	}
+	if got := m.currentCursorSessionID(); got != "" {
+		t.Errorf("cursor on deleting session → %q, want empty", got)
+	}
+}
+
+func TestCurrentCursorSessionID_EmptyList(t *testing.T) {
+	m := Model{
+		sessions:    nil,
+		cursor:      0,
+		deletingIDs: map[string]bool{},
+	}
+	if got := m.currentCursorSessionID(); got != "" {
+		t.Errorf("empty list → %q, want empty", got)
+	}
+}
+
+// TestWriteCursorEnv_UpdatesTmux is a degraded guard test: with tmuxClient=nil
+// (legacy mode / tests), writeCursorEnv must be a no-op. Real SetEnvironment
+// wiring is covered by manual verification (03_todo.md V-009).
+func TestWriteCursorEnv_UpdatesTmux(t *testing.T) {
+	m := Model{
+		sessions: []session.Info{
+			{ID: "s1", Description: "one"},
+		},
+		cursor:      0,
+		deletingIDs: map[string]bool{},
+	}
+	// Must not panic with a nil client.
+	m.writeCursorEnv()
 }

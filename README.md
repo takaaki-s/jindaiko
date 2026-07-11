@@ -294,6 +294,10 @@ keybindings:
   # While attached
   detach: ["ctrl+]"]  # Default: ctrl+]
                        # Supported keys: ctrl+^, ctrl+], ctrl+\, ctrl+g
+  # Outer tmux (jin-mgr) — action palette trigger, both panes
+  action_panel: ["M-p"]  # Default: M-p
+                          # action_panel: []           to disable
+                          # action_panel: ["M-x"]      to rebind
 ```
 
 ### Worktree placement
@@ -384,6 +388,26 @@ Supported detach keys:
 | `ctrl+^` | Ctrl+Shift+6 |
 | `ctrl+\` | Ctrl+Backslash |
 | `ctrl+g` | Ctrl+G |
+
+### Outer tmux — action palette
+
+`M-p` (Alt+p, default) opens the action palette, a searchable popup listing
+every built-in TUI action plus installed plugin actions. It's bound at the
+outer tmux (`jin-mgr`) root key table, so it fires the same way whether the
+session list (left) or an attached agent (right) has focus.
+
+Override or disable it in `config.yaml` (see `keybindings.action_panel`
+above):
+
+```yaml
+keybindings:
+  action_panel: ["M-x"]  # rebind to Alt+x
+  # action_panel: []       # disable entirely (no bind-key issued)
+```
+
+Keys must include a modifier (`M-`/`C-`) — a bare letter would be consumed as
+normal input by the agent in the right pane instead of reaching the outer
+tmux binding.
 
 ## Claude Code Hooks
 

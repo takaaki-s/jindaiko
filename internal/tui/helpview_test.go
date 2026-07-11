@@ -14,7 +14,7 @@ func TestNewHelpModel(t *testing.T) {
 	keys := NewKeyMap(cfg)
 	detachHint := "Ctrl+]"
 
-	m := NewHelpModel(keys, detachHint)
+	m := NewHelpModel(keys, detachHint, "M-p")
 
 	// Verify keybindings are set (spot-check a few)
 	if h := m.keys.Up.Help(); h.Key == "" || h.Desc == "" {
@@ -40,7 +40,7 @@ func TestNewHelpModel(t *testing.T) {
 func TestNewHelpModel_EmptyKeyMap(t *testing.T) {
 	// A zero-value KeyMap should still produce a valid model
 	keys := KeyMap{}
-	m := NewHelpModel(keys, "")
+	m := NewHelpModel(keys, "", "")
 
 	if m.detachKeyHint != "" {
 		t.Errorf("detachKeyHint: got %q, want empty", m.detachKeyHint)
@@ -50,7 +50,7 @@ func TestNewHelpModel_EmptyKeyMap(t *testing.T) {
 func TestHelpModel_View(t *testing.T) {
 	cfg := config.DefaultKeybindings()
 	keys := NewKeyMap(cfg)
-	m := NewHelpModel(keys, "Ctrl+]")
+	m := NewHelpModel(keys, "Ctrl+]", "M-p")
 
 	view := m.View()
 
@@ -90,7 +90,7 @@ func TestHelpModel_View(t *testing.T) {
 func TestHelpModel_View_KeyLabels(t *testing.T) {
 	cfg := config.DefaultKeybindings()
 	keys := NewKeyMap(cfg)
-	m := NewHelpModel(keys, "Ctrl+]")
+	m := NewHelpModel(keys, "Ctrl+]", "M-p")
 
 	view := m.View()
 
@@ -101,6 +101,21 @@ func TestHelpModel_View_KeyLabels(t *testing.T) {
 		if !strings.Contains(view, k) {
 			t.Errorf("View() missing key label %q", k)
 		}
+	}
+}
+
+func TestHelpModel_ActionPanelLine(t *testing.T) {
+	cfg := config.DefaultKeybindings()
+	keys := NewKeyMap(cfg)
+
+	withHint := NewHelpModel(keys, "Ctrl+]", "M-p")
+	if !strings.Contains(withHint.View(), "open action palette") {
+		t.Error("View() with actionPanelKeyHint set should contain \"open action palette\"")
+	}
+
+	withoutHint := NewHelpModel(keys, "Ctrl+]", "")
+	if strings.Contains(withoutHint.View(), "open action palette") {
+		t.Error("View() with empty actionPanelKeyHint should not contain \"open action palette\"")
 	}
 }
 

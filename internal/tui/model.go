@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/takaaki-s/jind-ai/internal/action"
 	"github.com/takaaki-s/jind-ai/internal/config"
 	"github.com/takaaki-s/jind-ai/internal/daemon"
 	"github.com/takaaki-s/jind-ai/internal/paths"
@@ -246,6 +247,10 @@ func NewModelWithTmux(client *daemon.Client, tc, innerTC *tmux.Client, tuiPaneID
 	m.displayPaneID = displayPaneID
 	// Restore which session was displayed (for reattach)
 	m.currentSessionID = tc.GetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION")
+	// Reset JIN_CURSOR_SESSION at startup — sessions have not been fetched
+	// yet, so publish an empty value so a stale env from a prior TUI run does
+	// not confuse a popup that opens before the first sessionsMsg arrives.
+	m.writeCursorEnv()
 	return m
 }
 
@@ -683,6 +688,187 @@ func (m Model) handleSelectSession() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// currentCursorSessionID returns the session ID under the cursor, or "" when
+// the list is empty, the cursor is out of range, or the target is in a
+// deleting state. Kept in sync with the palette / plugin dispatch so callers
+// never target a session that is transitioning away.
+func (m Model) currentCursorSessionID() string {
+	ps := m.getPageSessions()
+	if len(ps) == 0 || m.cursor < 0 || m.cursor >= len(ps) {
+		return ""
+	}
+	if m.deletingIDs[ps[m.cursor].ID] {
+		return ""
+	}
+	return ps[m.cursor].ID
+}
+
+// writeCursorEnv publishes the current cursor session ID to the outer tmux
+// server env (JIN_CURSOR_SESSION). The action-popup reads this to decorate
+// NeedsSession labels with the target's description. No-op without an outer
+// tmux client (legacy mode / tests).
+func (m Model) writeCursorEnv() {
+	if m.tmuxClient == nil {
+		return
+	}
+	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURSOR_SESSION", m.currentCursorSessionID())
+}
+
+// handleNew opens the session-creation popup in outer tmux. Matches the
+// former inline keys.New case verbatim.
+func (m Model) handleNew() (tea.Model, tea.Cmd) {
+	if m.tmuxClient != nil {
+		selfBin, _ := os.Executable()
+		_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+			Width:  "80%",
+			Height: "80%",
+			Cmd:    fmt.Sprintf("'%s' create-popup", selfBin),
+			Title:  " New Session ",
+		})
+	}
+	return m, nil
+}
+
+// handleKill enters kill-confirmation mode for the session under the cursor.
+// No-op when the list is empty or the target is already being deleted.
+func (m Model) handleKill() (tea.Model, tea.Cmd) {
+	pageSessions := m.getPageSessions()
+	if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
+		sess := pageSessions[m.cursor]
+		if m.deletingIDs[sess.ID] {
+			return m, nil
+		}
+		m.confirmKill = true
+		m.killTargetID = sess.ID
+		m.killTargetDesc = sess.Description
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleDelete enters delete-confirmation mode for the session under the
+// cursor. Worktree sessions get a follow-up sub-confirmation later in the
+// delete flow.
+func (m Model) handleDelete() (tea.Model, tea.Cmd) {
+	pageSessions := m.getPageSessions()
+	if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
+		sess := pageSessions[m.cursor]
+		if m.deletingIDs[sess.ID] {
+			return m, nil
+		}
+		m.confirmDelete = true
+		m.deleteTargetID = sess.ID
+		m.deleteTargetDesc = sess.Description
+		m.deleteTargetIsWorktree = sess.IsWorktree
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleRefresh triggers a session-list refetch.
+func (m Model) handleRefresh() (tea.Model, tea.Cmd) {
+	return m, m.fetchSessions
+}
+
+// handleVscode launches VS Code for the cursor session's working directory.
+func (m Model) handleVscode() (tea.Model, tea.Cmd) {
+	pageSessions := m.getPageSessions()
+	if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
+		sess := pageSessions[m.cursor]
+		if m.deletingIDs[sess.ID] {
+			return m, nil
+		}
+		go m.openVSCode(&sess)
+	}
+	return m, nil
+}
+
+// handleNotifications opens the notification-history popup.
+func (m Model) handleNotifications() (tea.Model, tea.Cmd) {
+	if m.tmuxClient != nil {
+		selfBin, _ := os.Executable()
+		_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+			Width:  "70%",
+			Height: "60%",
+			Cmd:    fmt.Sprintf("'%s' notify-popup", selfBin),
+			Title:  " Notifications ",
+		})
+	}
+	return m, nil
+}
+
+// handleHelp opens the shortcut help popup.
+func (m Model) handleHelp() (tea.Model, tea.Cmd) {
+	if m.tmuxClient != nil {
+		selfBin, _ := os.Executable()
+		_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+			Width:  "60%",
+			Height: "60%",
+			Cmd:    fmt.Sprintf("'%s' help-popup", selfBin),
+			Title:  " Shortcuts ",
+		})
+	}
+	return m, nil
+}
+
+// handleTogglePane zooms/unzooms the display pane (sidebar toggle). Mirrors
+// the outer-tmux root binding so palette invocation matches the direct key.
+func (m Model) handleTogglePane() (tea.Model, tea.Cmd) {
+	if m.tmuxClient == nil || m.displayPaneID == "" {
+		return m, nil
+	}
+	_ = m.tmuxClient.ZoomPane(m.displayPaneID)
+	return m, nil
+}
+
+// dispatchAction routes an action ID (from the action palette or any other
+// caller) to the same helper the direct-key path uses. Unknown IDs are
+// silently ignored so a stale env value cannot wedge the TUI.
+func (m Model) dispatchAction(id string) (tea.Model, tea.Cmd) {
+	switch id {
+	case action.IDNew:
+		return m.handleNew()
+	case action.IDKill:
+		return m.handleKill()
+	case action.IDDelete:
+		return m.handleDelete()
+	case action.IDRefresh:
+		return m.handleRefresh()
+	case action.IDVscode:
+		return m.handleVscode()
+	case action.IDNotifications:
+		return m.handleNotifications()
+	case action.IDHelp:
+		return m.handleHelp()
+	case action.IDTogglePane:
+		return m.handleTogglePane()
+	}
+	if strings.HasPrefix(id, action.PluginIDPrefix) {
+		return m.handlePluginRun(strings.TrimPrefix(id, action.PluginIDPrefix))
+	}
+	return m, nil
+}
+
+// handlePluginRun issues a plugin-run request to the daemon for the given
+// plugin name, targeting the current cursor session (empty ID => global
+// action). Failures surface on m.err.
+func (m Model) handlePluginRun(name string) (tea.Model, tea.Cmd) {
+	if m.client == nil {
+		return m, nil
+	}
+	req := daemon.PluginRunRequest{
+		Plugin:           name,
+		SessionID:        m.currentCursorSessionID(),
+		Depth:            0,
+		CallerTmuxSocket: tmux.SocketPathFromEnv(os.Getenv("TMUX")),
+		CallerTmuxPane:   m.tuiPaneID,
+	}
+	if err := m.client.PluginRun(req); err != nil {
+		m.err = fmt.Errorf("plugin %s: %w", name, err)
+	}
+	return m, nil
+}
+
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -882,6 +1068,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchInput.Reset()
 				m.filteredSessions = nil
 				m.cursor = 0
+				m.writeCursorEnv()
 				m.scrollOffset = 0
 				return m, nil
 
@@ -891,6 +1078,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.skipDeletingSessions(-1)
 				}
 				m.adjustScrollForCursor()
+				m.writeCursorEnv()
 				return m, nil
 
 			case "down":
@@ -900,6 +1088,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.skipDeletingSessions(1)
 				}
 				m.adjustScrollForCursor()
+				m.writeCursorEnv()
 				return m, nil
 
 			case "enter":
@@ -908,11 +1097,13 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "pgup", "left":
 				m.scrollOffset -= m.pageScrollLines()
 				m.clampScroll()
+				m.writeCursorEnv()
 				return m, nil
 
 			case "pgdown", "right":
 				m.scrollOffset += m.pageScrollLines()
 				m.clampScroll()
+				m.writeCursorEnv()
 				return m, nil
 			}
 
@@ -923,6 +1114,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.searchInput.Value() != oldQuery {
 				m.applySearchFilter()
 				m.cursor = 0
+				m.writeCursorEnv()
 				m.scrollOffset = 0
 			}
 			return m, cmd
@@ -939,6 +1131,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.skipDeletingSessions(-1)
 			}
 			m.adjustScrollForCursor()
+			m.writeCursorEnv()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Down):
@@ -948,6 +1141,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.skipDeletingSessions(1)
 			}
 			m.adjustScrollForCursor()
+			m.writeCursorEnv()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Enter):
@@ -959,80 +1153,42 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput.Focus()
 			m.filteredSessions = m.sessions
 			m.cursor = 0
+			m.writeCursorEnv()
 			m.scrollOffset = 0
 			return m, textinput.Blink
 
 		case key.Matches(msg, m.keys.New):
-			// Open session creation form in a tmux popup
-			if m.tmuxClient != nil {
-				selfBin, _ := os.Executable()
-				_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
-					Width:  "80%",
-					Height: "80%",
-					Cmd:    fmt.Sprintf("'%s' create-popup", selfBin),
-					Title:  " New Session ",
-				})
-			}
-			return m, nil
+			return m.handleNew()
 
 		case key.Matches(msg, m.keys.Kill):
-			pageSessions := m.getPageSessions()
-			if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
-				sess := pageSessions[m.cursor]
-				if m.deletingIDs[sess.ID] {
-					return m, nil // ignore deleting session
-				}
-				// Enter confirmation mode
-				m.confirmKill = true
-				m.killTargetID = sess.ID
-				m.killTargetDesc = sess.Description
-				return m, nil
-			}
+			return m.handleKill()
 
 		case key.Matches(msg, m.keys.Delete):
-			pageSessions := m.getPageSessions()
-			if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
-				sess := pageSessions[m.cursor]
-				if m.deletingIDs[sess.ID] {
-					return m, nil // ignore deleting session
-				}
-				// Enter confirmation mode
-				m.confirmDelete = true
-				m.deleteTargetID = sess.ID
-				m.deleteTargetDesc = sess.Description
-				m.deleteTargetIsWorktree = sess.IsWorktree
-				return m, nil
-			}
+			return m.handleDelete()
 
 		case key.Matches(msg, m.keys.Refresh):
-			return m, m.fetchSessions
+			return m.handleRefresh()
 
 		case key.Matches(msg, m.keys.Help):
-			if m.tmuxClient != nil {
-				selfBin, _ := os.Executable()
-				_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
-					Width:  "60%",
-					Height: "60%",
-					Cmd:    fmt.Sprintf("'%s' help-popup", selfBin),
-					Title:  " Shortcuts ",
-				})
-			}
-			return m, nil
+			return m.handleHelp()
 
 		case key.Matches(msg, m.keys.PrevPage):
 			m.scrollOffset -= m.pageScrollLines()
 			m.clampScroll()
+			m.writeCursorEnv()
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextPage):
 			m.scrollOffset += m.pageScrollLines()
 			m.clampScroll()
+			m.writeCursorEnv()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Home):
 			m.cursor = 0
 			m.skipDeletingSessions(1)
 			m.adjustScrollForCursor()
+			m.writeCursorEnv()
 			return m, nil
 
 		case key.Matches(msg, m.keys.End):
@@ -1042,30 +1198,14 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.skipDeletingSessions(-1)
 			}
 			m.adjustScrollForCursor()
+			m.writeCursorEnv()
 			return m, nil
 
 		case key.Matches(msg, m.keys.Vscode):
-			pageSessions := m.getPageSessions()
-			if len(pageSessions) > 0 && m.cursor < len(pageSessions) {
-				sess := pageSessions[m.cursor]
-				if m.deletingIDs[sess.ID] {
-					return m, nil
-				}
-				go m.openVSCode(&sess)
-			}
-			return m, nil
+			return m.handleVscode()
 
 		case key.Matches(msg, m.keys.Notifications):
-			if m.tmuxClient != nil {
-				selfBin, _ := os.Executable()
-				_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
-					Width:  "70%",
-					Height: "60%",
-					Cmd:    fmt.Sprintf("'%s' notify-popup", selfBin),
-					Title:  " Notifications ",
-				})
-			}
-			return m, nil
+			return m.handleNotifications()
 		}
 
 	case sessionsMsg:
@@ -1109,6 +1249,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.focusSessionID = ""
+			m.writeCursorEnv()
 			return m, nil
 		}
 		displaySessions := m.getDisplaySessions()
@@ -1136,6 +1277,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.respawnPlaceholder()
 			}
 			m.processingMsg = ""
+			m.writeCursorEnv()
 			return m, nil
 		}
 		// Reset right pane to placeholder when sessions become empty
@@ -1147,6 +1289,7 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.respawnPlaceholder()
 			}
 			m.processingMsg = ""
+			m.writeCursorEnv()
 			return m, nil
 		}
 		// Reset right pane when the currently displayed session disappears during polling
@@ -1181,6 +1324,9 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// since the last poll.
 		m.refreshDisplayedDescription()
 		m.processingMsg = ""
+		// Keep the outer-tmux env in sync so a popup opened right after the
+		// list refresh sees the current cursor target.
+		m.writeCursorEnv()
 		return m, nil
 
 	case resizeSettledMsg:
@@ -1227,6 +1373,20 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "JIN_NOTIFY_SESSION"); id != "" {
 				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_NOTIFY_SESSION")
 				m.focusSessionID = id
+			}
+			// Poll for an action ID pushed by the action-popup, then route
+			// through dispatchAction so palette and direct-key paths share
+			// the same helpers. If the helper returns a Cmd (e.g. Refresh),
+			// merge it into the tick's Batch so tea sees a single frame.
+			if id := m.tmuxClient.GetEnvironment(tmux.SessionName, "JIN_ACTION_ID"); id != "" {
+				_ = m.tmuxClient.UnsetEnvironment(tmux.SessionName, "JIN_ACTION_ID")
+				next, cmd := m.dispatchAction(id)
+				if nm, ok := next.(Model); ok {
+					m = nm
+				}
+				if cmd != nil {
+					return m, tea.Batch(m.fetchSessions, tickCmd(), cmd)
+				}
 			}
 		}
 		return m, tea.Batch(m.fetchSessions, tickCmd())

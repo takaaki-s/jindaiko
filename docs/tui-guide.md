@@ -88,6 +88,7 @@ After popup completion, results are returned to the parent TUI via environment v
 Keybindings are retrieved from `config.GetKeybindings()`.
 Default values are defined in `config.DefaultKeybindings()`.
 Users can customize them in the `keybindings` section of `~/.config/jind-ai/config.yaml` (or wherever `$XDG_CONFIG_HOME/jind-ai/config.yaml` resolves to).
+`action_panel` (default `M-p`) is another outer-tmux root binding, same shape as `toggle_pane` below — see [Action Palette](#action-palette).
 
 ### Outer tmux — sidebar toggle
 
@@ -112,3 +113,26 @@ tmux server restarts.
 Note: an omitted `toggle_pane` field uses the default, while an explicit empty
 list (`toggle_pane: []`) disables the feature — the nil/empty distinction is
 intentional.
+
+## Action Palette
+
+The action palette is a searchable popup that unifies every action a user
+might want to trigger from the TUI: the 8 built-in actions (new / kill /
+delete / refresh / vscode / notifications / help / toggle sidebar) plus any
+`plugin:*` action from installed plugins, all in one substring-searchable
+list. Like `toggle_pane`, it's bound at the outer tmux (`jin-mgr`) root key
+table, so it can be launched from either the session list (left) or an
+attached agent (right) pane.
+
+The default trigger is `M-p` (Alt+p). Once open, each row shows its Label
+alongside a Shortcut column — this doubles as a live reference for the
+direct keys documented above, so users don't need to keep checking this doc
+once they've learned a shortcut from the palette itself.
+
+Override or disable the trigger the same way as `toggle_pane`:
+
+```yaml
+keybindings:
+  action_panel: ["M-x"]  # rebind to Alt+x
+  # action_panel: []       # disable entirely (no bind-key issued)
+```

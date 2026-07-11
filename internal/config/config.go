@@ -56,6 +56,14 @@ type KeybindingsConfig struct {
 	// nil ⇒ use default from DefaultKeybindings. Explicit empty slice ⇒ disabled
 	// (no bind-key is issued).
 	TogglePane []string `mapstructure:"toggle_pane,omitempty"`
+
+	// Outer tmux (jin-mgr) — action panel trigger.
+	// Format: tmux bind-key notation (e.g., "M-p" for Alt+p). Must be
+	// modifier-prefixed so bare-letter input in the display pane still reaches
+	// the agent.
+	// nil ⇒ use default from DefaultKeybindings. Explicit empty slice ⇒ disabled
+	// (no bind-key is issued).
+	ActionPanel []string `mapstructure:"action_panel,omitempty"`
 }
 
 // WorktreeConfig represents settings for the git-worktree session option.
@@ -344,6 +352,9 @@ func DefaultKeybindings() KeybindingsConfig {
 
 		// Outer tmux — sidebar toggle
 		TogglePane: []string{"M-\\"},
+
+		// Outer tmux — action panel trigger
+		ActionPanel: []string{"M-p"},
 	}
 }
 
@@ -421,6 +432,9 @@ func (m *Manager) GetKeybindings() KeybindingsConfig {
 		} else {
 			cfg.Detach = valid
 		}
+	}
+	if len(cfg.ActionPanel) == 0 {
+		cfg.ActionPanel = defaults.ActionPanel
 	}
 
 	return cfg
@@ -563,4 +577,21 @@ func (m *Manager) GetTogglePaneKeys() []string {
 		return DefaultKeybindings().TogglePane
 	}
 	return m.config.Keybindings.TogglePane
+}
+
+// GetActionPanelKeys returns the tmux bind-key strings for the outer-tmux
+// action panel trigger. The nil ↔ empty-slice distinction is significant:
+//   - nil (field unset in config) ⇒ default from DefaultKeybindings
+//   - explicit empty slice ⇒ feature disabled by the user (no bind-key issued)
+//
+// The returned strings are passed straight to tmux bind-key, so they use tmux
+// notation (e.g. "M-p" for Alt+p).
+func (m *Manager) GetActionPanelKeys() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.config.Keybindings.ActionPanel == nil {
+		return DefaultKeybindings().ActionPanel
+	}
+	return m.config.Keybindings.ActionPanel
 }
