@@ -243,3 +243,51 @@ func TestLogPath(t *testing.T) {
 		t.Errorf("LogPath = %q, want %q", got, want)
 	}
 }
+
+func TestBuildEnv_ExportsPopupSize_WhenSet(t *testing.T) {
+	env := buildEnv(ExecOptions{
+		Env:         sampleEvent(),
+		APIVersion:  1,
+		SocketPath:  "/run/jin.sock",
+		PopupWidth:  "40%",
+		PopupHeight: "20%",
+	})
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "JIN_PLUGIN_POPUP_WIDTH=40%") {
+		t.Errorf("missing JIN_PLUGIN_POPUP_WIDTH; env:\n%s", joined)
+	}
+	if !strings.Contains(joined, "JIN_PLUGIN_POPUP_HEIGHT=20%") {
+		t.Errorf("missing JIN_PLUGIN_POPUP_HEIGHT; env:\n%s", joined)
+	}
+}
+
+func TestBuildEnv_OmitsPopupSize_WhenEmpty(t *testing.T) {
+	env := buildEnv(ExecOptions{
+		Env:        sampleEvent(),
+		APIVersion: 1,
+		SocketPath: "/run/jin.sock",
+	})
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "JIN_PLUGIN_POPUP_WIDTH") {
+		t.Errorf("unexpected JIN_PLUGIN_POPUP_WIDTH when unset; env:\n%s", joined)
+	}
+	if strings.Contains(joined, "JIN_PLUGIN_POPUP_HEIGHT") {
+		t.Errorf("unexpected JIN_PLUGIN_POPUP_HEIGHT when unset; env:\n%s", joined)
+	}
+}
+
+func TestBuildEnv_OmitsWidthOnlyWhenHeightUnset(t *testing.T) {
+	env := buildEnv(ExecOptions{
+		Env:        sampleEvent(),
+		APIVersion: 1,
+		SocketPath: "/run/jin.sock",
+		PopupWidth: "40%",
+	})
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "JIN_PLUGIN_POPUP_WIDTH=40%") {
+		t.Errorf("missing JIN_PLUGIN_POPUP_WIDTH; env:\n%s", joined)
+	}
+	if strings.Contains(joined, "JIN_PLUGIN_POPUP_HEIGHT") {
+		t.Errorf("unexpected JIN_PLUGIN_POPUP_HEIGHT when unset; env:\n%s", joined)
+	}
+}

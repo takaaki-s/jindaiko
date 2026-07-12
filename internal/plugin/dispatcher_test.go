@@ -36,7 +36,7 @@ func newTestDispatcher(t *testing.T, cfg config.PluginsConfig) (*EventDispatcher
 	pluginsDir := t.TempDir()
 	stateDir := t.TempDir()
 	reg := NewRegistry(pluginsDir, stateDir, cfg)
-	d := NewDispatcher(reg, pluginsDir, stateDir, "/tmp/test.sock", 500*time.Millisecond)
+	d := NewDispatcher(reg, pluginsDir, stateDir, "/tmp/test.sock", 500*time.Millisecond, nil)
 	return d, pluginsDir, stateDir
 }
 
@@ -269,5 +269,68 @@ func TestRunActionErrors(t *testing.T) {
 	}
 	if err := d.RunAction("old", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "jin plugin update") {
 		t.Errorf("incompatible plugin: %v, want update hint", err)
+	}
+}
+
+func TestNewDispatcher_NilResolver_UsesDefault(t *testing.T) {
+	pluginsDir := t.TempDir()
+	stateDir := t.TempDir()
+	reg := NewRegistry(pluginsDir, stateDir, config.PluginsConfig{})
+
+	d := NewDispatcher(reg, pluginsDir, stateDir, "/tmp/test.sock", 500*time.Millisecond, nil)
+
+	w, h := d.popupResolver("any-plugin", nil)
+	if w != "" || h != "" {
+		t.Errorf("default popupResolver returned %q/%q, want empty/empty", w, h)
+	}
+}
+
+func TestDispatcher_CallsPopupResolver_WithManifestPopup(t *testing.T) {
+	pluginsDir := t.TempDir()
+	stateDir := t.TempDir()
+
+	var gotName string
+	var gotPopup *PopupConfig
+	resolver := func(name string, popup *PopupConfig) (string, string) {
+		gotName = name
+		gotPopup = popup
+		return "42%", "24%"
+	}
+
+	reg := NewRegistry(pluginsDir, stateDir, config.PluginsConfig{})
+	d := NewDispatcher(reg, pluginsDir, stateDir, "/tmp/test.sock", 500*time.Millisecond, resolver)
+
+	envDump := filepath.Join(pluginsDir, "envcap", "env.txt")
+	manifest := fmt.Sprintf(`name: envcap
+api_version: 1
+on: ["status_changed:idle"]
+run: env | grep JIN_PLUGIN_POPUP > %s
+popup:
+  width: 40
+  height: 20
+`, envDump)
+	installTestPlugin(t, pluginsDir, stateDir, "envcap", manifest)
+
+	d.Publish(idleEvent())
+
+	if !waitForFile(t, envDump) {
+		t.Fatal("plugin did not run")
+	}
+	data, err := os.ReadFile(envDump)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotName != "envcap" {
+		t.Errorf("resolver got name=%q, want envcap", gotName)
+	}
+	if gotPopup == nil || gotPopup.Width != 40 || gotPopup.Height != 20 {
+		t.Errorf("resolver got popup=%+v, want {40, 20}", gotPopup)
+	}
+	env := string(data)
+	if !strings.Contains(env, "JIN_PLUGIN_POPUP_WIDTH=42%") {
+		t.Errorf("plugin env missing JIN_PLUGIN_POPUP_WIDTH=42%%; env:\n%s", env)
+	}
+	if !strings.Contains(env, "JIN_PLUGIN_POPUP_HEIGHT=24%") {
+		t.Errorf("plugin env missing JIN_PLUGIN_POPUP_HEIGHT=24%%; env:\n%s", env)
 	}
 }

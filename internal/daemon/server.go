@@ -104,7 +104,14 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir string) (*Server, er
 	pluginCfg := configMgr.GetPluginsConfig()
 	pluginReg := plugin.NewRegistry(paths.Plugins(), stateDir, pluginCfg)
 	pluginDisp := plugin.NewDispatcher(pluginReg, paths.Plugins(), stateDir, socketPath,
-		time.Duration(pluginCfg.Debounce)*time.Second)
+		time.Duration(pluginCfg.Debounce)*time.Second,
+		func(pluginName string, manifest *plugin.PopupConfig) (string, string) {
+			var cfgManifest *config.PopupSizeConfig
+			if manifest != nil {
+				cfgManifest = &config.PopupSizeConfig{Width: manifest.Width, Height: manifest.Height}
+			}
+			return configMgr.GetPluginPopupSize(pluginName, cfgManifest)
+		})
 	mgr.SetPluginDispatcher(pluginDisp)
 
 	return &Server{

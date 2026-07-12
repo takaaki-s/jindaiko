@@ -29,16 +29,24 @@ const DefaultDebounce = 3 * time.Second
 // information, making the sweep free of behaviour change.
 const debouncePruneThreshold = 128
 
+// PopupSizeResolver resolves the popup size a plugin should receive as
+// JIN_PLUGIN_POPUP_* env when it runs. Returning empty strings means "no
+// explicit size" and the caller of `jin pane popup --here` falls through to
+// tmux's built-in default. The resolver takes precedence in the order:
+// user config > manifest declaration > global plugin default > hardcoded.
+type PopupSizeResolver func(pluginName string, manifest *PopupConfig) (width, height string)
+
 // EventDispatcher fans events out to installed plugins. Publish never blocks:
 // registry reads and plugin processes run on background goroutines, and every
 // failure is logged rather than returned (fail-open — a broken plugin must not
 // stall the status pipeline).
 type EventDispatcher struct {
-	registry   *Registry
-	pluginsDir string
-	stateDir   string
-	socketPath string
-	debounce   time.Duration
+	registry      *Registry
+	pluginsDir    string
+	stateDir      string
+	socketPath    string
+	debounce      time.Duration
+	popupResolver PopupSizeResolver
 
 	mu        sync.Mutex
 	lastFired map[string]time.Time
@@ -47,19 +55,24 @@ type EventDispatcher struct {
 
 // NewDispatcher returns a dispatcher that resolves plugins through registry
 // and injects socketPath as JIN_SOCKET into every run. debounce <= 0 selects
-// DefaultDebounce.
-func NewDispatcher(registry *Registry, pluginsDir, stateDir, socketPath string, debounce time.Duration) *EventDispatcher {
+// DefaultDebounce. A nil popupResolver is replaced with one that always
+// returns empty strings (no popup size hints exported).
+func NewDispatcher(registry *Registry, pluginsDir, stateDir, socketPath string, debounce time.Duration, popupResolver PopupSizeResolver) *EventDispatcher {
 	if debounce <= 0 {
 		debounce = DefaultDebounce
 	}
+	if popupResolver == nil {
+		popupResolver = func(string, *PopupConfig) (string, string) { return "", "" }
+	}
 	return &EventDispatcher{
-		registry:   registry,
-		pluginsDir: pluginsDir,
-		stateDir:   stateDir,
-		socketPath: socketPath,
-		debounce:   debounce,
-		lastFired:  make(map[string]time.Time),
-		warned:     make(map[string]bool),
+		registry:      registry,
+		pluginsDir:    pluginsDir,
+		stateDir:      stateDir,
+		socketPath:    socketPath,
+		debounce:      debounce,
+		popupResolver: popupResolver,
+		lastFired:     make(map[string]time.Time),
+		warned:        make(map[string]bool),
 	}
 }
 
@@ -131,16 +144,20 @@ func (d *EventDispatcher) run(e Entry, ev Event, depth int, actx ActionContext) 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	popupWidth, popupHeight := d.popupResolver(e.Name, e.Manifest.Popup)
+
 	err := ExecPlugin(ctx, ExecOptions{
-		PluginDir:  filepath.Join(d.pluginsDir, e.Name),
-		Run:        e.Manifest.Run,
-		Env:        ev,
-		Caller:     actx,
-		APIVersion: e.Manifest.APIVersion,
-		Depth:      depth,
-		SocketPath: d.socketPath,
-		LogPath:    LogPath(d.stateDir, e.Name),
-		Timeout:    timeout,
+		PluginDir:   filepath.Join(d.pluginsDir, e.Name),
+		Run:         e.Manifest.Run,
+		Env:         ev,
+		Caller:      actx,
+		APIVersion:  e.Manifest.APIVersion,
+		Depth:       depth,
+		SocketPath:  d.socketPath,
+		LogPath:     LogPath(d.stateDir, e.Name),
+		Timeout:     timeout,
+		PopupWidth:  popupWidth,
+		PopupHeight: popupHeight,
 	})
 	if err != nil {
 		d.warnOnce(e.Name+"|"+err.Error(), "plugin %s failed: %v", e.Name, err)

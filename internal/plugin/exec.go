@@ -86,16 +86,23 @@ type ActionContext struct {
 // deadline is carried by the ctx passed to ExecPlugin, matching the worktreehook
 // convention where the caller owns cancellation and the option only shapes the
 // error message.
+//
+// PopupWidth / PopupHeight carry the pre-resolved popup size (already in tmux
+// notation, e.g. "70%") for the plugin's `jin pane popup --here` invocations.
+// Empty strings mean "no size hint" — buildEnv skips the corresponding env var
+// so the CLI falls through to its own fallback chain (flag > env > empty).
 type ExecOptions struct {
-	PluginDir  string
-	Run        string
-	Env        Event
-	Caller     ActionContext
-	APIVersion int
-	Depth      int
-	SocketPath string
-	LogPath    string
-	Timeout    time.Duration
+	PluginDir   string
+	Run         string
+	Env         Event
+	Caller      ActionContext
+	APIVersion  int
+	Depth       int
+	SocketPath  string
+	LogPath     string
+	Timeout     time.Duration
+	PopupWidth  string
+	PopupHeight string
 }
 
 // LogPath returns the append-only log location for a plugin's runs. The parent
@@ -221,6 +228,12 @@ func buildEnv(opts ExecOptions) []string {
 	// older install that lacks newer subcommands (daemon/CLI version skew).
 	if exe, err := os.Executable(); err == nil {
 		env = append(env, "JIN_BIN="+exe)
+	}
+	if opts.PopupWidth != "" {
+		env = append(env, "JIN_PLUGIN_POPUP_WIDTH="+opts.PopupWidth)
+	}
+	if opts.PopupHeight != "" {
+		env = append(env, "JIN_PLUGIN_POPUP_HEIGHT="+opts.PopupHeight)
 	}
 	return env
 }
