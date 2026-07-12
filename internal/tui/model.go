@@ -708,27 +708,38 @@ func (m Model) writeCursorEnv() {
 	_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURSOR_SESSION", m.currentCursorSessionID())
 }
 
-// openPopup runs one of the hidden `jin <subcmd>` UIs inside a tmux popup.
-// No-op when tmuxClient is unwired (tests, legacy mode); popup errors are
-// swallowed since there is no useful recovery from a failed popup spawn
-// mid-Bubble Tea update loop.
-func (m Model) openPopup(width, height, subcmd, title string) {
-	if m.tmuxClient == nil {
+// openPopup runs one of the hidden `jin <name>-popup` UIs inside a tmux
+// popup, sized via configMgr.GetPopupSize(name). No-op when tmuxClient or
+// configMgr is unwired (tests, legacy mode); popup errors are swallowed
+// since there is no useful recovery from a failed popup spawn mid-Bubble
+// Tea update loop.
+func (m Model) openPopup(name, title string) {
+	if m.tmuxClient == nil || m.configMgr == nil {
 		return
 	}
+	_ = m.tmuxClient.DisplayPopup(m.popupDisplayOptions(name, title))
+}
+
+// popupDisplayOptions resolves the tmux display-popup arguments for a
+// canonical popup name. Split out from openPopup so the size/subcmd
+// resolution is unit-testable without a live tmux client. Both the size
+// and the subcommand are looked up from config's popup catalog, so config
+// keys and cobra subcommand names cannot silently drift.
+func (m Model) popupDisplayOptions(name, title string) tmux.DisplayPopupOptions {
+	width, height := m.configMgr.GetPopupSize(name)
 	selfBin, _ := os.Executable()
-	_ = m.tmuxClient.DisplayPopup(tmux.DisplayPopupOptions{
+	return tmux.DisplayPopupOptions{
 		Width:  width,
 		Height: height,
-		Cmd:    fmt.Sprintf("'%s' %s", selfBin, subcmd),
+		Cmd:    fmt.Sprintf("'%s' %s", selfBin, config.PopupSubcmd(name)),
 		Title:  title,
-	})
+	}
 }
 
 // handleNew opens the session-creation popup in outer tmux. Matches the
 // former inline keys.New case verbatim.
 func (m Model) handleNew() (tea.Model, tea.Cmd) {
-	m.openPopup("80%", "80%", "create-popup", " New Session ")
+	m.openPopup(config.PopupCreate, " New Session ")
 	return m, nil
 }
 
@@ -788,7 +799,7 @@ func (m Model) handleVscode() (tea.Model, tea.Cmd) {
 
 // handleNotifications opens the notification-history popup.
 func (m Model) handleNotifications() (tea.Model, tea.Cmd) {
-	m.openPopup("70%", "60%", "notify-popup", " Notifications ")
+	m.openPopup(config.PopupNotify, " Notifications ")
 	return m, nil
 }
 
@@ -797,13 +808,13 @@ func (m Model) handleNotifications() (tea.Model, tea.Cmd) {
 // here so the action palette can launch it without depending on the
 // tmux root binding being set (or on the user's default key).
 func (m Model) handleSessionFilter() (tea.Model, tea.Cmd) {
-	m.openPopup("70%", "70%", "session-filter-popup", " Session Filter ")
+	m.openPopup(config.PopupSessionFilter, " Session Filter ")
 	return m, nil
 }
 
 // handleHelp opens the shortcut help popup.
 func (m Model) handleHelp() (tea.Model, tea.Cmd) {
-	m.openPopup("60%", "60%", "help-popup", " Shortcuts ")
+	m.openPopup(config.PopupHelp, " Shortcuts ")
 	return m, nil
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -1463,4 +1464,61 @@ func TestSessionTickCmd_NonNil(t *testing.T) {
 	if sessionTickCmd() == nil {
 		t.Fatal("sessionTickCmd returned nil")
 	}
+}
+
+// --- openPopup / popupDisplayOptions ---
+
+// TestOpenPopup_LooksUpSizeByName verifies that each core popup name
+// resolves its width/height via configMgr.GetPopupSize (matching
+// config.DefaultPopupSizes for a Manager with no user overrides) and that
+// the subcmd is built as "<name>-popup" with underscores hyphenated to
+// match the registered cobra subcommand (e.g. "session-filter-popup").
+func TestOpenPopup_LooksUpSizeByName(t *testing.T) {
+	configMgr, err := config.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("config.NewManager: %v", err)
+	}
+	m := Model{configMgr: configMgr, deletingIDs: map[string]bool{}}
+
+	defaults := config.DefaultPopupSizes()
+	tests := []struct {
+		name       string
+		wantSubcmd string
+	}{
+		{"create", "create-popup"},
+		{"notify", "notify-popup"},
+		{"session_filter", "session-filter-popup"},
+		{"help", "help-popup"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := m.popupDisplayOptions(tt.name, " Title ")
+
+			def := defaults[tt.name]
+			wantWidth := fmt.Sprintf("%d%%", def.Width)
+			wantHeight := fmt.Sprintf("%d%%", def.Height)
+			if opts.Width != wantWidth {
+				t.Errorf("Width = %q, want %q", opts.Width, wantWidth)
+			}
+			if opts.Height != wantHeight {
+				t.Errorf("Height = %q, want %q", opts.Height, wantHeight)
+			}
+			if !strings.HasSuffix(opts.Cmd, " "+tt.wantSubcmd) {
+				t.Errorf("Cmd = %q, want suffix %q", opts.Cmd, tt.wantSubcmd)
+			}
+			if opts.Title != " Title " {
+				t.Errorf("Title = %q, want %q", opts.Title, " Title ")
+			}
+		})
+	}
+}
+
+// TestOpenPopup_NoConfigMgr_NoOp verifies the configMgr=nil safeguard: an
+// unwired Model (tmuxClient and configMgr both nil — the legacy/test path)
+// must not panic when opening a popup, since popupDisplayOptions dereferences
+// configMgr.GetPopupSize.
+func TestOpenPopup_NoConfigMgr_NoOp(t *testing.T) {
+	m := Model{deletingIDs: map[string]bool{}}
+	m.openPopup("create", " New Session ")
 }
