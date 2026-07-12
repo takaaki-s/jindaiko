@@ -732,15 +732,6 @@ func TestManager_HandleHookEvent_StopFailure(t *testing.T) {
 	if got.ErrorMessage != "rate_limit" {
 		t.Errorf("ErrorMessage = %q, want %q", got.ErrorMessage, "rate_limit")
 	}
-
-	// Verify error notification was added to history
-	history := mgr.NotificationHistory()
-	if len(history) == 0 {
-		t.Fatal("expected at least 1 notification")
-	}
-	if history[0].Type != "error" {
-		t.Errorf("notification Type = %q, want %q", history[0].Type, "error")
-	}
 }
 
 func TestManager_HandleHookEvent_StopFailure_ThenStop_ClearsError(t *testing.T) {
@@ -1259,60 +1250,6 @@ func TestManager_SetStatus_NonExistent(t *testing.T) {
 	infos := mgr.List()
 	if len(infos) != 0 {
 		t.Errorf("List returned %d items, want 0", len(infos))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// NotificationHistory tests
-// ---------------------------------------------------------------------------
-
-func TestManager_NotificationHistory(t *testing.T) {
-	mgr, _, _ := newTestManager(t)
-
-	// Initially, notification history should be empty
-	history := mgr.NotificationHistory()
-	if len(history) != 0 {
-		t.Fatalf("initial NotificationHistory: got %d entries, want 0", len(history))
-	}
-
-	// Create sessions and trigger hook events that generate notifications
-	sess1, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/notify-1", Description: "n1"})
-	if err != nil {
-		t.Fatalf("create sess1 failed: %v", err)
-	}
-	sess2, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/notify-2", Description: "n2"})
-	if err != nil {
-		t.Fatalf("create sess2 failed: %v", err)
-	}
-
-	// Set sessions to thinking first (Stop hook transitions from thinking to idle)
-	mgr.SetStatus(sess1.ID, StatusThinking)
-	mgr.SetStatus(sess2.ID, StatusThinking)
-
-	// Trigger Stop event (generates task_complete notification)
-	mgr.HandleHookEvent(sess1.AgentSessionID, sess1.ID, "Stop", "", "", "")
-
-	// Trigger Notification/permission event (generates permission notification)
-	mgr.HandleHookEvent(sess2.AgentSessionID, sess2.ID, "Notification", "permission_prompt", "", "")
-
-	history = mgr.NotificationHistory()
-	if len(history) != 2 {
-		t.Fatalf("NotificationHistory: got %d entries, want 2", len(history))
-	}
-
-	// History is sorted newest first, so permission (sess2) should come first
-	if history[0].SessionID != sess2.ID {
-		t.Errorf("history[0].SessionID: got %q, want %q", history[0].SessionID, sess2.ID)
-	}
-	if history[0].Type != "permission" {
-		t.Errorf("history[0].Type: got %q, want %q", history[0].Type, "permission")
-	}
-
-	if history[1].SessionID != sess1.ID {
-		t.Errorf("history[1].SessionID: got %q, want %q", history[1].SessionID, sess1.ID)
-	}
-	if history[1].Type != "task_complete" {
-		t.Errorf("history[1].Type: got %q, want %q", history[1].Type, "task_complete")
 	}
 }
 

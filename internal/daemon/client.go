@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/takaaki-s/jind-ai/internal/config"
-	"github.com/takaaki-s/jind-ai/internal/notify"
 	"github.com/takaaki-s/jind-ai/internal/session"
 )
 
@@ -258,23 +257,6 @@ func (c *Client) SendHook(req HookRequest) error {
 		return errors.New(resp.Error)
 	}
 	return nil
-}
-
-// NotificationHistory retrieves the notification history
-func (c *Client) NotificationHistory() ([]notify.Entry, error) {
-	resp, err := c.send(Request{Action: "notification-history"})
-	if err != nil {
-		return nil, err
-	}
-	if !resp.Success {
-		return nil, errors.New(resp.Error)
-	}
-
-	var entries []notify.Entry
-	if err := json.Unmarshal(resp.Data, &entries); err != nil {
-		return nil, err
-	}
-	return entries, nil
 }
 
 // DirHistory retrieves directory usage history

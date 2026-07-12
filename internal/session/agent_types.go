@@ -104,21 +104,21 @@ type StatusUpdate struct {
 	Notify       NotifyKind
 }
 
-// NotifyKind is the abstract notification category an adapter can request
-// from a StatusUpdate. Manager maps each kind to a concrete notifier call.
+// NotifyKind is the abstract notification category an adapter attaches to
+// a StatusUpdate. Manager forwards it unchanged as plugin.Event.NotifyKind
+// (surfaced to plugin runtimes as JIN_NOTIFY_KIND / notify_kind JSON).
 type NotifyKind string
 
 const (
-	// NotifyNone is the zero value; Manager fires no notification.
+	// NotifyNone is the zero value; the transition carries no notification.
 	NotifyNone NotifyKind = ""
-	// NotifyTaskComplete corresponds to notifier.NotifyTaskComplete
-	// (assistant finished a turn).
+	// NotifyTaskComplete signals that the assistant finished a turn.
 	NotifyTaskComplete NotifyKind = "task-complete"
-	// NotifyError corresponds to notifier.NotifyError (assistant reported
-	// a failure). ErrorMessage on StatusUpdate is passed through.
+	// NotifyError signals that the assistant reported a failure.
+	// ErrorMessage on StatusUpdate is passed through.
 	NotifyError NotifyKind = "error"
-	// NotifyPermission corresponds to notifier.NotifyPermission (the
-	// agent is blocked waiting for user approval).
+	// NotifyPermission signals that the agent is blocked waiting for
+	// user approval.
 	NotifyPermission NotifyKind = "permission"
 )
 

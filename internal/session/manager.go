@@ -15,7 +15,6 @@ import (
 	"github.com/takaaki-s/jind-ai/internal/config"
 	"github.com/takaaki-s/jind-ai/internal/debug"
 	"github.com/takaaki-s/jind-ai/internal/git"
-	"github.com/takaaki-s/jind-ai/internal/notify"
 	"github.com/takaaki-s/jind-ai/internal/plugin"
 	"github.com/takaaki-s/jind-ai/internal/tmux"
 	"github.com/takaaki-s/jind-ai/internal/transcript"
@@ -40,7 +39,6 @@ var ErrNotWorktree = errors.New("path is not a git worktree")
 type Manager struct {
 	sessions       map[string]*Session
 	store          *Store
-	notifier       *notify.Notifier
 	configMgr      *config.Manager
 	tmuxClient     tmux.Runner // tmux client for session management
 	hookRunner     worktreehook.Runner
@@ -215,7 +213,6 @@ func NewManager(sessionsDir, stateDir string, configMgr *config.Manager) (*Manag
 	m := &Manager{
 		sessions:  make(map[string]*Session),
 		store:     store,
-		notifier:  notify.NewNotifier(),
 		configMgr: configMgr,
 		gitClient: git.NewClient(),
 		stateDir:  stateDir,
@@ -1410,7 +1407,7 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 		m.updateGitBranch(session, cwd, "")
 	}
 
-	// Persist status/CWD/session-started changes and send notifications
+	// Persist status/CWD/session-started changes
 	if oldStatus != newStatus || cwdChanged || sessionStarted {
 		_ = m.store.Save(session)
 		if oldStatus != newStatus {
@@ -1418,17 +1415,6 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 		}
 		if cwdChanged {
 			debugLog("[HOOK] Session %s: CWD updated to %s", sessionName, cwd)
-		}
-	}
-
-	if updOK {
-		switch upd.Notify {
-		case NotifyTaskComplete:
-			m.notifier.NotifyTaskComplete(sessionID, sessionName)
-		case NotifyError:
-			m.notifier.NotifyError(sessionID, sessionName, upd.ErrorMessage)
-		case NotifyPermission:
-			m.notifier.NotifyPermission(sessionID, sessionName)
 		}
 	}
 
@@ -1489,16 +1475,6 @@ func (m *Manager) HandleAgentSignal(jinSessionID, kind string, payload map[strin
 	default:
 		debugLog("[SIGNAL] Session %s: unsupported signal kind %q", jinSessionID, kind)
 	}
-}
-
-// NotificationHistory returns the notification history
-func (m *Manager) NotificationHistory() []notify.Entry {
-	return m.notifier.NotificationHistory()
-}
-
-// NotifyDesktop sends a local desktop notification (used for relaying remote events)
-func (m *Manager) NotifyDesktop(title, message string) {
-	m.notifier.SendDesktop(title, message)
 }
 
 // Kill terminates a session

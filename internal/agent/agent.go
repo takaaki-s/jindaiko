@@ -46,7 +46,8 @@ type StatusSource = session.StatusSource
 // DescriptionSource is the Layer C description enhancer surface.
 type DescriptionSource = session.DescriptionEnhancer
 
-// NotifyKind categorises the desktop notification an adapter requests.
+// NotifyKind categorises the notification signal an adapter attaches to a
+// StatusUpdate; downstream plugins receive it via JIN_NOTIFY_KIND.
 type NotifyKind = session.NotifyKind
 
 // Notification kind constants — re-exported for adapter convenience.

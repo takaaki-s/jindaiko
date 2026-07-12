@@ -190,49 +190,6 @@ func TestE2E_HookEventFlow(t *testing.T) {
 	}
 }
 
-func TestE2E_NotificationHistory(t *testing.T) {
-	client := setupE2E(t)
-
-	// Initially empty
-	entries, err := client.NotificationHistory()
-	if err != nil {
-		t.Fatalf("NotificationHistory: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries, got %d", len(entries))
-	}
-
-	// Create session and trigger a Stop hook (generates task_complete notification)
-	info, _, err := client.NewWithOptions(daemon.NewOptions{
-		Description: "notify-e2e",
-		WorkDir:     t.TempDir(),
-		Start:       false,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	// Make it thinking first, then stop
-	client.SendHook(daemon.HookRequest{
-		JinSessionID:  info.ID,
-		HookEventName: "UserPromptSubmit",
-	})
-	client.SendHook(daemon.HookRequest{
-		JinSessionID:  info.ID,
-		HookEventName: "Stop",
-	})
-
-	// Check notification history
-	entries, err = client.NotificationHistory()
-	if err != nil {
-		t.Fatalf("NotificationHistory: %v", err)
-	}
-	// At least one notification should have been recorded
-	if len(entries) == 0 {
-		t.Log("WARNING: notification history is empty (notifications may be debounced)")
-	}
-}
-
 func TestE2E_MultipleSessionsConcurrent(t *testing.T) {
 	client := setupE2E(t)
 

@@ -211,8 +211,6 @@ func (s *Server) handleRequest(req *Request) Response {
 		return s.handleStop()
 	case "hook":
 		return s.handleHook(req.Data)
-	case "notification-history":
-		return s.handleNotificationHistory()
 	case "dir-history":
 		return s.handleDirHistory(req.Data)
 	case "remove-dir-history":
@@ -280,12 +278,6 @@ func (s *Server) handleHook(data json.RawMessage) Response {
 	}
 	s.manager.HandleHookEvent(req.SessionID, req.JinSessionID, req.HookEventName, req.NotificationType, req.CWD, req.StopReason)
 	return Response{Success: true}
-}
-
-func (s *Server) handleNotificationHistory() Response {
-	entries := s.manager.NotificationHistory()
-	data, _ := json.Marshal(entries)
-	return Response{Success: true, Data: data}
 }
 
 type NewRequest struct {
