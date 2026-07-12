@@ -83,11 +83,33 @@ type PluginsConfig struct {
 	Debounce     int      `mapstructure:"debounce"`      // seconds, 0 = default(3)
 }
 
+// PopupSizeConfig represents a single popup's percent-based dimensions.
+// A field value of 0 (or the whole struct being nil) means "unset — fall
+// through to the next tier". Valid range is 1-100 inclusive.
+type PopupSizeConfig struct {
+	Width  int `mapstructure:"width,omitempty"`
+	Height int `mapstructure:"height,omitempty"`
+}
+
+// PopupsConfig groups per-popup size overrides. All fields are pointers so
+// "unset" (nil) is distinguishable from "explicit zero" — both fall through
+// to the hardcoded default, but only nil is silent.
+type PopupsConfig struct {
+	Create        *PopupSizeConfig            `mapstructure:"create,omitempty"`
+	Notify        *PopupSizeConfig            `mapstructure:"notify,omitempty"`
+	SessionFilter *PopupSizeConfig            `mapstructure:"session_filter,omitempty"`
+	Help          *PopupSizeConfig            `mapstructure:"help,omitempty"`
+	Action        *PopupSizeConfig            `mapstructure:"action,omitempty"`
+	PluginDefault *PopupSizeConfig            `mapstructure:"plugin_default,omitempty"`
+	Plugins       map[string]*PopupSizeConfig `mapstructure:"plugins,omitempty"`
+}
+
 // Config represents the application-wide configuration
 type Config struct {
 	Keybindings  KeybindingsConfig `mapstructure:"keybindings,omitempty"`   // Keybinding settings
 	Worktree     WorktreeConfig    `mapstructure:"worktree,omitempty"`      // Git worktree session settings
 	Plugins      PluginsConfig     `mapstructure:"plugins,omitempty"`       // Plugin dispatcher settings
+	Popups       PopupsConfig      `mapstructure:"popups,omitempty"`        // Popup size overrides (core + plugin)
 	Env          map[string]string `mapstructure:"-"`                       // Custom environment variables (loaded separately to preserve key case)
 	DefaultAgent string            `mapstructure:"default_agent,omitempty"` // Adapter used when `jin session new` omits --agent (empty ⇒ "claude")
 }
@@ -98,6 +120,7 @@ type Manager struct {
 	mu       sync.RWMutex
 	config   *Config
 	filePath string
+	warned   map[string]bool // warn-once keys for popup-size resolution; guarded by mu (Lock).
 }
 
 // NewManager creates a new configuration manager
@@ -161,6 +184,69 @@ func DefaultPluginsConfig() PluginsConfig {
 		BuildTimeout: 300,
 		Debounce:     3,
 	}
+}
+
+// Canonical popup names. These are the single source of truth for both the
+// config schema (YAML keys under popups.*), the resolver's default lookup,
+// and the hidden `jin *-popup` subcommand names the TUI launches. Using
+// these constants at every call site prevents silent drift between the
+// user config key, the default entry, and the subcommand jindaiko spawns.
+const (
+	PopupCreate        = "create"
+	PopupNotify        = "notify"
+	PopupSessionFilter = "session_filter"
+	PopupHelp          = "help"
+	PopupAction        = "action"
+	PopupPluginDefault = "plugin_default"
+)
+
+// popupSpec bundles the per-popup metadata that must stay in lock-step:
+// the hardcoded default size and the subcommand jindaiko spawns for it.
+// Keeping them adjacent kills the fragile "config-key → subcommand" name
+// derivation the TUI used to run at popup open time.
+type popupSpec struct {
+	DefaultSize PopupSizeConfig
+	Subcmd      string
+}
+
+// popupCatalog owns the canonical popup metadata. Adding a new popup means
+// touching this one map — the resolver, subcommand lookup, and default table
+// all read from here.
+var popupCatalog = map[string]popupSpec{
+	PopupCreate:        {DefaultSize: PopupSizeConfig{Width: 80, Height: 80}, Subcmd: "create-popup"},
+	PopupNotify:        {DefaultSize: PopupSizeConfig{Width: 70, Height: 60}, Subcmd: "notify-popup"},
+	PopupSessionFilter: {DefaultSize: PopupSizeConfig{Width: 70, Height: 70}, Subcmd: "session-filter-popup"},
+	PopupHelp:          {DefaultSize: PopupSizeConfig{Width: 60, Height: 60}, Subcmd: "help-popup"},
+	PopupAction:        {DefaultSize: PopupSizeConfig{Width: 70, Height: 70}, Subcmd: "action-popup"},
+	PopupPluginDefault: {DefaultSize: PopupSizeConfig{Width: 70, Height: 70}, Subcmd: ""},
+}
+
+// defaultUnknownPopup is the final fallback used by GetPopupSize when the
+// requested name isn't in popupCatalog — a safety net for programmer error
+// (all in-tree callers pass canonical names). Kept as a plain value so
+// there's no map lookup on this path.
+var defaultUnknownPopup = PopupSizeConfig{Width: 70, Height: 70}
+
+// DefaultPopupSizes returns a snapshot of the canonical default sizes,
+// keyed by popup name. The returned map is a fresh copy — callers may
+// mutate it freely without touching the shared catalog.
+func DefaultPopupSizes() map[string]PopupSizeConfig {
+	out := make(map[string]PopupSizeConfig, len(popupCatalog)+1)
+	for name, spec := range popupCatalog {
+		out[name] = spec.DefaultSize
+	}
+	out["default"] = defaultUnknownPopup
+	return out
+}
+
+// PopupSubcmd returns the hidden `jin` subcommand name that renders the
+// popup with the given canonical name. Empty for unknown names and for
+// PopupPluginDefault (which is a resolver tier, not a real popup).
+func PopupSubcmd(name string) string {
+	if spec, ok := popupCatalog[name]; ok {
+		return spec.Subcmd
+	}
+	return ""
 }
 
 // load reads the configuration file
@@ -608,4 +694,143 @@ func (m *Manager) GetSessionFilterKeys() []string {
 		return DefaultKeybindings().Search
 	}
 	return m.config.Keybindings.Search
+}
+
+// GetPopupSize returns tmux-formatted width/height strings (e.g. "70%") for a
+// canonical core popup name (create / notify / session_filter / help /
+// action). Unknown names fall back to the "default" entry in
+// DefaultPopupSizes. Out-of-range user values (<1 or >100) log a warn once
+// per key and fall back to the hardcoded default; a zero value falls back
+// silently.
+func (m *Manager) GetPopupSize(name string) (width, height string) {
+	m.mu.RLock()
+	var user *PopupSizeConfig
+	if m.config != nil {
+		user = coreUserPopup(&m.config.Popups, name)
+	}
+	m.mu.RUnlock()
+	return m.resolvePopupSize(user, name)
+}
+
+// GetPluginPopupSize resolves a plugin popup's size using the priority chain:
+//  1. user config popups.plugins[pluginName]
+//  2. manifest (caller converts plugin.PopupConfig → PopupSizeConfig to
+//     avoid an import cycle from internal/plugin into internal/config)
+//  3. user config popups.plugin_default
+//  4. hardcoded DefaultPopupSizes["plugin_default"]
+//
+// The returned strings are tmux-formatted percent values.
+func (m *Manager) GetPluginPopupSize(pluginName string, manifest *PopupSizeConfig) (width, height string) {
+	m.mu.RLock()
+	var perPlugin, pluginDefault *PopupSizeConfig
+	if m.config != nil {
+		if m.config.Popups.Plugins != nil {
+			perPlugin = m.config.Popups.Plugins[pluginName]
+		}
+		pluginDefault = m.config.Popups.PluginDefault
+	}
+	m.mu.RUnlock()
+	return m.resolvePluginPopupSize(perPlugin, manifest, pluginDefault, pluginName)
+}
+
+// coreUserPopup returns the user-configured popup size for a canonical core
+// popup name, or nil if the name is not one of the five core popups.
+func coreUserPopup(p *PopupsConfig, name string) *PopupSizeConfig {
+	switch name {
+	case "create":
+		return p.Create
+	case "notify":
+		return p.Notify
+	case "session_filter":
+		return p.SessionFilter
+	case "help":
+		return p.Help
+	case "action":
+		return p.Action
+	}
+	return nil
+}
+
+// popupTier bundles a size config with its warn-key prefix so out-of-range
+// values can be reported without duplicate log spam.
+type popupTier struct {
+	cfg *PopupSizeConfig
+	key string
+}
+
+// resolvePopupSize applies the single-tier lookup used by core popups.
+func (m *Manager) resolvePopupSize(user *PopupSizeConfig, name string) (width, height string) {
+	fallback := defaultUnknownPopup
+	if spec, ok := popupCatalog[name]; ok {
+		fallback = spec.DefaultSize
+	}
+	tiers := []popupTier{
+		{cfg: user, key: "popups." + name},
+	}
+	w := m.pickPopupDim(tiers, "width", fallback.Width)
+	h := m.pickPopupDim(tiers, "height", fallback.Height)
+	return formatPopupPercent(w, h)
+}
+
+// resolvePluginPopupSize applies the 4-tier lookup used by plugin popups.
+func (m *Manager) resolvePluginPopupSize(perPlugin, manifest, pluginDefault *PopupSizeConfig, pluginName string) (width, height string) {
+	fallback := popupCatalog[PopupPluginDefault].DefaultSize
+	tiers := []popupTier{
+		{cfg: perPlugin, key: "popups.plugins." + pluginName},
+		{cfg: manifest, key: "manifest:" + pluginName},
+		{cfg: pluginDefault, key: "popups.plugin_default"},
+	}
+	w := m.pickPopupDim(tiers, "width", fallback.Width)
+	h := m.pickPopupDim(tiers, "height", fallback.Height)
+	return formatPopupPercent(w, h)
+}
+
+// formatPopupPercent shapes two integer percents into the tmux width/height
+// notation ("70%") both resolvers hand back to callers.
+func formatPopupPercent(w, h int) (width, height string) {
+	return fmt.Sprintf("%d%%", w), fmt.Sprintf("%d%%", h)
+}
+
+// pickPopupDim walks tiers in priority order, returning the first valid
+// dimension in [1, 100]. Zero silently falls through; out-of-range emits a
+// warn once per (tier-key, dim) pair and falls through. Returns fallback
+// when no tier yields a valid value.
+func (m *Manager) pickPopupDim(tiers []popupTier, dim string, fallback int) int {
+	for _, t := range tiers {
+		if t.cfg == nil {
+			continue
+		}
+		v := t.cfg.Width
+		if dim == "height" {
+			v = t.cfg.Height
+		}
+		if v == 0 {
+			continue
+		}
+		if v < 1 || v > 100 {
+			m.warnPopupOnce(
+				t.key+"."+dim,
+				"config: %s.%s = %d out of range (1-100); falling back",
+				t.key, dim, v,
+			)
+			continue
+		}
+		return v
+	}
+	return fallback
+}
+
+// warnPopupOnce logs a warning at most once per key over the Manager's
+// lifetime. Uses mu (write lock) to guard warned; safe to call concurrently.
+func (m *Manager) warnPopupOnce(key, format string, args ...any) {
+	m.mu.Lock()
+	if m.warned == nil {
+		m.warned = make(map[string]bool)
+	}
+	seen := m.warned[key]
+	m.warned[key] = true
+	m.mu.Unlock()
+	if !seen {
+		log.Printf(format, args...)
+	}
 }

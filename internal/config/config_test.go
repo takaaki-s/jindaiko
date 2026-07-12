@@ -2,7 +2,11 @@ package config
 
 import (
 	"bytes"
+	"log"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -419,5 +423,281 @@ func TestGetSessionFilterKeys_ExplicitEmptyDisables(t *testing.T) {
 	got := m.GetSessionFilterKeys()
 	if len(got) != 0 {
 		t.Errorf("GetSessionFilterKeys() = %v, want empty slice", got)
+	}
+}
+
+// --- PopupsConfig YAML decode ---
+
+// writePopupYAML writes a config.yaml into a fresh temp dir and returns the
+// dir. Callers pass it straight to NewManager to exercise viper decode.
+func writePopupYAML(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return dir
+}
+
+func TestPopupsConfig_YAMLDecode_ParsesFullSchema(t *testing.T) {
+	body := `
+popups:
+  create:         { width: 80, height: 80 }
+  notify:         { width: 70, height: 60 }
+  session_filter: { width: 65, height: 65 }
+  help:           { width: 60, height: 55 }
+  action:         { width: 75, height: 75 }
+  plugin_default: { width: 50, height: 50 }
+  plugins:
+    my-plugin:    { width: 40, height: 20 }
+    other:        { width: 30, height: 15 }
+`
+	m, err := NewManager(writePopupYAML(t, body))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	p := m.Get().Popups
+
+	cases := []struct {
+		name         string
+		got          *PopupSizeConfig
+		wantW, wantH int
+	}{
+		{"create", p.Create, 80, 80},
+		{"notify", p.Notify, 70, 60},
+		{"session_filter", p.SessionFilter, 65, 65},
+		{"help", p.Help, 60, 55},
+		{"action", p.Action, 75, 75},
+		{"plugin_default", p.PluginDefault, 50, 50},
+	}
+	for _, c := range cases {
+		if c.got == nil {
+			t.Errorf("Popups.%s = nil, want non-nil", c.name)
+			continue
+		}
+		if c.got.Width != c.wantW || c.got.Height != c.wantH {
+			t.Errorf("Popups.%s = {W:%d H:%d}, want {W:%d H:%d}", c.name, c.got.Width, c.got.Height, c.wantW, c.wantH)
+		}
+	}
+
+	if p.Plugins == nil {
+		t.Fatalf("Popups.Plugins = nil, want populated map")
+	}
+	mp, ok := p.Plugins["my-plugin"]
+	if !ok || mp == nil {
+		t.Fatalf("Popups.Plugins[my-plugin] missing")
+	}
+	if mp.Width != 40 || mp.Height != 20 {
+		t.Errorf("Popups.Plugins[my-plugin] = {W:%d H:%d}, want {W:40 H:20}", mp.Width, mp.Height)
+	}
+	other, ok := p.Plugins["other"]
+	if !ok || other == nil {
+		t.Fatalf("Popups.Plugins[other] missing")
+	}
+	if other.Width != 30 || other.Height != 15 {
+		t.Errorf("Popups.Plugins[other] = {W:%d H:%d}, want {W:30 H:15}", other.Width, other.Height)
+	}
+}
+
+func TestPopupsConfig_YAMLDecode_MissingKeepsBackwardCompat(t *testing.T) {
+	body := `
+keybindings:
+  up: ["k"]
+`
+	m, err := NewManager(writePopupYAML(t, body))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	p := m.Get().Popups
+	if p.Create != nil || p.Notify != nil || p.SessionFilter != nil || p.Help != nil || p.Action != nil {
+		t.Errorf("expected all Popups core fields nil, got %+v", p)
+	}
+	if p.PluginDefault != nil {
+		t.Errorf("expected PluginDefault nil, got %+v", p.PluginDefault)
+	}
+	if len(p.Plugins) != 0 {
+		t.Errorf("expected Plugins nil/empty, got %+v", p.Plugins)
+	}
+}
+
+// --- DefaultPopupSizes ---
+
+func TestDefaultPopupSizes_ContainsExpectedKeys(t *testing.T) {
+	sizes := DefaultPopupSizes()
+	wantKeys := []string{"create", "notify", "session_filter", "help", "action", "plugin_default", "default"}
+	for _, k := range wantKeys {
+		v, ok := sizes[k]
+		if !ok {
+			t.Errorf("DefaultPopupSizes missing key %q", k)
+			continue
+		}
+		if v.Width < 1 || v.Width > 100 || v.Height < 1 || v.Height > 100 {
+			t.Errorf("DefaultPopupSizes[%q] = %+v, want dims in [1,100]", k, v)
+		}
+	}
+}
+
+// --- GetPopupSize ---
+
+func TestGetPopupSize_NilReturnsDefault(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	cases := []struct {
+		name         string
+		wantW, wantH string
+	}{
+		{"create", "80%", "80%"},
+		{"notify", "70%", "60%"},
+		{"session_filter", "70%", "70%"},
+		{"help", "60%", "60%"},
+		{"action", "70%", "70%"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotW, gotH := m.GetPopupSize(c.name)
+			if gotW != c.wantW || gotH != c.wantH {
+				t.Errorf("GetPopupSize(%q) = (%q, %q), want (%q, %q)", c.name, gotW, gotH, c.wantW, c.wantH)
+			}
+		})
+	}
+}
+
+func TestGetPopupSize_UserOverride_UsesConfigValue(t *testing.T) {
+	m := &Manager{config: &Config{
+		Popups: PopupsConfig{
+			Create: &PopupSizeConfig{Width: 50, Height: 40},
+		},
+	}}
+	gotW, gotH := m.GetPopupSize("create")
+	if gotW != "50%" || gotH != "40%" {
+		t.Errorf("GetPopupSize(create) = (%q, %q), want (50%%, 40%%)", gotW, gotH)
+	}
+}
+
+func TestGetPopupSize_UnknownName_ReturnsFallbackDefault(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	gotW, gotH := m.GetPopupSize("does-not-exist")
+	if gotW != "70%" || gotH != "70%" {
+		t.Errorf("GetPopupSize(unknown) = (%q, %q), want (70%%, 70%%)", gotW, gotH)
+	}
+}
+
+// captureLog redirects the default logger to a buffer for the duration of the
+// callback, restoring the original writer afterwards.
+func captureLog(t *testing.T, f func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(orig) })
+	f()
+	return buf.String()
+}
+
+func TestGetPopupSize_OutOfRange_LogsWarnAndFallsBack(t *testing.T) {
+	cases := []struct {
+		label    string
+		width    int
+		wantWarn bool
+	}{
+		{"negative", -10, true},
+		{"zero", 0, false},
+		{"over max", 101, true},
+	}
+	for _, c := range cases {
+		t.Run(c.label, func(t *testing.T) {
+			m := &Manager{config: &Config{
+				Popups: PopupsConfig{
+					Create: &PopupSizeConfig{Width: c.width, Height: 80},
+				},
+			}}
+			var gotW, gotH string
+			out := captureLog(t, func() {
+				gotW, gotH = m.GetPopupSize("create")
+			})
+			if gotW != "80%" {
+				t.Errorf("width = %q, want fallback %q", gotW, "80%")
+			}
+			if gotH != "80%" {
+				t.Errorf("height = %q, want %q", gotH, "80%")
+			}
+			hasWarn := strings.Contains(out, "out of range")
+			if hasWarn != c.wantWarn {
+				t.Errorf("warn present = %v, want %v (log=%q)", hasWarn, c.wantWarn, out)
+			}
+		})
+	}
+}
+
+func TestGetPopupSize_WarnEmittedOncePerKey(t *testing.T) {
+	m := &Manager{config: &Config{
+		Popups: PopupsConfig{
+			Create: &PopupSizeConfig{Width: 200, Height: 80},
+		},
+	}}
+	out := captureLog(t, func() {
+		m.GetPopupSize("create")
+		m.GetPopupSize("create")
+		m.GetPopupSize("create")
+	})
+	count := strings.Count(out, "out of range")
+	if count != 1 {
+		t.Errorf("warn emitted %d times, want 1 (log=%q)", count, out)
+	}
+}
+
+// --- GetPluginPopupSize ---
+
+func TestGetPluginPopupSize_ConfigOverrideManifest(t *testing.T) {
+	m := &Manager{config: &Config{
+		Popups: PopupsConfig{
+			Plugins: map[string]*PopupSizeConfig{
+				"notifier": {Width: 60, Height: 50},
+			},
+			PluginDefault: &PopupSizeConfig{Width: 30, Height: 30},
+		},
+	}}
+	manifest := &PopupSizeConfig{Width: 40, Height: 40}
+	gotW, gotH := m.GetPluginPopupSize("notifier", manifest)
+	if gotW != "60%" || gotH != "50%" {
+		t.Errorf("got (%q, %q), want (60%%, 50%%)", gotW, gotH)
+	}
+}
+
+func TestGetPluginPopupSize_ManifestOnly(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	manifest := &PopupSizeConfig{Width: 40, Height: 40}
+	gotW, gotH := m.GetPluginPopupSize("notifier", manifest)
+	if gotW != "40%" || gotH != "40%" {
+		t.Errorf("got (%q, %q), want (40%%, 40%%)", gotW, gotH)
+	}
+}
+
+func TestGetPluginPopupSize_PluginDefaultConfig(t *testing.T) {
+	m := &Manager{config: &Config{
+		Popups: PopupsConfig{
+			PluginDefault: &PopupSizeConfig{Width: 90, Height: 90},
+		},
+	}}
+	gotW, gotH := m.GetPluginPopupSize("notifier", nil)
+	if gotW != "90%" || gotH != "90%" {
+		t.Errorf("got (%q, %q), want (90%%, 90%%)", gotW, gotH)
+	}
+}
+
+func TestGetPluginPopupSize_HardcodedDefault(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	gotW, gotH := m.GetPluginPopupSize("notifier", nil)
+	if gotW != "70%" || gotH != "70%" {
+		t.Errorf("got (%q, %q), want (70%%, 70%%)", gotW, gotH)
+	}
+}
+
+func TestGetPluginPopupSize_EmptyManifestAndConfig_UsesPluginDefault(t *testing.T) {
+	m := &Manager{config: &Config{}}
+	// An explicit but zero-valued manifest should be treated the same as
+	// no manifest (silent fallback), landing on the hardcoded default.
+	gotW, gotH := m.GetPluginPopupSize("notifier", &PopupSizeConfig{})
+	if gotW != "70%" || gotH != "70%" {
+		t.Errorf("got (%q, %q), want (70%%, 70%%)", gotW, gotH)
 	}
 }

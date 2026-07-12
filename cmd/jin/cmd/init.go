@@ -44,6 +44,21 @@ keybindings:
 # Leave commented to fall back to "claude". Uncomment and change to
 # override (available kinds: "claude", "codex").
 # default_agent: claude
+
+# Popup size overrides (percent-based, 1-100).
+# Any omitted field falls back to the hardcoded default shown below.
+# Out-of-range values log a warn and fall back silently.
+# popups:
+#   create:         { width: 80, height: 80 }
+#   notify:         { width: 70, height: 60 }
+#   session_filter: { width: 70, height: 70 }
+#   help:           { width: 60, height: 60 }
+#   action:         { width: 70, height: 70 }
+#   # plugin_default applies to every plugin popup unless overridden per-plugin.
+#   plugin_default: { width: 70, height: 70 }
+#   # Per-plugin overrides beat the plugin's own manifest declaration.
+#   plugins:
+#     my-plugin:    { width: 40, height: 20 }
 `
 
 var forceInit bool
