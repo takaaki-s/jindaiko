@@ -42,6 +42,7 @@ Example:
 		height, _ := cmd.Flags().GetString("height")
 
 		if here {
+			width, height = popupSizeWithEnvFallback(width, height)
 			return runPopupHere(strings.Join(args, " "), title, width, height)
 		}
 
@@ -73,18 +74,12 @@ Example:
 // JIN_CALLER_TMUX_SOCKET (plugin action invocation); the anchor pane likewise
 // from $TMUX_PANE or JIN_CALLER_TMUX_PANE.
 func runPopupHere(cmdStr, title, width, height string) error {
-	socketPath := tmux.SocketPathFromEnv(os.Getenv("TMUX"))
-	if socketPath == "" {
-		socketPath = os.Getenv("JIN_CALLER_TMUX_SOCKET")
-	}
+	socketPath := envFallback(tmux.SocketPathFromEnv(os.Getenv("TMUX")), "JIN_CALLER_TMUX_SOCKET")
 	if socketPath == "" {
 		return errors.New("--here requires a tmux client: not inside tmux and no JIN_CALLER_TMUX_SOCKET")
 	}
 
-	anchorPane := os.Getenv("TMUX_PANE")
-	if anchorPane == "" {
-		anchorPane = os.Getenv("JIN_CALLER_TMUX_PANE")
-	}
+	anchorPane := envFallback(os.Getenv("TMUX_PANE"), "JIN_CALLER_TMUX_PANE")
 
 	tc, err := tmux.NewClientWithSocketPath(socketPath)
 	if err != nil {
@@ -97,6 +92,26 @@ func runPopupHere(cmdStr, title, width, height string) error {
 		Title:  title,
 		Cmd:    cmdStr,
 	})
+}
+
+// envFallback returns v when it's non-empty, otherwise the named env var's
+// value. Kept small and single-purpose so the "flag beats env, env beats
+// nothing" priority is obvious at each call site.
+func envFallback(v, envKey string) string {
+	if v != "" {
+		return v
+	}
+	return os.Getenv(envKey)
+}
+
+// popupSizeWithEnvFallback fills in width/height from the JIN_PLUGIN_POPUP_*
+// env vars (set by the plugin dispatcher, see internal/plugin/exec.go) when
+// the corresponding flag was left empty. Explicit flags always win; if both
+// the flag and the env var are empty, the value stays empty and tmux falls
+// back to its own default.
+func popupSizeWithEnvFallback(flagWidth, flagHeight string) (width, height string) {
+	return envFallback(flagWidth, "JIN_PLUGIN_POPUP_WIDTH"),
+		envFallback(flagHeight, "JIN_PLUGIN_POPUP_HEIGHT")
 }
 
 var paneSplitCmd = &cobra.Command{
