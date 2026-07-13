@@ -26,9 +26,10 @@ func setupInstallEnv(t *testing.T) (stateDir, dataDir string) {
 	t.Setenv("XDG_DATA_HOME", dataDir)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	// Pin jin's version so consent-screen compat checks are deterministic
-	// regardless of ldflags at test time.
-	t.Cleanup(func() { plugin.SetJinVersion(plugin.SetJinVersion("0.7.0")) })
-	plugin.SetJinVersion("0.7.0")
+	// regardless of ldflags at test time. SetJinVersion returns the value it
+	// replaced, so we capture that once at setup and restore it at cleanup.
+	prev := plugin.SetJinVersion("0.7.0")
+	t.Cleanup(func() { plugin.SetJinVersion(prev) })
 	return stateDir, dataDir
 }
 

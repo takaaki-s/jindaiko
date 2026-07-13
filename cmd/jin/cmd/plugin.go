@@ -188,8 +188,9 @@ func runPluginInstallBySource(cmd *cobra.Command, arg string) error {
 	if err != nil {
 		return err
 	}
-	force, _ := cmd.Flags().GetBool("force")
-	plan, err := plugin.Fetch(src, paths.Plugins(), getStateDir(), plugin.FetchOptions{AllowIncompatibleJin: force})
+	// --force is scoped to the registry install path in 04_install.md, so
+	// the git-URL path keeps the historical fail-closed compat behaviour.
+	plan, err := plugin.Fetch(src, paths.Plugins(), getStateDir(), plugin.FetchOptions{})
 	if err != nil {
 		return err
 	}
@@ -197,9 +198,6 @@ func runPluginInstallBySource(cmd *cobra.Command, arg string) error {
 
 	m := plan.Manifest()
 	printPluginPlan(out, m, src.Raw, plan.CommitSHA())
-	if plan.CompatErr() != nil {
-		fmt.Fprintf(out, "Compat: %v (forced)\n", plan.CompatErr())
-	}
 
 	if yes, _ := cmd.Flags().GetBool("yes"); !yes && !confirmPlugin(cmd, "Install? [y/N]: ") {
 		fmt.Fprintln(out, "aborted")
@@ -259,10 +257,9 @@ func runPluginInstallByName(cmd *cobra.Command, name string) error {
 	defer plan.Abort() // no-op after a successful Commit; discards staging otherwise
 
 	m := plan.Manifest()
-	dest, absErr := filepath.Abs(filepath.Join(paths.Plugins(), m.Name))
-	if absErr != nil {
-		dest = filepath.Join(paths.Plugins(), m.Name)
-	}
+	// paths.Plugins() is XDG-anchored and already absolute, so a plain Join
+	// produces the absolute install path the consent screen wants to show.
+	dest := filepath.Join(paths.Plugins(), m.Name)
 	printRemotePluginPlan(out, resolution, m, plan.CommitSHA(), dest, plan.CompatErr())
 
 	if plan.CompatErr() != nil && !force {
@@ -341,12 +338,8 @@ func runPluginRemove(cmd *cobra.Command, args []string) error {
 }
 
 // printRemotePluginPlan renders the consent screen for a registry-driven
-// install. Everything the user needs to judge the install fits on one screen:
-// name/version, the exact clone target (repo@short-sha), an explicit unverified
-// marker (the MVP has no verified badge), the jin compat verdict, the build
-// commands that will run, and the absolute install path. compatErr is nil
-// when the compat check passed; a non-nil value is shown with ✗ so --force's
-// override is visible before it is applied.
+// install. A non-nil compatErr still renders with ✗ (instead of aborting the
+// screen) so what --force is about to override is visible before it is.
 func printRemotePluginPlan(out io.Writer, r *plugin.RemoteResolution, m *manifest.Manifest, commitSHA, installPath string, compatErr error) {
 	entry := r.Entry
 	ver := r.Version

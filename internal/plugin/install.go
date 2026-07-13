@@ -200,6 +200,24 @@ type InstallPlan struct {
 // manifest's jin range is satisfied by the current binary.
 func (p *InstallPlan) CompatErr() error { return p.compatErr }
 
+// applyCompatCheck runs checkJinCompat against the plan's manifest and either
+// aborts the plan (fail-closed, the default) or stashes the mismatch on the
+// plan (when opts opted in via AllowIncompatibleJin). Extracted so Fetch and
+// FetchUpdate share the same invariant — currently the sole owner of "when
+// does a compat mismatch reject a plan".
+func (p *InstallPlan) applyCompatCheck(opts FetchOptions) error {
+	compatErr := checkJinCompat(p.manifest)
+	if compatErr == nil {
+		return nil
+	}
+	if !opts.AllowIncompatibleJin {
+		p.Abort()
+		return compatErr
+	}
+	p.compatErr = compatErr
+	return nil
+}
+
 // Manifest returns the loaded, validated manifest of the staged plugin.
 func (p *InstallPlan) Manifest() *manifest.Manifest { return p.manifest }
 
@@ -227,12 +245,8 @@ func Fetch(src Source, pluginsDir, stateDir string, opts FetchOptions) (*Install
 		staging: staging, manifest: m, commitSHA: sha,
 	}
 
-	if compatErr := checkJinCompat(m); compatErr != nil {
-		if !opts.AllowIncompatibleJin {
-			p.Abort()
-			return nil, compatErr
-		}
-		p.compatErr = compatErr
+	if err := p.applyCompatCheck(opts); err != nil {
+		return nil, err
 	}
 
 	dest := filepath.Join(pluginsDir, m.Name)
@@ -283,12 +297,8 @@ func FetchUpdate(name, pluginsDir, stateDir string, opts FetchOptions) (*Install
 		staging: staging, manifest: m, commitSHA: sha,
 		prevCommit: entry.Commit, isUpdate: true,
 	}
-	if compatErr := checkJinCompat(m); compatErr != nil {
-		if !opts.AllowIncompatibleJin {
-			p.Abort()
-			return nil, compatErr
-		}
-		p.compatErr = compatErr
+	if err := p.applyCompatCheck(opts); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

@@ -9,7 +9,6 @@ package plugin
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/takaaki-s/jind-ai/pkg/plugin/manifest"
 )
@@ -24,24 +23,20 @@ type RemoteResolution struct {
 }
 
 // Source returns the Source that, passed to Fetch, will clone the resolved
-// repo at the resolved SHA. Raw records the "<repo>@<sha>" pair so the lock
-// file (and any later update) can trace back to the origin. A registry entry
-// normally records Repo in the "github.com/owner/name" shape; if the entry
-// already carries a scheme (http/https/git/file/scp-style) it is preserved
-// verbatim so mirrors, forks, and test fixtures can round-trip.
+// repo at the resolved SHA. The registry normally records Repo as
+// "github.com/owner/name" but is tolerant of full URLs (mirrors, forks,
+// file:// fixtures) — the URL-shape rules already live in ParseSource, so
+// we round-trip through it to keep the two callers of that grammar in sync.
 func (r RemoteResolution) Source() Source {
-	cloneURL := repoToCloneURL(r.Entry.Repo)
-	raw := cloneURL + "@" + r.Version.SHA
-	return Source{Raw: raw, CloneURL: cloneURL, Ref: r.Version.SHA}
-}
-
-func repoToCloneURL(repo string) string {
-	switch {
-	case strings.Contains(repo, "://"), strings.HasPrefix(repo, "git@"):
-		return repo
-	default:
-		return "https://" + repo
+	src, err := ParseSource(r.Entry.Repo + "@" + r.Version.SHA)
+	if err != nil {
+		// ParseSource only rejects an empty repo, which the registry
+		// crawler cannot emit — a Manifest without name/repo never lands
+		// in registry.json. A zero Source here would confuse Fetch, so
+		// fall back to the historical hand-built shape.
+		return Source{Raw: r.Entry.Repo + "@" + r.Version.SHA, CloneURL: r.Entry.Repo, Ref: r.Version.SHA}
 	}
+	return src
 }
 
 // ResolveRemote looks up name in doc and picks a version. An empty versionPin
@@ -66,6 +61,7 @@ func ResolveRemote(name, versionPin string, doc *manifest.RegistryDocument) (*Re
 		}
 	}
 
+	available := make([]string, 0, len(entry.Versions))
 	for _, v := range entry.Versions {
 		if v.Version == target {
 			if v.SHA == "" {
@@ -73,10 +69,6 @@ func ResolveRemote(name, versionPin string, doc *manifest.RegistryDocument) (*Re
 			}
 			return &RemoteResolution{Entry: *entry, Version: v}, nil
 		}
-	}
-
-	available := make([]string, 0, len(entry.Versions))
-	for _, v := range entry.Versions {
 		available = append(available, v.Version)
 	}
 	if len(available) == 0 {
