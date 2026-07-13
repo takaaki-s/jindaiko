@@ -305,19 +305,19 @@ func printGithubAnnotations(out io.Writer, findings []manifest.Finding, manifest
 			title = fmt.Sprintf("R%d %s", f.Rule, f.Field)
 		}
 		fmt.Fprintf(out, "::%s file=%s,title=%s::%s\n",
-			level, file, escapeGHAValue(title), escapeGHAValue(f.Message))
+			level, file, ghaValueEscaper.Replace(title), ghaValueEscaper.Replace(f.Message))
 	}
 }
 
-// escapeGHAValue applies the workflow-command escape sequence. Without it a
+// ghaValueEscaper applies the workflow-command escape sequence. Without it a
 // message containing `%`, `\r`, or `\n` splits the annotation or corrupts the
-// value in GHA's UI.
-func escapeGHAValue(s string) string {
-	s = strings.ReplaceAll(s, "%", "%25")
-	s = strings.ReplaceAll(s, "\r", "%0D")
-	s = strings.ReplaceAll(s, "\n", "%0A")
-	return s
-}
+// value in GHA's UI. Order matters for `\r\n`: a lone `\r` and a lone `\n`
+// both map to their own escapes, so the pair round-trips as %0D%0A.
+var ghaValueEscaper = strings.NewReplacer(
+	"%", "%25",
+	"\r", "%0D",
+	"\n", "%0A",
+)
 
 func writeGithubStepSummary(findings []manifest.Finding, manifestPath string) error {
 	path := os.Getenv("GITHUB_STEP_SUMMARY")
@@ -339,7 +339,7 @@ func writeGithubStepSummary(findings []manifest.Finding, manifestPath string) er
 				field = "-"
 			}
 			fmt.Fprintf(&b, "| %s | R%d | %s | %s |\n",
-				f.Severity.String(), f.Rule, escapeMarkdownCell(field), escapeMarkdownCell(f.Message))
+				f.Severity.String(), f.Rule, markdownCellEscaper.Replace(field), markdownCellEscaper.Replace(f.Message))
 		}
 		errN, warnN := countFindings(findings)
 		fmt.Fprintf(&b, "\n**%d ERROR, %d WARN**\n", errN, warnN)
@@ -353,11 +353,11 @@ func writeGithubStepSummary(findings []manifest.Finding, manifestPath string) er
 	return err
 }
 
-// escapeMarkdownCell defuses the two characters that break a table row: `|`
-// (column separator) and newlines (row separator).
-func escapeMarkdownCell(s string) string {
-	s = strings.ReplaceAll(s, "|", `\|`)
-	s = strings.ReplaceAll(s, "\r\n", "<br>")
-	s = strings.ReplaceAll(s, "\n", "<br>")
-	return s
-}
+// markdownCellEscaper defuses the two characters that break a table row: `|`
+// (column separator) and newlines (row separator). `\r\n` is listed first so
+// a CRLF collapses to one `<br>` instead of two.
+var markdownCellEscaper = strings.NewReplacer(
+	"|", `\|`,
+	"\r\n", "<br>",
+	"\n", "<br>",
+)
