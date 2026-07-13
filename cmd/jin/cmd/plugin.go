@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -33,7 +34,13 @@ plugin lock file.`,
 var pluginInstallCmd = &cobra.Command{
 	Use:   "install [source]",
 	Short: "Install a plugin",
-	Long: `Install a plugin from a git source or a local directory.
+	Long: `Install a plugin from the registry, a git source, or a local directory.
+
+A registry name (e.g. jind-ai-notifier) resolves through the plugin registry to
+the repository and pinned commit for the requested version (default: the entry's
+latest_version). --pin/-v selects a specific version, --refresh bypasses the
+24-hour registry cache, and --force lets the install proceed when the plugin's
+jin compat range does not match this binary.
 
 A git source is <host>/<owner>/<repo>[@ref] (or any URL 'git clone' accepts).
 The repository is cloned, its manifest is shown for confirmation, and — when the
@@ -88,6 +95,10 @@ func init() {
 	pluginCmd.AddCommand(pluginInstallCmd, pluginUpdateCmd, pluginRemoveCmd, pluginListCmd, pluginRunCmd)
 	pluginInstallCmd.Flags().String("link", "", "Install a local plugin directory as a symlink")
 	pluginInstallCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
+	pluginInstallCmd.Flags().StringP("pin", "v", "", "Version to install from the registry (default: latest_version)")
+	pluginInstallCmd.Flags().Bool("force", false, "Install even when the plugin's jin compat range is unsatisfied")
+	pluginInstallCmd.Flags().Bool("refresh", false, "Bypass the registry cache freshness check")
+	pluginInstallCmd.Flags().String("registry", "", "Registry URL (default: canonical)")
 	pluginUpdateCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 	pluginRunCmd.Flags().StringP("session", "s", "", "Session selector (ID prefix or description substring); omit for a global action")
 }
@@ -139,29 +150,46 @@ func resolvePluginRunSession(client *daemon.Client, flagChanged bool, selector s
 }
 
 func runPluginInstall(cmd *cobra.Command, args []string) error {
-	out := cmd.OutOrStdout()
-
 	if link, _ := cmd.Flags().GetString("link"); link != "" {
-		m, err := plugin.Link(link, paths.Plugins(), getStateDir())
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "name: %s\n", m.Name)
-		fmt.Fprintf(out, "on: %s\n", strings.Join(m.On, ", "))
-		fmt.Fprintf(out, "entrypoint: %s\n", m.Entrypoint())
-		fmt.Fprintln(out, "linked")
-		return nil
+		return runPluginInstallLink(cmd, link)
 	}
 
 	if len(args) == 0 {
-		return errors.New("plugin source required (e.g. github.com/owner/repo), or use --link <path>")
+		return errors.New("plugin source required (a registry name, github.com/owner/repo, or --link <path>)")
 	}
 
-	src, err := plugin.ParseSource(args[0])
+	arg := args[0]
+	// A registry name matches NamePattern's grammar (^[a-z][a-z0-9-]{1,63}$),
+	// which forbids '/' and ':', so it never collides with a git URL or an
+	// scp-style remote. Anything else is handed to the git-clone path.
+	if manifest.NamePattern.MatchString(arg) {
+		return runPluginInstallByName(cmd, arg)
+	}
+	return runPluginInstallBySource(cmd, arg)
+}
+
+func runPluginInstallLink(cmd *cobra.Command, link string) error {
+	m, err := plugin.Link(link, paths.Plugins(), getStateDir())
 	if err != nil {
 		return err
 	}
-	plan, err := plugin.Fetch(src, paths.Plugins(), getStateDir())
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "name: %s\n", m.Name)
+	fmt.Fprintf(out, "on: %s\n", strings.Join(m.On, ", "))
+	fmt.Fprintf(out, "entrypoint: %s\n", m.Entrypoint())
+	fmt.Fprintln(out, "linked")
+	return nil
+}
+
+func runPluginInstallBySource(cmd *cobra.Command, arg string) error {
+	out := cmd.OutOrStdout()
+
+	src, err := plugin.ParseSource(arg)
+	if err != nil {
+		return err
+	}
+	force, _ := cmd.Flags().GetBool("force")
+	plan, err := plugin.Fetch(src, paths.Plugins(), getStateDir(), plugin.FetchOptions{AllowIncompatibleJin: force})
 	if err != nil {
 		return err
 	}
@@ -169,8 +197,78 @@ func runPluginInstall(cmd *cobra.Command, args []string) error {
 
 	m := plan.Manifest()
 	printPluginPlan(out, m, src.Raw, plan.CommitSHA())
+	if plan.CompatErr() != nil {
+		fmt.Fprintf(out, "Compat: %v (forced)\n", plan.CompatErr())
+	}
 
 	if yes, _ := cmd.Flags().GetBool("yes"); !yes && !confirmPlugin(cmd, "Install? [y/N]: ") {
+		fmt.Fprintln(out, "aborted")
+		return nil
+	}
+
+	buildTimeout, err := pluginBuildTimeout()
+	if err != nil {
+		return err
+	}
+	if cmds := m.BuildCommands(); len(cmds) > 0 {
+		fmt.Fprintf(out, "Running build: %s\n", strings.Join(cmds, " && "))
+	}
+	if err := plan.Commit(buildTimeout); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Installed %s @ %s\n", m.Name, shortSHA(plan.CommitSHA()))
+	return nil
+}
+
+// runPluginInstallByName resolves a registry name to a repo+SHA, stages the
+// clone, prints the consent screen (unverified marker, jin compat verdict,
+// build commands, install path), and — after the user confirms — commits.
+// A jin compat mismatch aborts unless --force was passed; the screen shows
+// the mismatch verdict either way so the user can see what --force overrides.
+func runPluginInstallByName(cmd *cobra.Command, name string) error {
+	out := cmd.OutOrStdout()
+
+	versionPin, _ := cmd.Flags().GetString("pin")
+	force, _ := cmd.Flags().GetBool("force")
+	refresh, _ := cmd.Flags().GetBool("refresh")
+	registryURL, _ := cmd.Flags().GetString("registry")
+	yes, _ := cmd.Flags().GetBool("yes")
+
+	doc, result, err := loadRegistryDocument(registryURL, refresh)
+	if err != nil {
+		return err
+	}
+	if result.Outcome == manifest.OutcomeCacheFallback && result.FetchErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: registry fetch failed, using cache: %v\n", result.FetchErr)
+	}
+
+	resolution, err := plugin.ResolveRemote(name, versionPin, doc)
+	if err != nil {
+		return err
+	}
+
+	// Always let Fetch return the plan so the consent screen is printed even
+	// when the manifest's jin range does not match this build. Whether to
+	// proceed after the screen is a CLI-side decision — with --force we go
+	// on and commit, without it we surface the error the user just saw.
+	plan, err := plugin.Fetch(resolution.Source(), paths.Plugins(), getStateDir(),
+		plugin.FetchOptions{AllowIncompatibleJin: true})
+	if err != nil {
+		return err
+	}
+	defer plan.Abort() // no-op after a successful Commit; discards staging otherwise
+
+	m := plan.Manifest()
+	dest, absErr := filepath.Abs(filepath.Join(paths.Plugins(), m.Name))
+	if absErr != nil {
+		dest = filepath.Join(paths.Plugins(), m.Name)
+	}
+	printRemotePluginPlan(out, resolution, m, plan.CommitSHA(), dest, plan.CompatErr())
+
+	if plan.CompatErr() != nil && !force {
+		return fmt.Errorf("%v (pass --force to override)", plan.CompatErr())
+	}
+	if !yes && !confirmPlugin(cmd, "Continue? [y/N]: ") {
 		fmt.Fprintln(out, "aborted")
 		return nil
 	}
@@ -193,7 +291,7 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	out := cmd.OutOrStdout()
 
-	plan, err := plugin.FetchUpdate(name, paths.Plugins(), getStateDir())
+	plan, err := plugin.FetchUpdate(name, paths.Plugins(), getStateDir(), plugin.FetchOptions{})
 	if err != nil {
 		return err
 	}
@@ -240,6 +338,56 @@ func runPluginRemove(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Removed: %s\n", name)
 	return nil
+}
+
+// printRemotePluginPlan renders the consent screen for a registry-driven
+// install. Everything the user needs to judge the install fits on one screen:
+// name/version, the exact clone target (repo@short-sha), an explicit unverified
+// marker (the MVP has no verified badge), the jin compat verdict, the build
+// commands that will run, and the absolute install path. compatErr is nil
+// when the compat check passed; a non-nil value is shown with ✗ so --force's
+// override is visible before it is applied.
+func printRemotePluginPlan(out io.Writer, r *plugin.RemoteResolution, m *manifest.Manifest, commitSHA, installPath string, compatErr error) {
+	entry := r.Entry
+	ver := r.Version
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  Plugin:  %s @ %s\n", entry.Name, ver.Version)
+	fmt.Fprintf(out, "  Source:  %s@%s\n", entry.Repo, shortSHA(commitSHA))
+	fmt.Fprintln(out, "  Kind:    (unverified community plugin)")
+
+	compatLine := fmt.Sprintf("jin %s", m.Jin)
+	if jv := jinDisplayVersion(); jv != "" {
+		compatLine += fmt.Sprintf("  (you have %s)", jv)
+	}
+	if compatErr == nil {
+		compatLine += "  ✓"
+	} else {
+		compatLine += "  ✗"
+	}
+	fmt.Fprintf(out, "  Compat:  %s\n", compatLine)
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  Installation will:")
+	fmt.Fprintf(out, "    1. clone %s at %s into\n", entry.Repo, shortSHA(commitSHA))
+	fmt.Fprintf(out, "       %s/\n", installPath)
+	if cmds := m.BuildCommands(); len(cmds) > 0 {
+		for i, c := range cmds {
+			fmt.Fprintf(out, "    %d. run: %s\n", i+2, c)
+		}
+	}
+	fmt.Fprintln(out)
+}
+
+// jinDisplayVersion is the running jin version rendered for consent screens,
+// or "" for a dev build (in which case the compat check is skipped anyway).
+// The import path lives here (not in internal/plugin) because the CLI is the
+// only consent-screen consumer.
+func jinDisplayVersion() string {
+	v := plugin.CurrentJinVersion()
+	if v == "" || v == "dev" {
+		return ""
+	}
+	return v
 }
 
 // printPluginPlan renders the confirmation block shared by install and update.

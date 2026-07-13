@@ -51,6 +51,11 @@ func currentJinVersion() string {
 	return ""
 }
 
+// CurrentJinVersion returns the jin binary version used by plugin compat
+// checks (i.e. what checkJinCompat matches against). Exported for the CLI's
+// consent screen — the same value the check itself uses.
+func CurrentJinVersion() string { return currentJinVersion() }
+
 // loadManifest reads and validates the manifest at pluginDir. Unknown fields
 // are dropped here on purpose — they are advisory WARNs for the validate
 // command, not blockers for the runtime. Every ERROR-severity rule turns

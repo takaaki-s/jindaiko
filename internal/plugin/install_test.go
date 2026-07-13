@@ -406,7 +406,7 @@ func TestFetchCommit_Success(t *testing.T) {
 	repo := initRepo(t, validSource)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestFetch_CheckoutTag(t *testing.T) {
 	runGit(t, repo, "commit", "-m", "second")
 
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
-	plan, err := Fetch(fileSource(t, repo, "v1.0.0"), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, "v1.0.0"), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -478,7 +478,7 @@ install:
 `)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	if _, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir); err == nil {
+	if _, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{}); err == nil {
 		t.Fatal("Fetch with invalid manifest: want error, got nil")
 	}
 	assertNoScratch(t, pluginsDir)
@@ -502,7 +502,7 @@ on:
 `)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	if _, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir); err == nil {
+	if _, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{}); err == nil {
 		t.Fatal("Fetch with unsatisfied jin range: want error, got nil")
 	}
 	if _, err := os.Lstat(filepath.Join(pluginsDir, "notifier")); !os.IsNotExist(err) {
@@ -511,18 +511,56 @@ on:
 	assertNoScratch(t, pluginsDir)
 }
 
+func TestFetch_AllowIncompatibleJinKeepsPlanAndSurfacesCompatErr(t *testing.T) {
+	restore := setJinVersionForTest(t, "0.5.0")
+	defer restore()
+
+	repo := initRepo(t, `schema_version: 1
+name: notifier
+version: 0.1.0
+description: needs jin 99
+jin: ">=99.0.0"
+install:
+  source:
+    build: ["true"]
+    entrypoint: ./run.sh
+on:
+  - status_changed
+`)
+	pluginsDir, stateDir := t.TempDir(), t.TempDir()
+
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{AllowIncompatibleJin: true})
+	if err != nil {
+		t.Fatalf("Fetch with AllowIncompatibleJin: %v", err)
+	}
+	if plan.CompatErr() == nil {
+		t.Fatal("CompatErr = nil, want the compat mismatch surfaced")
+	}
+	if !strings.Contains(plan.CompatErr().Error(), "99.0.0") {
+		t.Errorf("CompatErr = %v, want it to name the required range", plan.CompatErr())
+	}
+	// Commit must still succeed — --force is meant to install anyway.
+	if err := plan.Commit(testBuildTimeout); err != nil {
+		t.Fatalf("Commit after forced install: %v", err)
+	}
+	if !lockHas(t, stateDir, "notifier") {
+		t.Error("lock entry missing after forced install")
+	}
+	assertNoScratch(t, pluginsDir)
+}
+
 func TestFetch_RejectsDoubleInstall(t *testing.T) {
 	repo := initRepo(t, validSource)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("first Fetch: %v", err)
 	}
 	if err := plan.Commit(testBuildTimeout); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	if _, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir); err == nil {
+	if _, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{}); err == nil {
 		t.Fatal("second Fetch of the same name: want error, got nil")
 	}
 	assertNoScratch(t, pluginsDir)
@@ -544,7 +582,7 @@ on:
 `)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -575,7 +613,7 @@ on:
 `)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -607,7 +645,7 @@ on:
 `)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -627,7 +665,7 @@ func TestFetchUpdate_PicksUpNewCommit(t *testing.T) {
 	repo := initRepo(t, validSource)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -640,7 +678,7 @@ func TestFetchUpdate_PicksUpNewCommit(t *testing.T) {
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "commit", "-m", "second")
 
-	up, err := FetchUpdate("notifier", pluginsDir, stateDir)
+	up, err := FetchUpdate("notifier", pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("FetchUpdate: %v", err)
 	}
@@ -668,7 +706,7 @@ func TestFetchUpdate_RejectsIncompatibleNewVersion(t *testing.T) {
 	repo := initRepo(t, validSource)
 	pluginsDir, stateDir := t.TempDir(), t.TempDir()
 
-	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir)
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -697,7 +735,7 @@ on:
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "commit", "-m", "bump jin")
 
-	if _, err := FetchUpdate("notifier", pluginsDir, stateDir); err == nil {
+	if _, err := FetchUpdate("notifier", pluginsDir, stateDir, FetchOptions{}); err == nil {
 		t.Fatal("FetchUpdate with unsatisfied jin range: want error, got nil")
 	}
 	assertNoScratch(t, pluginsDir)
@@ -721,7 +759,7 @@ func TestFetchUpdate_RejectsLinked(t *testing.T) {
 	if _, err := Link(src, pluginsDir, stateDir); err != nil {
 		t.Fatalf("Link: %v", err)
 	}
-	if _, err := FetchUpdate("notifier", pluginsDir, stateDir); err == nil {
+	if _, err := FetchUpdate("notifier", pluginsDir, stateDir, FetchOptions{}); err == nil {
 		t.Fatal("FetchUpdate of a linked plugin: want error, got nil")
 	}
 }
