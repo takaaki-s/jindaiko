@@ -20,12 +20,9 @@ import (
 const Filename = "jind-ai-plugin.yaml"
 
 // CurrentSchemaVersion is the newest schema_version this build understands.
-// MinSchemaVersion is the oldest it still accepts (validator supports N-2
-// generations per docs/plugin-registry.md).
-const (
-	CurrentSchemaVersion = 1
-	MinSchemaVersion     = 1
-)
+// A future N-2 window will land when the first bump ships; today the check
+// is strict equality against this value.
+const CurrentSchemaVersion = 1
 
 // DefaultTimeout is applied to a plugin run when the manifest omits timeout.
 const DefaultTimeout = 30 * time.Second
@@ -79,43 +76,26 @@ type PopupConfig struct {
 }
 
 // UnmarshalYAML decodes the manifest, translating the human-friendly timeout
-// string (e.g. "30s") into a time.Duration. A shadow struct avoids recursing
-// into this method and lets Timeout arrive as a string.
+// string (e.g. "30s") into a time.Duration. The type alias in aux breaks
+// method resolution so yaml does not recurse back into this method; every
+// other field decodes through the alias's inline embedding.
 func (m *Manifest) UnmarshalYAML(value *yaml.Node) error {
-	var raw struct {
-		SchemaVersion int          `yaml:"schema_version"`
-		Name          string       `yaml:"name"`
-		Version       string       `yaml:"version"`
-		Description   string       `yaml:"description"`
-		License       string       `yaml:"license"`
-		Homepage      string       `yaml:"homepage"`
-		Jin           string       `yaml:"jin"`
-		Install       Install      `yaml:"install"`
-		On            []string     `yaml:"on"`
-		Timeout       string       `yaml:"timeout"`
-		Popup         *PopupConfig `yaml:"popup"`
-	}
-	if err := value.Decode(&raw); err != nil {
+	type manifestFields Manifest
+	aux := struct {
+		*manifestFields `yaml:",inline"`
+		Timeout         string `yaml:"timeout"`
+	}{manifestFields: (*manifestFields)(m)}
+	if err := value.Decode(&aux); err != nil {
 		return err
 	}
-
-	m.SchemaVersion = raw.SchemaVersion
-	m.Name = raw.Name
-	m.Version = raw.Version
-	m.Description = raw.Description
-	m.License = raw.License
-	m.Homepage = raw.Homepage
-	m.Jin = raw.Jin
-	m.Install = raw.Install
-	m.On = raw.On
-	m.Popup = raw.Popup
-	if raw.Timeout != "" {
-		d, err := time.ParseDuration(raw.Timeout)
-		if err != nil {
-			return fmt.Errorf("parse timeout %q: %w", raw.Timeout, err)
-		}
-		m.Timeout = d
+	if aux.Timeout == "" {
+		return nil
 	}
+	d, err := time.ParseDuration(aux.Timeout)
+	if err != nil {
+		return fmt.Errorf("parse timeout %q: %w", aux.Timeout, err)
+	}
+	m.Timeout = d
 	return nil
 }
 
@@ -153,18 +133,28 @@ func (m *Manifest) BuildCommands() []string {
 // or install-level fields for forward-compatible WARN reporting. A YAML
 // syntax error is returned as err; on success err is nil even if the manifest
 // is missing required fields (that is checks.go's job).
+//
+// The bytes are parsed once: root.Decode drives Manifest.UnmarshalYAML, and
+// unknownFieldsFromNode walks the same yaml.Node to collect field keys the
+// current schema does not recognise.
 func Parse(data []byte) (*Manifest, []string, error) {
-	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
 		return nil, nil, fmt.Errorf("invalid YAML: %w", err)
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return &Manifest{}, nil, nil
+	}
+	top := root.Content[0]
+	if top.Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("invalid YAML: root is not a mapping")
 	}
 
 	var m Manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
+	if err := top.Decode(&m); err != nil {
 		return nil, nil, fmt.Errorf("invalid YAML: %w", err)
 	}
-
-	return &m, unknownFields(raw), nil
+	return &m, unknownFieldsFromNode(top), nil
 }
 
 // LoadFile reads Filename at pluginDir and delegates to Parse. Returns a
@@ -198,17 +188,29 @@ var knownInstall = map[string]struct{}{
 	"release_asset": {},
 }
 
-func unknownFields(raw map[string]any) []string {
+// unknownFieldsFromNode walks the top-level mapping and its nested `install`
+// mapping (when present) once, collecting any keys the current schema does
+// not recognise. The order of returned entries follows the mapping's own
+// key order, so diagnostics are deterministic per input.
+func unknownFieldsFromNode(mapping *yaml.Node) []string {
 	var out []string
-	for k := range raw {
-		if _, ok := knownTopLevel[k]; !ok {
-			out = append(out, k)
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		key := mapping.Content[i].Value
+		if _, ok := knownTopLevel[key]; !ok {
+			out = append(out, key)
+			continue
 		}
-	}
-	if inst, ok := raw["install"].(map[string]any); ok {
-		for k := range inst {
-			if _, ok := knownInstall[k]; !ok {
-				out = append(out, "install."+k)
+		if key != "install" {
+			continue
+		}
+		val := mapping.Content[i+1]
+		if val.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(val.Content); j += 2 {
+			sub := val.Content[j].Value
+			if _, ok := knownInstall[sub]; !ok {
+				out = append(out, "install."+sub)
 			}
 		}
 	}

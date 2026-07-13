@@ -313,20 +313,6 @@ func TestCheckReadmeMissingHeading(t *testing.T) {
 	}
 }
 
-func TestCheckRunBuildStub(t *testing.T) {
-	m, _ := mustParse(t, "testdata/manifests/valid_minimal.yaml")
-	findings := Check(m, CheckOptions{RunBuild: true})
-	if !hasFinding(findings, RuleBuildRuns, SeverityError) {
-		t.Errorf("run-build without PluginDir should ERROR, got:\n%s", findingsSummary(findings))
-	}
-
-	dir := t.TempDir()
-	findings = Check(m, CheckOptions{PluginDir: dir, RunBuild: true})
-	if !hasFinding(findings, RuleBuildRuns, SeverityWarning) {
-		t.Errorf("run-build stub should emit WARN, got:\n%s", findingsSummary(findings))
-	}
-}
-
 func TestHasErrorsWarnings(t *testing.T) {
 	findings := []Finding{
 		{Rule: RuleNamePattern, Severity: SeverityError},

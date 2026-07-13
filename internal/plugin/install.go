@@ -391,12 +391,18 @@ func runBuilds(stagingDir, stateDir, name string, cmds []string, timeout time.Du
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Assemble the build environment once — every step uses the same curated
+	// parent env plus npm_config_ignore_scripts=true, and curatedEnv() scans
+	// os.Environ() each call, so pulling it out of the loop avoids repeating
+	// that scan per step.
+	env := append(curatedEnv(), "npm_config_ignore_scripts=true")
+
 	for i, cmdStr := range cmds {
 		fmt.Fprintf(out, "\n--- build step %d/%d: %s ---\n", i+1, len(cmds), cmdStr)
 
 		cmd := exec.CommandContext(ctx, "bash", "-c", cmdStr)
 		cmd.Dir = stagingDir
-		cmd.Env = append(curatedEnv(), "npm_config_ignore_scripts=true")
+		cmd.Env = env
 		cmd.Stdout = out
 		cmd.Stderr = out
 		setProcessGroupKill(cmd)

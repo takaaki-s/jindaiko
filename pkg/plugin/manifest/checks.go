@@ -50,11 +50,9 @@ const (
 	RuleVersionMonotonic    RuleID = 10
 	RuleLicenseFile         RuleID = 11
 	RuleReadmeMinimal       RuleID = 12
-	RuleBuildRuns           RuleID = 13
-	RuleEntrypointExists    RuleID = 14
 	RuleOnMatcher           RuleID = 15
 	RulePopupBounds         RuleID = 16
-	RuleUnknownFieldWarning RuleID = 100 // synthetic; forward-compat WARN
+	RuleUnknownFieldWarning RuleID = 100 // synthetic; forward-compat WARN, out of the spec table range
 )
 
 // Finding is one validation result. Field points at the offending YAML key
@@ -86,22 +84,22 @@ type RegistryLookup interface {
 
 // CheckOptions bundles the moving parts of a check run: the plugin directory
 // (needed for file-existence rules), a registry lookup (nil = skip network
-// checks), the caller's own repo identity for rule #9, whether to actually
-// execute the build (rules #13/#14, opt-in), and any unknown fields carried
-// over from Parse.
+// checks), the caller's own repo identity for rule #9, and any unknown
+// fields carried over from Parse. The opt-in build execution (rules #13/#14
+// from the spec table) is not wired in yet and lives with the `plugin
+// validate` command (J3); the RuleID slots are reserved in
+// docs/plugin-registry.md and will be added here when the executor lands.
 type CheckOptions struct {
 	PluginDir     string
 	Registry      RegistryLookup
 	OwnerRepo     string
-	RunBuild      bool
 	UnknownFields []string
 }
 
-var namePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
-
-// NamePattern is exposed so callers outside this package (installers, remove
-// paths) can enforce the same grammar without duplicating the regex.
-var NamePattern = namePattern
+// NamePattern is the grammar plugin names must match. Exported so
+// installers, remove paths, and any external tooling enforce the exact
+// same rule as manifest validation.
+var NamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
 
 // Check runs every validation rule that applies to an already-parsed
 // manifest. It is safe to call with a partially populated Manifest; missing
@@ -127,17 +125,13 @@ func Check(m *Manifest, opts CheckOptions) []Finding {
 	findings = append(findings, checkOn(m)...)
 	findings = append(findings, checkPopup(m)...)
 
-	if opts.Registry != nil {
+	if opts.Registry != nil && NamePattern.MatchString(m.Name) {
 		findings = append(findings, checkRegistry(m, opts.Registry, opts.OwnerRepo)...)
 	}
 
 	if opts.PluginDir != "" {
 		findings = append(findings, checkLicenseFile(opts.PluginDir)...)
 		findings = append(findings, checkReadme(opts.PluginDir)...)
-	}
-
-	if opts.RunBuild {
-		findings = append(findings, checkBuildRuns(m, opts.PluginDir)...)
 	}
 
 	return findings
@@ -157,12 +151,12 @@ func Validate(m *Manifest) error {
 }
 
 func checkSchemaVersion(m *Manifest) []Finding {
-	if m.SchemaVersion < MinSchemaVersion || m.SchemaVersion > CurrentSchemaVersion {
+	if m.SchemaVersion != CurrentSchemaVersion {
 		return []Finding{{
 			Rule:     RuleSchemaVersion,
 			Severity: SeverityError,
-			Message: fmt.Sprintf("schema_version %d not supported (this build accepts %d..%d)",
-				m.SchemaVersion, MinSchemaVersion, CurrentSchemaVersion),
+			Message: fmt.Sprintf("schema_version %d not supported (this build accepts %d)",
+				m.SchemaVersion, CurrentSchemaVersion),
 			Field: "schema_version",
 		}}
 	}
@@ -206,12 +200,12 @@ func checkName(m *Manifest) []Finding {
 	if m.Name == "" {
 		return nil // already reported by required-fields
 	}
-	if !namePattern.MatchString(m.Name) {
+	if !NamePattern.MatchString(m.Name) {
 		return []Finding{{
 			Rule:     RuleNamePattern,
 			Severity: SeverityError,
 			Message: fmt.Sprintf("name %q must match %s (lowercase, starts with letter, 2-64 chars)",
-				m.Name, namePattern.String()),
+				m.Name, NamePattern.String()),
 			Field: "name",
 		}}
 	}
@@ -357,10 +351,11 @@ func checkPopup(m *Manifest) []Finding {
 	return findings
 }
 
+// checkRegistry consults the registry for rules #9 (name ownership) and #10
+// (monotonic version). Callers must gate this on a valid name (see Check);
+// this function assumes m.Name has already passed rule #5 grammar, so it
+// avoids a wasted network round-trip on names that could never be accepted.
 func checkRegistry(m *Manifest, reg RegistryLookup, ownerRepo string) []Finding {
-	if m.Name == "" {
-		return nil
-	}
 	owner, latest, err := reg.Lookup(m.Name)
 	if err != nil {
 		return []Finding{{
@@ -449,29 +444,6 @@ func checkReadme(pluginDir string) []Finding {
 		}}
 	}
 	return nil
-}
-
-// checkBuildRuns is the opt-in build execution stub (rules #13/#14). The
-// full implementation lives with the plugin validate command (J3) where an
-// executor, working directory, and process supervision are available; here
-// we return a placeholder WARN so the interface exists and tests can assert
-// the rule is dispatched.
-func checkBuildRuns(m *Manifest, pluginDir string) []Finding {
-	if m.Install.Source == nil {
-		return nil
-	}
-	if pluginDir == "" {
-		return []Finding{{
-			Rule:     RuleBuildRuns,
-			Severity: SeverityError,
-			Message:  "--run-build requires a plugin directory",
-		}}
-	}
-	return []Finding{{
-		Rule:     RuleBuildRuns,
-		Severity: SeverityWarning,
-		Message:  "--run-build execution is not yet wired in (stub)",
-	}}
 }
 
 // HasErrors reports whether the finding list contains at least one ERROR.

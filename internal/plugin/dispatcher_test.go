@@ -83,27 +83,11 @@ func countLines(path string) int {
 	return n
 }
 
-// dumpManifestFor renders a runtime manifest that prepares the plugin dir so
-// the dispatcher will exec its entrypoint. The entrypoint is a bash script
-// (chmod +x set below via the plugin dir setup) that writes JIN_PLUGIN_DEPTH
-// to out.txt.
-const dumpManifest = `schema_version: 1
-name: dumper
-version: 0.1.0
-description: dumps depth
-jin: ">=0.0.0"
-install:
-  source:
-    build: ["true"]
-    entrypoint: /bin/bash
-on:
-  - status_changed:idle
-`
-
-// Because the runtime dispatcher execs the entrypoint via `bash -c`, we can
-// point entrypoint at a shell fragment when the fixture wants one. Below,
-// `entrypoint: bash -c 'echo ...'` uses that fact.
-
+// dumpEntrypointRuntime is a fixture manifest whose entrypoint is itself a
+// bash fragment. The runtime execs the entrypoint via `bash -c`, so any
+// shell-parseable string works — here it appends JIN_PLUGIN_DEPTH to
+// out.txt, giving tests a cheap way to observe both that the plugin ran
+// and what depth it saw.
 const dumpEntrypointRuntime = `schema_version: 1
 name: dumper
 version: 0.1.0
@@ -387,7 +371,3 @@ popup:
 		t.Errorf("plugin env missing JIN_PLUGIN_POPUP_HEIGHT=24%%; env:\n%s", env)
 	}
 }
-
-// Silence unused variable warning for the pure-entrypoint dumpManifest
-// variant kept for reference; the runtime variant is used above.
-var _ = dumpManifest
