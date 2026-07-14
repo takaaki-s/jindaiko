@@ -1,21 +1,14 @@
 .PHONY: build install clean test fmt lint lint-install
 
-# Version is derived from git so local builds never drift from release tags.
-# On a tagged commit: "0.7.2". Post-tag / dirty tree becomes semver build
-# metadata (after "+") rather than a prerelease suffix (after "-") because
-# Masterminds/semver — used by pkg/plugin/manifest.CheckJinCompat — excludes
-# prereleases from ranges like ">=0.7.0" but ignores build metadata for
-# precedence. Without this, local builds past a tag would fail plugin compat.
-#   0.7.2            (tagged)     → 0.7.2
-#   0.7.1-2-gabc1234 (post-tag)   → 0.7.1+2.gabc1234
-#   0.7.1-2-gabc1234-dirty        → 0.7.1+2.gabc1234.dirty
-#   abc1234          (no tags)    → abc1234   (compat check parses this as
-#                                              non-semver and skips, same as "dev")
-# Falls back to "dev" outside a git checkout entirely.
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null | sed -E 's/^v//; s/^([0-9]+\.[0-9]+\.[0-9]+)-/\1+/; s/-/./g')
-ifeq ($(strip $(VERSION)),)
-VERSION := dev
-endif
+# Version comes from git so local builds never drift from release tags.
+# The sed rewrites describe's post-tag "-N-gSHA[-dirty]" suffix as semver
+# "+build-metadata": Masterminds/semver (used by
+# pkg/plugin/manifest.CheckJinCompat) excludes prereleases from ranges like
+# ">=0.7.0" but ignores build metadata. Falls back to "dev" outside a git
+# checkout. Recursive `=` so the describe (including --dirty's worktree scan)
+# only fires when build/install actually expands $(LDFLAGS), not on
+# `make test`/`lint`/`fmt`/etc.
+VERSION = $(shell v=$$(git describe --tags --always --dirty 2>/dev/null | sed -E 's/^v//; s/^([0-9]+\.[0-9]+\.[0-9]+)-/\1+/; s/-/./g'); echo "$${v:-dev}")
 BINARY := jin
 BUILD_DIR := bin
 
@@ -31,12 +24,13 @@ GOLANGCI_LINT_BIN_DIR := $(shell go env GOPATH)/bin
 endif
 GOLANGCI_LINT := $(GOLANGCI_LINT_BIN_DIR)/golangci-lint
 
-# ldflags for version injection
-COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -X github.com/takaaki-s/jind-ai/internal/version.Version=$(VERSION) \
-           -X github.com/takaaki-s/jind-ai/internal/version.Commit=$(COMMIT) \
-           -X github.com/takaaki-s/jind-ai/internal/version.Date=$(DATE)
+# ldflags for version injection. All `=` (lazy) so the git/date shell calls
+# only run when a recipe actually expands $(LDFLAGS) — see VERSION note above.
+COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE = $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS = -X github.com/takaaki-s/jind-ai/internal/version.Version=$(VERSION) \
+          -X github.com/takaaki-s/jind-ai/internal/version.Commit=$(COMMIT) \
+          -X github.com/takaaki-s/jind-ai/internal/version.Date=$(DATE)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/jin
