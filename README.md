@@ -687,10 +687,9 @@ linking a local path is itself the trust decision, and jind-ai never runs
 
 ### Language-specific guidance
 
-- **Shell / single file** — commit the script in the repo and point
-  `entrypoint` at it directly; `install.source.build` can be omitted
-  entirely. Add a `chmod +x` build step only if the script is generated
-  or its executable bit is not preserved in git.
+- **Shell / single file** — commit the script, point `entrypoint` at it,
+  and omit `install.source.build`; add a `chmod +x` step only if the
+  script is generated or the exec bit isn't preserved in git.
 - **Node.js / TypeScript** — bundle to `dist/` (esbuild etc.) as one build
   step; resolving dependencies at runtime (bun/deno) works too, but that
   first-dispatch network fetch can fail silently since dispatch is fail-open
