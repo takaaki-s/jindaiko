@@ -5,6 +5,18 @@ attaches them to the corresponding [GitHub Release](https://github.com/takaaki-s
 This file is the curated overview — highlights per release, not a per-commit
 log.
 
+## 0.7.2
+
+### Bug Fixes
+
+- **`jin plugin install <name>` / `jin plugin update` now clone from
+  `github.com`.** Registry entries record `repo` as bare `owner/name`
+  (the crawler's GitHub `FullName`), but the resolver was passing that
+  string to `git clone` unchanged and hitting an unresolvable host.
+  Bare entries are now prefixed with `https://github.com/` before
+  clone; entries that already carry a URL scheme (mirrors, `file://`
+  fixtures) pass through untouched.
+
 ## 0.7.1
 
 ### Features

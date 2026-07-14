@@ -1,6 +1,6 @@
 .PHONY: build install clean test fmt lint lint-install
 
-VERSION := 0.7.1
+VERSION := 0.7.2
 BINARY := jin
 BUILD_DIR := bin
 
