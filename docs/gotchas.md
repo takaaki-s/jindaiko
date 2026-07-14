@@ -17,6 +17,49 @@ Common pitfalls and caveats that agents tend to fall into.
 - **base-index issue**: If `base-index=1` is set in the user's `~/.tmux.conf`,
   the `:0.0` target becomes invalid. Use pane IDs (`%N`) instead.
 
+## Session send
+
+- **`SendPrompt` verifies keystrokes landed before pressing Enter.**
+  `tmux send-keys` reports success unconditionally, even when the target TUI
+  is still redrawing after startup and drops the incoming keys. To make this
+  observable, `Manager.SendPrompt` captures the pane before and after the
+  send and checks that the tail of the prompt appeared in the visible buffer
+  (`sendVerifyOK` in `internal/session/manager.go`). Attempts repeat with
+  backoff for up to `sendVerifyTimeout` (default 5s); Enter is only pressed
+  after a successful verify. This means the CLI contract is stronger than it
+  looks: when `jin session send` returns nil, the prompt is in the input
+  buffer — orchestration callers do NOT need to interleave
+  `jin session wait --status idle` between `session new` and the first
+  `session send`.
+
+- **`send --wait-running` only verifies the agent took the prompt.** Since
+  `SendPrompt` itself guarantees keystroke reception, `--wait-running` is
+  now purely about "did the agent transition into running/thinking/permission
+  after the prompt landed?". Callers that only care about "was my prompt
+  seen?" can drop the flag entirely.
+
+- **The verify check keys off the prompt's tail, not full text.** TUIs wrap
+  long input across visible rows and may add ANSI styling. `promptTail` /
+  `collapseWS` normalize both sides to whitespace-collapsed plain text and
+  match only the last `sendVerifyTailBytes` bytes. A prompt whose entire
+  tail happens to already exist in the pane (rare — e.g. re-sending the same
+  short phrase seen elsewhere on screen) will not falsely satisfy verify
+  because the check compares occurrence counts before/after, not mere
+  presence.
+
+- **Verify guarantees "the tail landed", not "exactly the prompt landed once".**
+  If a TUI accepts a strict prefix of the keys on the first attempt and
+  drops the rest, the retry re-sends the full prompt and the input area
+  ends up carrying `<prefix><full prompt>`. Verify still passes (the tail
+  appears one more time than before) and Enter commits the concatenated
+  form. We accept the risk in transport because the fixes we considered
+  (kill-line before each retry, echo-diff on the exact prompt) all leak
+  per-TUI assumptions into the agent-agnostic layer. In practice tmux
+  `send-keys` tends to deliver keystrokes atomically, so we have not
+  observed corruption against Claude Code or Codex — but if it ever
+  shows up (garbled first message on a slow-startup pane), that is
+  the escape hatch to revisit.
+
 ## Hook
 
 - **Session identification uses the `JIN_SESSION_ID` environment variable** (most reliable).

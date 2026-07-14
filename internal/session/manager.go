@@ -540,8 +540,92 @@ func (m *Manager) SetStatus(id string, status Status) {
 	}
 }
 
+// Verify-by-capture tuning. Kept as vars so tests can shorten them.
+// See SendPrompt for the mechanism, and docs/gotchas.md for the rationale.
+var (
+	// sendVerifyTimeout bounds the whole send-verify retry loop. On
+	// timeout SendPrompt returns an error before ever pressing Enter,
+	// so buffered/dropped keystrokes never reach the agent as a
+	// half-formed prompt.
+	sendVerifyTimeout = 5 * time.Second
+	// sendVerifySettleDelay is how long we wait between SendKeysLiteral
+	// and the follow-up CapturePane. Empirically ~50ms is enough for
+	// tmux to reflect the literal into the pane's visible buffer.
+	sendVerifySettleDelay = 50 * time.Millisecond
+	// sendVerifyBackoff is the pause between a failed verify and the
+	// next re-send. Kept small so a genuinely-not-ready TUI recovers
+	// within a few hundred ms once it is ready.
+	sendVerifyBackoff = 100 * time.Millisecond
+	// sendVerifyTailBytes controls how many trailing bytes of the prompt
+	// we look for in the capture. Long prompts get wrapped by the TUI's
+	// input area, so matching only the tail avoids reflow false negatives
+	// while still uniquely identifying the send.
+	sendVerifyTailBytes = 32
+)
+
+// promptTail returns the last n bytes of prompt with whitespace
+// collapsed. Used by sendVerifyOK to build a compact needle that
+// survives TUI reflow, ANSI decoration and trailing newlines.
+func promptTail(prompt string, n int) string {
+	s := collapseWS(prompt)
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
+}
+
+// collapseWS folds every run of whitespace into a single space and trims
+// the result. This makes verify tolerant to the TUI splitting the input
+// across multiple visible rows or padding it with cursor-positioning
+// spaces. strings.Fields already splits on unicode.IsSpace, so joining
+// its output with a single space produces the same normalized form.
+func collapseWS(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// sendVerifyOK reports whether the pane's captured content shows that
+// the prompt landed in the TUI's input area since the pre-send snapshot.
+// The check compares occurrence counts of promptTail(prompt) between
+// before and after so that pane content that already carried the tail
+// (previous conversation, help text, etc.) does not falsely satisfy
+// the verify.
+//
+// An empty prompt is treated as trivially accepted: SendPrompt is only
+// reachable via daemon.handleSend which already rejects empty and
+// whitespace-only prompts, so this branch exists only to keep the
+// helper total.
+func sendVerifyOK(before, after, prompt string) bool {
+	tail := promptTail(prompt, sendVerifyTailBytes)
+	if tail == "" {
+		return true
+	}
+	nAfter := strings.Count(collapseWS(after), tail)
+	if nAfter == 0 {
+		return false
+	}
+	return nAfter > strings.Count(collapseWS(before), tail)
+}
+
 // SendPrompt sends a prompt to a session's tmux pane.
 // The session must be in idle status.
+//
+// tmux send-keys is fire-and-forget from tmux's point of view: it
+// always reports success, even when the TUI has not finished its
+// startup redraw and drops the incoming keys. To make this observable,
+// SendPrompt captures the pane before and after each send attempt and
+// checks that the tail of prompt appeared in the visible buffer.
+// Attempts repeat with backoff until the check passes or
+// sendVerifyTimeout elapses. Enter is only pressed after verify
+// succeeds, so fully-dropped prompts never get committed.
+//
+// Known limit: verify checks "did the tail appear once more", not
+// "did exactly the prompt land once". A TUI that keeps a dropped
+// prefix from the first attempt can end up with "<prefix><full prompt>"
+// concatenated in its input buffer, and verify still passes. Agent-
+// agnostic guards (kill-line before retry, echo-diff on the exact
+// prompt) all leak per-TUI assumptions into this transport-layer
+// helper, so we accept the risk. Revisit if corruption is ever
+// observed against a real agent.
 func (m *Manager) SendPrompt(id, prompt string) error {
 	m.mu.RLock()
 	sess, ok := m.sessions[id]
@@ -563,9 +647,40 @@ func (m *Manager) SendPrompt(id, prompt string) error {
 		return fmt.Errorf("tmux client not available")
 	}
 
-	if err := m.tmuxClient.SendKeysLiteral(paneID, prompt); err != nil {
-		return fmt.Errorf("failed to send prompt: %w", err)
+	deadline := time.Now().Add(sendVerifyTimeout)
+	attempts := 0
+	for {
+		attempts++
+
+		before, err := m.tmuxClient.CapturePane(paneID, false)
+		if err != nil {
+			return fmt.Errorf("capture-pane before failed: %w", err)
+		}
+
+		if err := m.tmuxClient.SendKeysLiteral(paneID, prompt); err != nil {
+			return fmt.Errorf("failed to send prompt: %w", err)
+		}
+
+		time.Sleep(sendVerifySettleDelay)
+
+		after, err := m.tmuxClient.CapturePane(paneID, false)
+		if err != nil {
+			return fmt.Errorf("capture-pane after failed: %w", err)
+		}
+
+		if sendVerifyOK(before, after, prompt) {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"send verify: prompt did not appear in pane within %s (attempts=%d); "+
+					"the TUI may not have been ready to receive input",
+				sendVerifyTimeout, attempts)
+		}
+		time.Sleep(sendVerifyBackoff)
 	}
+
 	if err := m.tmuxClient.SendKeys(paneID, "Enter"); err != nil {
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}

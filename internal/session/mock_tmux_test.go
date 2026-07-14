@@ -21,16 +21,50 @@ type mockTmuxRunner struct {
 	panePaths map[string]string // target -> current path (GetPaneCurrentPath return value)
 	captured  map[string]string // target -> content (CapturePane return value)
 
+	// capturedSequence overrides captured for tests that need CapturePane
+	// to return different values on successive calls (send-verify retry
+	// scenarios). If set, entries are consumed in order and the final
+	// entry is repeated once exhausted. Empty/nil falls back to captured.
+	capturedSequence map[string][]string
+	capturedIdx      map[string]int
+
+	// captureErr, if set for a target, makes CapturePane return that
+	// error instead of any recorded content. Consumed on every call.
+	captureErr map[string]error
+
+	// captureErrAfter, if set for a target, is returned as the error on
+	// every CapturePane call after the first (i.e. the "after" capture in
+	// a SendPrompt attempt succeeds only on the initial "before" call,
+	// then fails). Lets tests exercise the "after"-side error path in
+	// isolation without failing the "before" capture first.
+	captureErrAfter map[string]error
+
+	// captureCallCount tracks how many times CapturePane was invoked per
+	// target, so captureErrAfter can distinguish first vs. subsequent
+	// calls without relying on capturedSequence consumption.
+	captureCallCount map[string]int
+
+	// sendKeysLiteralErr injects an error for SendKeysLiteral on a given
+	// target. Used by SendPrompt tests to simulate a tmux write failure
+	// during the prompt-injection phase.
+	sendKeysLiteralErr map[string]error
+
 	calls []mockCall // recorded calls for assertion
 }
 
 func newMockTmuxRunner() *mockTmuxRunner {
 	return &mockTmuxRunner{
-		sessions:  make(map[string]bool),
-		deadPanes: make(map[string]bool),
-		paneIDs:   make(map[string]string),
-		panePaths: make(map[string]string),
-		captured:  make(map[string]string),
+		sessions:           make(map[string]bool),
+		deadPanes:          make(map[string]bool),
+		paneIDs:            make(map[string]string),
+		panePaths:          make(map[string]string),
+		captured:           make(map[string]string),
+		capturedSequence:   make(map[string][]string),
+		capturedIdx:        make(map[string]int),
+		captureErr:         make(map[string]error),
+		captureErrAfter:    make(map[string]error),
+		captureCallCount:   make(map[string]int),
+		sendKeysLiteralErr: make(map[string]error),
 	}
 }
 
@@ -103,6 +137,9 @@ func (m *mockTmuxRunner) SendKeys(target, keys string) error {
 
 func (m *mockTmuxRunner) SendKeysLiteral(target, text string) error {
 	m.record("SendKeysLiteral", target, text)
+	if err, ok := m.sendKeysLiteralErr[target]; ok && err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -118,6 +155,24 @@ func (m *mockTmuxRunner) SplitWindow(target string, horizontal bool, percent int
 
 func (m *mockTmuxRunner) CapturePane(target string, ansi bool) (string, error) {
 	m.record("CapturePane", target)
+	m.captureCallCount[target]++
+	if err, ok := m.captureErr[target]; ok && err != nil {
+		return "", err
+	}
+	if err, ok := m.captureErrAfter[target]; ok && err != nil && m.captureCallCount[target] > 1 {
+		return "", err
+	}
+	if seq, ok := m.capturedSequence[target]; ok && len(seq) > 0 {
+		idx := m.capturedIdx[target]
+		if idx >= len(seq) {
+			idx = len(seq) - 1
+		}
+		val := seq[idx]
+		if idx+1 < len(seq) {
+			m.capturedIdx[target] = idx + 1
+		}
+		return val, nil
+	}
 	return m.captured[target], nil
 }
 

@@ -2658,3 +2658,372 @@ func TestBuildAgentShellCmd_SnapshotIsolatesFromConcurrentWrites(t *testing.T) {
 	close(stop)
 	<-writerDone
 }
+
+// ---------------------------------------------------------------------------
+// SendPrompt / verify-by-capture tests
+// ---------------------------------------------------------------------------
+
+// withShortSendVerify shortens the verify tuning knobs for the duration of
+// the test so timeout / retry cases finish in milliseconds instead of
+// seconds. Restore is registered on t.Cleanup, so callers don't need a
+// defer at the call site.
+//
+// Not safe under t.Parallel(): rewrites package-level vars. If parallel
+// send-verify tests are ever added, migrate to a config field on Manager.
+func withShortSendVerify(t *testing.T, timeout, settle, backoff time.Duration) {
+	t.Helper()
+	origTimeout, origSettle, origBackoff := sendVerifyTimeout, sendVerifySettleDelay, sendVerifyBackoff
+	sendVerifyTimeout = timeout
+	sendVerifySettleDelay = settle
+	sendVerifyBackoff = backoff
+	t.Cleanup(func() {
+		sendVerifyTimeout = origTimeout
+		sendVerifySettleDelay = origSettle
+		sendVerifyBackoff = origBackoff
+	})
+}
+
+// newIdleSessionWithPane creates a session, marks it idle and pins the given
+// tmux pane ID onto it — the pre-conditions SendPrompt requires.
+func newIdleSessionWithPane(t *testing.T, mgr *Manager, workDir, description, paneID string) *Session {
+	t.Helper()
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: workDir, Description: description})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	mgr.mu.Lock()
+	sess.Status = StatusIdle
+	sess.TmuxPaneID = paneID
+	mgr.mu.Unlock()
+	return sess
+}
+
+// countCalls reports how often the mock recorded a method whose first arg
+// matches target. SendPrompt tests use it to assert retry counts.
+func countCalls(m *mockTmuxRunner, method, target string) int {
+	n := 0
+	for _, c := range m.calls {
+		if c.method == method && len(c.args) > 0 && c.args[0] == target {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSendPrompt_HitOnFirstAttempt(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	withShortSendVerify(t, 2*time.Second, time.Millisecond, time.Millisecond)
+
+	const pane = "%1"
+	const prompt = "hello world"
+	sess := newIdleSessionWithPane(t, mgr, "/tmp/send-hit-first", "sp1", pane)
+
+	mock.capturedSequence[pane] = []string{
+		"$ ",              // before: empty prompt line
+		"$ hello world\n", // after: TUI echoed the prompt
+	}
+
+	if err := mgr.SendPrompt(sess.ID, prompt); err != nil {
+		t.Fatalf("SendPrompt returned err=%v, want nil", err)
+	}
+	if got := countCalls(mock, "SendKeysLiteral", pane); got != 1 {
+		t.Errorf("SendKeysLiteral called %d times, want 1", got)
+	}
+	if got := countCalls(mock, "SendKeys", pane); got != 1 {
+		t.Errorf("SendKeys called %d times, want 1", got)
+	}
+	if got := countCalls(mock, "CapturePane", pane); got != 2 {
+		t.Errorf("CapturePane called %d times, want 2 (before+after)", got)
+	}
+}
+
+func TestSendPrompt_HitOnRetry(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	withShortSendVerify(t, 2*time.Second, time.Millisecond, time.Millisecond)
+
+	const pane = "%2"
+	const prompt = "please build the report"
+	sess := newIdleSessionWithPane(t, mgr, "/tmp/send-retry", "sp2", pane)
+
+	// Sequence: before1 → after1 (miss) → before2 → after2 (hit).
+	mock.capturedSequence[pane] = []string{
+		"welcome\n$ ",                          // before1
+		"welcome\n$ ",                          // after1 — TUI dropped the keys
+		"welcome\n$ ",                          // before2
+		"welcome\n$ please build the report\n", // after2 — landed
+	}
+
+	if err := mgr.SendPrompt(sess.ID, prompt); err != nil {
+		t.Fatalf("SendPrompt returned err=%v, want nil", err)
+	}
+	if got := countCalls(mock, "SendKeysLiteral", pane); got != 2 {
+		t.Errorf("SendKeysLiteral called %d times, want 2 (initial + 1 retry)", got)
+	}
+	if got := countCalls(mock, "SendKeys", pane); got != 1 {
+		t.Errorf("SendKeys called %d times, want 1 (Enter after verify)", got)
+	}
+}
+
+func TestSendPrompt_TimeoutMiss(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	withShortSendVerify(t, 30*time.Millisecond, time.Millisecond, time.Millisecond)
+
+	const pane = "%3"
+	const prompt = "unreachable"
+	sess := newIdleSessionWithPane(t, mgr, "/tmp/send-timeout", "sp3", pane)
+
+	// Every capture returns the same idle screen — the prompt never lands.
+	mock.captured[pane] = "$ "
+
+	err := mgr.SendPrompt(sess.ID, prompt)
+	if err == nil {
+		t.Fatalf("SendPrompt returned nil, want timeout error")
+	}
+	if !strings.Contains(err.Error(), "send verify") {
+		t.Errorf("error %q missing 'send verify' prefix", err.Error())
+	}
+	if got := countCalls(mock, "SendKeys", pane); got != 0 {
+		t.Errorf("SendKeys called %d times on failure, want 0 (no Enter until verify passes)", got)
+	}
+	if countCalls(mock, "SendKeysLiteral", pane) < 1 {
+		t.Errorf("SendKeysLiteral was not called at all")
+	}
+}
+
+func TestSendPrompt_SendKeysLiteralError(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	withShortSendVerify(t, 2*time.Second, time.Millisecond, time.Millisecond)
+
+	const pane = "%4"
+	const prompt = "boom"
+	sess := newIdleSessionWithPane(t, mgr, "/tmp/send-lit-err", "sp4", pane)
+
+	mock.captured[pane] = "$ "
+	mock.sendKeysLiteralErr[pane] = errors.New("tmux disconnected")
+
+	err := mgr.SendPrompt(sess.ID, prompt)
+	if err == nil {
+		t.Fatalf("SendPrompt returned nil, want error")
+	}
+	if !strings.Contains(err.Error(), "failed to send prompt") {
+		t.Errorf("error %q missing 'failed to send prompt'", err.Error())
+	}
+	if got := countCalls(mock, "SendKeys", pane); got != 0 {
+		t.Errorf("SendKeys called %d times after send failure, want 0", got)
+	}
+}
+
+func TestSendPrompt_CapturePaneErrorBefore(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	withShortSendVerify(t, 2*time.Second, time.Millisecond, time.Millisecond)
+
+	const pane = "%5"
+	const prompt = "hello"
+	sess := newIdleSessionWithPane(t, mgr, "/tmp/send-cap-err-before", "sp5", pane)
+
+	mock.captureErr[pane] = errors.New("pane died")
+
+	err := mgr.SendPrompt(sess.ID, prompt)
+	if err == nil {
+		t.Fatalf("SendPrompt returned nil, want error")
+	}
+	if !strings.Contains(err.Error(), "capture-pane before failed") {
+		t.Errorf("error %q missing 'capture-pane before failed'", err.Error())
+	}
+	if got := countCalls(mock, "SendKeysLiteral", pane); got != 0 {
+		t.Errorf("SendKeysLiteral called %d times, want 0 (capture failed before send)", got)
+	}
+	if got := countCalls(mock, "SendKeys", pane); got != 0 {
+		t.Errorf("SendKeys called %d times, want 0 (Enter must not fire on capture failure)", got)
+	}
+}
+
+func TestSendPrompt_CapturePaneErrorAfter(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	withShortSendVerify(t, 2*time.Second, time.Millisecond, time.Millisecond)
+
+	const pane = "%5b"
+	const prompt = "hello"
+	sess := newIdleSessionWithPane(t, mgr, "/tmp/send-cap-err-after", "sp5b", pane)
+
+	// "before" capture succeeds, then "after" capture fails on the same
+	// SendPrompt attempt. Exercises the second capture-pane error branch
+	// so a regression that swaps the two wrapped strings is caught.
+	mock.capturedSequence[pane] = []string{"$ "}
+	mock.captureErrAfter[pane] = errors.New("pane died mid-send")
+
+	err := mgr.SendPrompt(sess.ID, prompt)
+	if err == nil {
+		t.Fatalf("SendPrompt returned nil, want error")
+	}
+	if !strings.Contains(err.Error(), "capture-pane after failed") {
+		t.Errorf("error %q missing 'capture-pane after failed'", err.Error())
+	}
+	if got := countCalls(mock, "SendKeysLiteral", pane); got != 1 {
+		t.Errorf("SendKeysLiteral called %d times, want 1 (send fires before the after-capture)", got)
+	}
+	if got := countCalls(mock, "SendKeys", pane); got != 0 {
+		t.Errorf("SendKeys called %d times, want 0 (Enter must not fire when after-capture fails)", got)
+	}
+}
+
+// TestSendPrompt_Preconditions covers the guard branches that return
+// before any tmux call. Both share the same shape: create a session,
+// force fields under lock, call SendPrompt, assert the error and that
+// no tmux verbs were invoked.
+func TestSendPrompt_Preconditions(t *testing.T) {
+	cases := []struct {
+		name    string
+		workDir string
+		status  Status
+		paneID  string
+		wantErr string
+	}{
+		{"not-idle", "/tmp/send-notidle", StatusThinking, "%6", "not idle"},
+		{"no-pane", "/tmp/send-nopane", StatusIdle, "", "no tmux pane"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, mock, _ := newTestManager(t)
+			sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: tc.workDir, Description: tc.name})
+			if err != nil {
+				t.Fatalf("create failed: %v", err)
+			}
+			mgr.mu.Lock()
+			sess.Status = tc.status
+			sess.TmuxPaneID = tc.paneID
+			mgr.mu.Unlock()
+
+			err = mgr.SendPrompt(sess.ID, "irrelevant")
+			if err == nil {
+				t.Fatalf("SendPrompt returned nil, want error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q missing %q", err.Error(), tc.wantErr)
+			}
+			for _, c := range mock.calls {
+				if c.method == "SendKeys" || c.method == "SendKeysLiteral" || c.method == "CapturePane" {
+					t.Errorf("unexpected tmux call %s(%v) on failing precondition", c.method, c.args)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers used by SendPrompt
+// ---------------------------------------------------------------------------
+
+func TestCollapseWS(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"single-space", " ", ""},
+		{"only-whitespace", "   \t\n\r", ""},
+		{"single-word", "hello", "hello"},
+		{"internal-runs", "hello\t\n  world", "hello world"},
+		{"leading-trailing", "  hi  ", "hi"},
+		{"cr-lf", "a\r\nb", "a b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := collapseWS(tc.in); got != tc.want {
+				t.Errorf("collapseWS(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPromptTail(t *testing.T) {
+	cases := []struct {
+		name   string
+		prompt string
+		n      int
+		want   string
+	}{
+		{"short-prompt-full", "hi", 32, "hi"},
+		{"exact-length", "abcdefgh", 8, "abcdefgh"},
+		{"longer-than-n", "aaaaaaaaaaaaaaaaabcdef", 6, "abcdef"},
+		{"whitespace-collapse", "aa  \n bb\tcc", 32, "aa bb cc"},
+		{"whitespace-collapse-then-truncate", "aaaaaaaa  bbb ccc", 5, "b ccc"},
+		{"empty", "", 32, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := promptTail(tc.prompt, tc.n); got != tc.want {
+				t.Errorf("promptTail(%q, %d) = %q, want %q", tc.prompt, tc.n, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendVerifyOK(t *testing.T) {
+	cases := []struct {
+		name   string
+		before string
+		after  string
+		prompt string
+		want   bool
+	}{
+		{
+			name:   "empty-prompt-trivially-ok",
+			before: "$ ",
+			after:  "$ ",
+			prompt: "",
+			want:   true,
+		},
+		{
+			name:   "tail-appeared-in-after",
+			before: "welcome\n$ ",
+			after:  "welcome\n$ hello world",
+			prompt: "hello world",
+			want:   true,
+		},
+		{
+			name:   "tail-missing-from-after",
+			before: "welcome\n$ ",
+			after:  "welcome\n$ ",
+			prompt: "hello world",
+			want:   false,
+		},
+		{
+			name:   "tail-preexisted-in-before-same-count-in-after",
+			before: "hello world\n$ ",
+			after:  "hello world\n$ ",
+			prompt: "hello world",
+			want:   false,
+		},
+		{
+			name:   "tail-preexisted-but-additional-occurrence-in-after",
+			before: "hello world\n$ ",
+			after:  "hello world\n$ hello world",
+			prompt: "hello world",
+			want:   true,
+		},
+		{
+			name:   "long-prompt-verifies-on-tail-only",
+			before: "$ ",
+			after:  "$ " + strings.Repeat("x", 500) + "TAIL-ANCHOR-END",
+			prompt: strings.Repeat("x", 500) + "TAIL-ANCHOR-END",
+			want:   true,
+		},
+		{
+			name:   "multiline-prompt-normalized",
+			before: "$ ",
+			after:  "$ first line and second bit",
+			prompt: "first\nline and second bit",
+			want:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sendVerifyOK(tc.before, tc.after, tc.prompt); got != tc.want {
+				t.Errorf("sendVerifyOK(before=%q, after=%q, prompt=%q) = %v, want %v",
+					tc.before, tc.after, tc.prompt, got, tc.want)
+			}
+		})
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -404,7 +405,12 @@ func (s *Server) handleSend(data json.RawMessage) Response {
 		return Response{Success: false, Error: err.Error()}
 	}
 
-	if req.Prompt == "" {
+	// Reject prompts that are empty or whitespace-only. The whitespace check
+	// pairs with Manager.SendPrompt's verify path: sendVerifyOK treats a
+	// whitespace-only prompt as trivially accepted (nothing meaningful to
+	// look for in the pane), so allowing one through here would send an
+	// unverified Enter to the TUI.
+	if strings.TrimSpace(req.Prompt) == "" {
 		return Response{Success: false, Error: "prompt is required"}
 	}
 	if err := s.manager.SendPrompt(req.ID, req.Prompt); err != nil {
