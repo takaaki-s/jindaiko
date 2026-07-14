@@ -5,6 +5,17 @@ attaches them to the corresponding [GitHub Release](https://github.com/takaaki-s
 This file is the curated overview — highlights per release, not a per-commit
 log.
 
+## 0.7.1
+
+### Features
+
+- **`install.source.build` is now optional.** Plugins that ship a directly
+  executable entrypoint (shell scripts, prebuilt binaries checked into the
+  repo) can omit the `build` block entirely and point `install.source.entrypoint`
+  at the script or binary. Only `install.source.entrypoint` remains required
+  under `install.source`. Existing manifests that declare a `build` block
+  continue to validate unchanged.
+
 ## 0.7.0
 
 ### Features
