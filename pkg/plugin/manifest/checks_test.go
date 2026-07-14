@@ -52,6 +52,17 @@ func TestCheckRuntimeFullPasses(t *testing.T) {
 	}
 }
 
+func TestCheckScriptPluginWithoutBuildPasses(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_script.yaml")
+	findings := Check(m, CheckOptions{})
+	if HasErrors(findings) {
+		t.Errorf("expected no ERROR findings for a build-less script plugin, got:\n%s", findingsSummary(findings))
+	}
+	if len(m.BuildCommands()) != 0 {
+		t.Errorf("expected zero build commands, got %v", m.BuildCommands())
+	}
+}
+
 func TestCheckBadNameEmitsRule5(t *testing.T) {
 	m, _ := mustParse(t, "testdata/manifests/invalid_bad_name.yaml")
 	findings := Check(m, CheckOptions{})

@@ -598,7 +598,7 @@ timeout: 30s
 | `description` | Yes | One-liner shown in `jin plugin ls-remote` search results |
 | `license` / `homepage` | No | Optional metadata carried into the registry entry |
 | `jin` | Yes | Semver constraint on the jin binary (`">=0.7.0"`, `"^0.7"`, `">=0.7 <0.9"`). Checked at install and at every dispatch |
-| `install.source.build` | Conditional | Ordered list of build commands (each element runs in its own `bash -c`, no piping across elements) — see [Language-specific guidance](#language-specific-guidance). Required when `install.source` is used |
+| `install.source.build` | No | Ordered list of build commands (each element runs in its own `bash -c`, no piping across elements) — see [Language-specific guidance](#language-specific-guidance). Omit for plugins that ship a directly-executable entrypoint (shell scripts, prebuilt binaries in the repo) |
 | `install.source.entrypoint` | Conditional | Path (relative to the plugin dir) the dispatcher executes on every event. Required when `install.source` is used |
 | `install.release_asset.pattern` | Conditional | Alternative to `install.source`. Downloads a prebuilt asset from the latest GitHub Release. Placeholders: `{os}`, `{arch}` |
 | `on` | No | List of `status_changed` or `status_changed:<status>` matchers. Empty or omitted = action-only |
@@ -687,8 +687,9 @@ linking a local path is itself the trust decision, and jind-ai never runs
 
 ### Language-specific guidance
 
-- **Shell / single file** — a one-element `install.source.build` that copies
-  or `chmod +x`s the script, with `entrypoint` pointing at it.
+- **Shell / single file** — commit the script, point `entrypoint` at it,
+  and omit `install.source.build`; add a `chmod +x` step only if the
+  script is generated or the exec bit isn't preserved in git.
 - **Node.js / TypeScript** — bundle to `dist/` (esbuild etc.) as one build
   step; resolving dependencies at runtime (bun/deno) works too, but that
   first-dispatch network fetch can fail silently since dispatch is fail-open

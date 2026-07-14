@@ -53,11 +53,13 @@ type Install struct {
 	ReleaseAsset *ReleaseAssetInstall `yaml:"release_asset,omitempty"`
 }
 
-// SourceInstall builds the plugin from source. Each build entry runs as its
-// own process (no shell piping); Entrypoint must exist after the build and
-// is what the runtime dispatcher executes on each event.
+// SourceInstall builds the plugin from source. Build is optional — plugins
+// that ship a directly-executable entrypoint (shell scripts, prebuilt bins
+// committed to the repo) omit it entirely. Each build entry runs as its own
+// process (no shell piping); Entrypoint must exist after any build steps
+// complete and is what the runtime dispatcher executes on each event.
 type SourceInstall struct {
-	Build      []string `yaml:"build"`
+	Build      []string `yaml:"build,omitempty"`
 	Entrypoint string   `yaml:"entrypoint"`
 }
 

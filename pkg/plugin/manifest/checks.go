@@ -264,24 +264,15 @@ func checkInstallXOR(m *Manifest) []Finding {
 }
 
 func checkSourceInstall(s *SourceInstall) []Finding {
-	var findings []Finding
-	if len(s.Build) == 0 {
-		findings = append(findings, Finding{
-			Rule:     RuleRequiredFields,
-			Severity: SeverityError,
-			Message:  "install.source.build must have at least one command",
-			Field:    "install.source.build",
-		})
-	}
 	if s.Entrypoint == "" {
-		findings = append(findings, Finding{
+		return []Finding{{
 			Rule:     RuleRequiredFields,
 			Severity: SeverityError,
 			Message:  "install.source.entrypoint is required",
 			Field:    "install.source.entrypoint",
-		})
+		}}
 	}
-	return findings
+	return nil
 }
 
 var releaseAssetPlaceholder = regexp.MustCompile(`\{([a-zA-Z_]+)\}`)

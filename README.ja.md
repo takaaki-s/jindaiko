@@ -518,7 +518,7 @@ timeout: 30s
 | `description` | あり | `jin plugin ls-remote` の検索結果に表示される一行説明 |
 | `license` / `homepage` | なし | 任意メタデータ。レジストリエントリに載る |
 | `jin` | あり | jin バイナリに対する semver 制約（`">=0.7.0"`、`"^0.7"`、`">=0.7 <0.9"`）。install 時と毎 dispatch 時にチェック |
-| `install.source.build` | 条件付き | ビルドコマンド配列（各要素が独立の `bash -c`。要素をまたぐパイプは不可） — [言語別ガイド](#言語別ガイド) を参照。`install.source` 使用時は必須 |
+| `install.source.build` | なし | ビルドコマンド配列（各要素が独立の `bash -c`。要素をまたぐパイプは不可） — [言語別ガイド](#言語別ガイド) を参照。直接実行可能な entrypoint を同梱するプラグイン（shell script、リポジトリに commit した prebuilt バイナリ等）では省略可 |
 | `install.source.entrypoint` | 条件付き | ディスパッチャーが毎イベント実行するパス（プラグインディレクトリ相対）。`install.source` 使用時は必須 |
 | `install.release_asset.pattern` | 条件付き | `install.source` の代替。最新 GitHub Release から prebuilt asset をダウンロード。プレースホルダ: `{os}` / `{arch}` |
 | `on` | なし | `status_changed` または `status_changed:<status>` マッチャーのリスト。空または省略時は action 専用 |
@@ -596,7 +596,7 @@ git からの install/update では、何かに触れる前にマニフェスト
 
 ### 言語別ガイド
 
-- **Shell / 単一ファイル** — `install.source.build` を 1 要素にしてスクリプトをコピー / `chmod +x` する程度で済みます。`entrypoint` はそのスクリプトを指します。
+- **Shell / 単一ファイル** — スクリプトを repo に commit し `entrypoint` から直接指して `install.source.build` は省略。スクリプトが生成物であるか実行権限が git 上で保持されない場合のみ、`chmod +x` の 1 要素を build に追加してください。
 - **Node.js / TypeScript** — `dist/`（esbuild 等）にバンドルするビルドステップを 1 つ書いてください。ランタイム依存解決（bun/deno）も動作しますが、dispatch は fail-open のため初回 dispatch 時のネットワーク取得が黙って失敗することがあります — 事前ビルド済みバンドルの方が予測可能です。
 - **Go / Rust などのコンパイル言語** — `install.source.build` にビルド手順を宣言してください。各要素は独立プロセスとして実行され（要素をまたぐパイプは不可）、ユーザーのプラットフォーム/アーキテクチャに合わせたバイナリを生成できます（`go.sum` / `Cargo.lock` は再現性のために有用）。ビルドは install/update ごとに一度だけ実行されます。jind-ai は依存解決やツールチェーンの検出を代行しないため、必要なものはプラグイン自身の README に明記してください。非ゼロ終了した場合 install/update はアトミックに失敗し（中途半端な状態は残りません）、出力は `~/.local/state/jind-ai/plugin-logs/<name>-build.log` に保存されます。jind-ai はデフォルトでビルド環境に `npm_config_ignore_scripts=true` を注入します（サプライチェーン対策で、自分のビルドステップ内で上書き可能）。ビルド自体はサンドボックス化されておらず、ユーザー自身の権限で実行されます。
 
