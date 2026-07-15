@@ -462,6 +462,7 @@ type pluginListItem struct {
 	Name          string `json:"name"`
 	Version       string `json:"version,omitempty"`
 	SchemaVersion int    `json:"schema_version,omitempty"`
+	Description   string `json:"description,omitempty"`
 	State         string `json:"state"`
 	Linked        bool   `json:"linked"`
 	Source        string `json:"source"`
@@ -491,6 +492,7 @@ func runPluginList(cmd *cobra.Command, args []string) error {
 			if e.Manifest != nil {
 				item.Version = e.Manifest.Version
 				item.SchemaVersion = e.Manifest.SchemaVersion
+				item.Description = e.Manifest.Description
 			}
 			if e.Err != nil {
 				item.Error = e.Err.Error()
@@ -506,11 +508,17 @@ func runPluginList(cmd *cobra.Command, args []string) error {
 	}
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tVERSION\tSTATE\tSOURCE")
+	fmt.Fprintln(tw, "NAME\tVERSION\tSTATE\tDESCRIPTION\tSOURCE")
 	for _, e := range entries {
 		version := "-"
-		if e.Manifest != nil && e.Manifest.Version != "" {
-			version = e.Manifest.Version
+		description := "-"
+		if e.Manifest != nil {
+			if e.Manifest.Version != "" {
+				version = e.Manifest.Version
+			}
+			if d := manifestDescriptionSingleLine(e.Manifest.Description); d != "" {
+				description = d
+			}
 		}
 		state := e.State.String()
 		if e.Lock.Linked {
@@ -519,7 +527,20 @@ func runPluginList(cmd *cobra.Command, args []string) error {
 		if e.Err != nil {
 			state += ": " + truncateStr(e.Err.Error(), 60)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Name, version, state, e.Lock.Source)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", e.Name, version, state, description, e.Lock.Source)
 	}
 	return tw.Flush()
+}
+
+// manifestDescriptionSingleLine flattens a possibly multi-line manifest
+// description into one tab-safe line for the plain-text table. Multi-line
+// scalars are legal in the YAML schema, but a table row cannot wrap.
+func manifestDescriptionSingleLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// Fold any run of whitespace (including embedded newlines) into a single
+	// space so the tabwriter never sees a stray \n or \t.
+	return strings.Join(strings.Fields(s), " ")
 }

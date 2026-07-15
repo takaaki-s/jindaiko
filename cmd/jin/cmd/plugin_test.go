@@ -102,6 +102,12 @@ func TestPluginInstallListUpdate(t *testing.T) {
 	if !strings.Contains(listOut, source) {
 		t.Errorf("expected source %q in list, got %q", source, listOut)
 	}
+	if !strings.Contains(listOut, "end-to-end plugin CLI fixture") {
+		t.Errorf("expected manifest description in list, got %q", listOut)
+	}
+	if !strings.Contains(listOut, "DESCRIPTION") {
+		t.Errorf("expected DESCRIPTION column header in list, got %q", listOut)
+	}
 
 	upOut, err := runPluginCmd(t, "update", "--yes", "notifier")
 	if err != nil {

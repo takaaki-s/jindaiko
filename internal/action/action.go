@@ -75,15 +75,20 @@ func CoreActions(kb KeyBindings) []Action {
 
 // PluginActions maps enabled plugin entries to palette actions. Callers pass
 // the result of Registry.Runnable, which already filters to StateEnabled
-// entries.
+// entries. Description (when the manifest declares one) rides along so the
+// palette fuzzy haystack treats plugin rows like core rows.
 func PluginActions(entries []plugin.Entry) []Action {
 	out := make([]Action, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, Action{
+		a := Action{
 			ID:    PluginIDPrefix + e.Name,
 			Kind:  KindPlugin,
 			Label: e.Name,
-		})
+		}
+		if e.Manifest != nil {
+			a.Description = e.Manifest.Description
+		}
+		out = append(out, a)
 	}
 	return out
 }

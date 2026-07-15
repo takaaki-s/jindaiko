@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/takaaki-s/jind-ai/internal/plugin"
+	"github.com/takaaki-s/jind-ai/pkg/plugin/manifest"
 )
 
 func TestCoreActions_LabelStable(t *testing.T) {
@@ -117,5 +118,24 @@ func TestPluginActions_Empty(t *testing.T) {
 	actions := PluginActions(nil)
 	if len(actions) != 0 {
 		t.Fatalf("len(actions) = %d, want 0", len(actions))
+	}
+}
+
+func TestPluginActions_DescriptionFromManifest(t *testing.T) {
+	entries := []plugin.Entry{
+		{Name: "with-desc", Manifest: &manifest.Manifest{Description: "sends slack notifications"}},
+		{Name: "no-desc", Manifest: &manifest.Manifest{}},
+		{Name: "broken"}, // Manifest is nil for StateBroken entries
+	}
+
+	want := []string{"sends slack notifications", "", ""}
+	actions := PluginActions(entries)
+	if len(actions) != len(entries) {
+		t.Fatalf("len(actions) = %d, want %d", len(actions), len(entries))
+	}
+	for i, a := range actions {
+		if a.Description != want[i] {
+			t.Errorf("actions[%d].Description = %q, want %q", i, a.Description, want[i])
+		}
 	}
 }
