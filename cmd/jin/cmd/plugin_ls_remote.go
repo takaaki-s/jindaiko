@@ -22,6 +22,13 @@ var pluginLsRemoteCmd = &cobra.Command{
 	Short: "List plugins from the remote registry",
 	Long: `List plugins available in the jind-ai plugin registry.
 
+Columns: NAME is the value to pass to 'jin plugin install' — the recommended
+path, because it resolves through the registry and pins to the commit SHA the
+crawler recorded. REPO is shown as 'github.com/<owner>/<name>' as a hint of
+which repository backs the entry; that value can also be pasted straight into
+'jin plugin install' as a fallback (git clone URL path), though it bypasses
+the registry's pinning and consent metadata.
+
 The registry document is cached locally for 24 hours; use --refresh to bypass
 the freshness check (the client still sends conditional headers so an unchanged
 registry is a cheap 304).`,
@@ -125,7 +132,20 @@ func printLsRemoteTable(out io.Writer, entries []manifest.RegistryEntry) {
 		if !e.UpdatedAt.IsZero() {
 			updated = e.UpdatedAt.UTC().Format("2006-01-02")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Name, e.LatestVersion, updated, e.Repo)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.Name, e.LatestVersion, updated, displayRepo(e.Repo))
 	}
 	_ = tw.Flush()
+}
+
+// displayRepo shows a registry entry's Repo field so the printed value can be
+// copy-pasted straight into `jin plugin install`. The MVP registry is
+// GitHub-only and records Repo as bare "owner/name" (see
+// RemoteResolution.Source in internal/plugin/remote.go, which shares this
+// invariant); URL-scheme values are integration-test fixtures that pass
+// through unchanged.
+func displayRepo(repo string) string {
+	if strings.Contains(repo, "://") {
+		return repo
+	}
+	return "github.com/" + repo
 }

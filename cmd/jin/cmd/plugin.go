@@ -36,15 +36,20 @@ var pluginInstallCmd = &cobra.Command{
 	Short: "Install a plugin",
 	Long: `Install a plugin from the registry, a git source, or a local directory.
 
-A registry name (e.g. jind-ai-notifier) resolves through the plugin registry to
-the repository and pinned commit for the requested version (default: the entry's
-latest_version). --pin/-v selects a specific version, --refresh bypasses the
-24-hour registry cache, and --force lets the install proceed when the plugin's
-jin compat range does not match this binary.
+Prefer the registry name for anything listed by 'jin plugin ls-remote': it is
+the NAME column, resolves through the plugin registry, and pins the install to
+the commit SHA the crawler recorded for the requested version (default: the
+entry's latest_version). --pin/-v selects a specific version, --refresh
+bypasses the 24-hour registry cache, and --force lets the install proceed when
+the plugin's jin compat range does not match this binary.
 
-A git source is <host>/<owner>/<repo>[@ref] (or any URL 'git clone' accepts).
-The repository is cloned, its manifest is shown for confirmation, and — when the
-manifest declares a build — the build runs before the plugin is placed.
+For anything not in the registry — or when you need to point at a specific
+branch, tag, or commit — pass a git source: <host>/<owner>/<repo>[@ref], or
+any URL 'git clone' accepts. The repository is cloned, its manifest is shown
+for confirmation, and — when the manifest declares a build — the build runs
+before the plugin is placed. The REPO column of 'ls-remote' is also a valid
+git source; pasting it works but bypasses the registry's SHA pinning, so
+prefer the NAME path when the entry appears in the registry.
 
 With --link <path>, the local directory at <path> is symlinked into the plugins
 directory (its manifest name decides the install name) so edits take effect

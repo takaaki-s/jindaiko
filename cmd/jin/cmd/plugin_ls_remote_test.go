@@ -223,6 +223,15 @@ func TestPluginLsRemoteJSONOutputParses(t *testing.T) {
 	if entries[0].Versions[0].SHA != "def456" {
 		t.Errorf("expected SHA def456, got %q", entries[0].Versions[0].SHA)
 	}
+	// JSON consumers (crawler / external tools) expect the raw crawler
+	// schema — the display-layer "github.com/" prefix used by the table
+	// output must NOT leak into the JSON.
+	if entries[0].Repo != "bar/another-plugin" {
+		t.Errorf("expected JSON Repo bar/another-plugin, got %q", entries[0].Repo)
+	}
+	if entries[1].Repo != "foo/jind-ai-notifier" {
+		t.Errorf("expected JSON Repo foo/jind-ai-notifier, got %q", entries[1].Repo)
+	}
 }
 
 func TestPluginLsRemoteJSONEmptyIsArrayNotNull(t *testing.T) {
@@ -238,6 +247,74 @@ func TestPluginLsRemoteJSONEmptyIsArrayNotNull(t *testing.T) {
 	trimmed := strings.TrimSpace(stdout)
 	if trimmed != "[]" {
 		t.Errorf("expected empty JSON array, got %q", trimmed)
+	}
+}
+
+func TestPluginLsRemoteTableRepoHasGithubPrefix(t *testing.T) {
+	setupIsolatedState(t)
+	srv := registryTestServer(t, twoEntryRegistryJSON(t))
+
+	stdout, _, err := runLsRemoteCmd(t, "--registry", srv.URL)
+	if err != nil {
+		t.Fatalf("ls-remote: err=%v, out=%q", err, stdout)
+	}
+	// Users copy the REPO column and paste it into `jin plugin install`, so
+	// the REPO column of every data row must start with "github.com/". Parse
+	// each row's last whitespace-separated field (tabwriter uses spaces)
+	// instead of substring-matching the whole output, because the bare
+	// "owner/name" naturally appears as the suffix of "github.com/owner/name"
+	// and would slip past a plain Contains check.
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected header + entries, got:\n%s", stdout)
+	}
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		repo := fields[len(fields)-1]
+		if !strings.HasPrefix(repo, "github.com/") {
+			t.Errorf("REPO column %q must start with github.com/ (row: %q)", repo, line)
+		}
+	}
+}
+
+func TestPluginLsRemoteTableRepoWithSchemePassesThrough(t *testing.T) {
+	setupIsolatedState(t)
+
+	// URL-scheme Repo values (file:// used by integration test fixtures,
+	// or a future http:// mirror) must appear in the table unchanged, not
+	// re-prefixed to "github.com/file://…".
+	doc := manifest.RegistryDocument{
+		SchemaVersion: manifest.CurrentSchemaVersion,
+		GeneratedAt:   time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC),
+		Plugins: []manifest.RegistryEntry{
+			{
+				Name:          "fixture-plugin",
+				Description:   "Repo already carries a URL scheme",
+				Repo:          "file:///tmp/fixture-plugin",
+				LatestVersion: "0.1.0",
+				Versions:      []manifest.RegistryVersion{{Version: "0.1.0", SHA: "abc123"}},
+				UpdatedAt:     time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	srv := registryTestServer(t, body)
+
+	stdout, _, err := runLsRemoteCmd(t, "--registry", srv.URL)
+	if err != nil {
+		t.Fatalf("ls-remote: err=%v, out=%q", err, stdout)
+	}
+	if !strings.Contains(stdout, "file:///tmp/fixture-plugin") {
+		t.Errorf("expected scheme-qualified Repo to appear unchanged, got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "github.com/file:") {
+		t.Errorf("scheme-qualified Repo must not be prefixed, got:\n%s", stdout)
 	}
 }
 

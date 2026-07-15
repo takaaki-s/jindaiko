@@ -61,6 +61,14 @@ unchanged registry is a cheap `304`. If the fetch fails for any reason
 warning printed to stderr so you can still install; use `--refresh` to force a
 network round-trip.
 
+The `NAME` column is what you pass to `jin plugin install` — that path
+resolves through the registry and pins to the commit SHA the crawler
+recorded. The `REPO` column is shown as `github.com/<owner>/<name>` so it can
+also be pasted straight into `jin plugin install` as a fallback (git clone
+URL path), though that bypasses the registry's pinning and consent metadata.
+The `--json` output keeps `repo` as the crawler's bare `owner/name` so
+existing consumers of the JSON schema are unaffected.
+
 ## Installing a plugin
 
 ```bash
@@ -79,7 +87,9 @@ jin plugin install jind-ai-notifier --yes        # skip the consent prompt
    the same version never lands on a different commit than the one you
    approved.
 2. **Git URL** (`github.com/owner/repo[@ref]`) — clones directly, bypasses
-   the registry.
+   the registry. The `REPO` column from `ls-remote` is a valid value here, so
+   copy-paste works; use the registry name form (1) when you want the pinned
+   SHA rather than whatever the branch resolves to right now.
 3. **`--link <path>`** — symlinks a local plugin directory (development).
    Trusted outright; no build runs.
 
