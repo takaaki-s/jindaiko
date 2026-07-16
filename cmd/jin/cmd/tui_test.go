@@ -149,6 +149,15 @@ func TestApplyActionPanelBinding_ExplicitEmpty(t *testing.T) {
 // Uses installedFn injection to bypass the on-disk registry read so tests
 // can exercise bind-key issuance without a fixture plugin tree.
 
+// wantNotifierBind returns the expected fakeBinder.calls row for a bind
+// issued by applyPluginActionBindings against the `notifier` plugin at
+// the given key, with selfBin `/usr/local/bin/jin`. Centralizing the
+// run-shell format keeps every plugin-binding test in lockstep when the
+// shell string changes (e.g., adding output redirects).
+func wantNotifierBind(key string) []string {
+	return []string{key, "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier >/dev/null 2>&1"}
+}
+
 // pluginSet is a shorthand for building fake installedPluginSetFn results.
 func pluginSet(names ...string) installedPluginSetFn {
 	return func() map[string]struct{} {
@@ -204,9 +213,7 @@ func TestApplyPluginActionBindings_IssuesRunShell(t *testing.T) {
 	fb := &fakeBinder{}
 	yaml := "keybindings:\n  plugins:\n    notifier: { keys: [\"M-n\"] }\n"
 	applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
-	want := [][]string{
-		{"M-n", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier >/dev/null 2>&1"},
-	}
+	want := [][]string{wantNotifierBind("M-n")}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
 	}
@@ -226,9 +233,7 @@ func TestApplyPluginActionBindings_EmptyKeyIsSkipped(t *testing.T) {
 	fb := &fakeBinder{}
 	yaml := "keybindings:\n  plugins:\n    notifier: { keys: [\"\", \"M-n\"] }\n"
 	applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
-	want := [][]string{
-		{"M-n", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier >/dev/null 2>&1"},
-	}
+	want := [][]string{wantNotifierBind("M-n")}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
 	}
@@ -239,8 +244,8 @@ func TestApplyPluginActionBindings_MultipleKeysPerPlugin(t *testing.T) {
 	yaml := "keybindings:\n  plugins:\n    notifier: { keys: [\"M-n\", \"M-!\"] }\n"
 	applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
 	want := [][]string{
-		{"M-n", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier >/dev/null 2>&1"},
-		{"M-!", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier >/dev/null 2>&1"},
+		wantNotifierBind("M-n"),
+		wantNotifierBind("M-!"),
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
@@ -298,9 +303,7 @@ func TestApplyPluginActionBindings_NormalizesPlusNotation(t *testing.T) {
 			fb := &fakeBinder{}
 			yaml := fmt.Sprintf("keybindings:\n  plugins:\n    notifier: { keys: [\"%s\"] }\n", tc.yamlKey)
 			applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
-			want := [][]string{
-				{tc.wantKey, "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier >/dev/null 2>&1"},
-			}
+			want := [][]string{wantNotifierBind(tc.wantKey)}
 			if !reflect.DeepEqual(fb.calls, want) {
 				t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
 			}
