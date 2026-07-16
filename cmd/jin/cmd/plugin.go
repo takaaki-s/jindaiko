@@ -82,16 +82,19 @@ var pluginListCmd = &cobra.Command{
 }
 
 var pluginRunCmd = &cobra.Command{
-	Use:   "run <name> [--session <selector>]",
-	Short: "Run a plugin on demand",
-	Long: `Run a plugin immediately, bypassing event matching and debounce. The
-plugin receives JIN_EVENT=action, plus the session's current snapshot when
---session is given; without it the run is a global action and all session
-fields are empty. When invoked from inside tmux, the caller's server socket
-and pane travel with the run as JIN_CALLER_TMUX_SOCKET/JIN_CALLER_TMUX_PANE.
-The run is asynchronous; follow its output in the plugin log.`,
-	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: completePluginNames,
+	Use:   "run <name> [action] [--session <selector>]",
+	Short: "Run a plugin action on demand",
+	Long: `Run a plugin action immediately, bypassing event matching and debounce.
+Without [action] the plugin's default action (the first one its manifest
+declares) runs; naming an unknown action is an error listing the available
+ones. The plugin receives JIN_EVENT=action, plus the session's current
+snapshot when --session is given; without it the run is a global action and
+all session fields are empty. When invoked from inside tmux, the caller's
+server socket and pane travel with the run as
+JIN_CALLER_TMUX_SOCKET/JIN_CALLER_TMUX_PANE. The run is asynchronous; follow
+its output in the plugin log.`,
+	Args:              cobra.RangeArgs(1, 2),
+	ValidArgsFunction: completePluginRunArgs,
 	RunE:              runPluginRun,
 }
 
@@ -110,6 +113,12 @@ func init() {
 
 func runPluginRun(cmd *cobra.Command, args []string) error {
 	name := args[0]
+	// An empty action ID means the plugin's default action (actions[0]); the
+	// daemon owns that resolution so old and new CLIs behave identically.
+	actionID := ""
+	if len(args) >= 2 {
+		actionID = args[1]
+	}
 
 	client := daemon.NewClient(getSocketPath())
 
@@ -126,6 +135,7 @@ func runPluginRun(cmd *cobra.Command, args []string) error {
 
 	err = client.PluginRun(daemon.PluginRunRequest{
 		Plugin:           name,
+		Action:           actionID,
 		SessionID:        sessionID,
 		Depth:            depth,
 		CallerTmuxSocket: tmux.SocketPathFromEnv(os.Getenv("TMUX")),
@@ -134,10 +144,16 @@ func runPluginRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// The started message names the action only when the caller did — a
+	// default run keeps the plugin-level phrasing older scripts may grep for.
+	started := name
+	if actionID != "" {
+		started = name + ":" + actionID
+	}
 	if sessionID == "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Started plugin %s (global)\n", name)
+		fmt.Fprintf(cmd.OutOrStdout(), "Started plugin %s (global)\n", started)
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "Started plugin %s for session %s\n", name, sessionDesc)
+		fmt.Fprintf(cmd.OutOrStdout(), "Started plugin %s for session %s\n", started, sessionDesc)
 	}
 	return nil
 }
@@ -453,6 +469,42 @@ func completePluginNames(cmd *cobra.Command, args []string, toComplete string) (
 		}
 	}
 	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completePluginRunArgs is the two-stage completion for `jin plugin run`:
+// installed plugin names in position 0, that plugin's action IDs in position 1.
+func completePluginRunArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completePluginNames(cmd, args, toComplete)
+	case 1:
+		return completePluginActions(args[0], toComplete)
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+// completePluginActions suggests the action IDs declared by pluginName's
+// manifest. An unknown or broken plugin yields no suggestions (cobra then
+// completes nothing) rather than an error — completion must never fail loudly.
+func completePluginActions(pluginName, toComplete string) ([]string, cobra.ShellCompDirective) {
+	entries, err := loadPluginEntries()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	for _, e := range entries {
+		if e.Name != pluginName || e.Manifest == nil {
+			continue
+		}
+		var ids []string
+		for _, id := range e.Manifest.ActionIDs() {
+			if strings.HasPrefix(id, toComplete) {
+				ids = append(ids, id)
+			}
+		}
+		return ids, cobra.ShellCompDirectiveNoFileComp
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 // pluginListItem is the JSON shape for `jin plugin list --json`. plugin.Entry
