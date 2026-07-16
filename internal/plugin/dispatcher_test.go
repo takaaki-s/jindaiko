@@ -376,20 +376,28 @@ popup:
 	}
 }
 
-// twoActionManifest is a v2 fixture with two actions on disjoint matchers:
-// on-idle appends to idle.txt for status_changed:idle, on-thinking appends to
-// thinking.txt for status_changed:thinking. Each line carries $JIN_ACTION_ID
-// so tests can also assert which action identity the run saw.
-const twoActionManifest = `schema_version: 2
-name: multi
+// v2Manifest renders a schema_version 2 fixture: the header (semver,
+// permissive jin range, no-op build) is shared by every v2 fixture in this
+// file so each test declares only its name and actions block (indented YAML
+// starting at "  - id: ...").
+func v2Manifest(name, description, actions string) string {
+	return fmt.Sprintf(`schema_version: 2
+name: %s
 version: 0.1.0
-description: two independent actions
+description: %s
 jin: ">=0.0.0"
 install:
   source:
     build: ["true"]
 actions:
-  - id: on-idle
+%s`, name, description, actions)
+}
+
+// twoActionManifest is a v2 fixture with two actions on disjoint matchers:
+// on-idle appends to idle.txt for status_changed:idle, on-thinking appends to
+// thinking.txt for status_changed:thinking. Each line carries $JIN_ACTION_ID
+// so tests can also assert which action identity the run saw.
+var twoActionManifest = v2Manifest("multi", "two independent actions", `  - id: on-idle
     entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> idle.txt'
     on:
       - status_changed:idle
@@ -397,7 +405,7 @@ actions:
     entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> thinking.txt'
     on:
       - status_changed:thinking
-`
+`)
 
 // Two actions with disjoint matchers must fire independently: an idle event
 // runs only on-idle, a thinking event only on-thinking.
@@ -435,16 +443,7 @@ func TestPublishRoutesEventsPerAction(t *testing.T) {
 
 // bothActionsManifest is a v2 fixture whose two actions both match
 // status_changed:idle, writing to distinct files.
-const bothActionsManifest = `schema_version: 2
-name: both
-version: 0.1.0
-description: two actions on the same matcher
-jin: ">=0.0.0"
-install:
-  source:
-    build: ["true"]
-actions:
-  - id: first
+var bothActionsManifest = v2Manifest("both", "two actions on the same matcher", `  - id: first
     entrypoint: bash -c 'echo ran >> first.txt'
     on:
       - status_changed:idle
@@ -452,7 +451,7 @@ actions:
     entrypoint: bash -c 'echo ran >> second.txt'
     on:
       - status_changed:idle
-`
+`)
 
 func TestPublishFiresAllMatchingActions(t *testing.T) {
 	d, pluginsDir, stateDir := newTestDispatcher(t, config.PluginsConfig{})
@@ -499,20 +498,11 @@ func TestPassDebounceIsPerAction(t *testing.T) {
 
 // actionDumpManifest exposes JIN_ACTION_ID for on-demand runs: both actions
 // append their received id to out.txt.
-const actionDumpManifest = `schema_version: 2
-name: actiondump
-version: 0.1.0
-description: dumps action id
-jin: ">=0.0.0"
-install:
-  source:
-    build: ["true"]
-actions:
-  - id: primary
+var actionDumpManifest = v2Manifest("actiondump", "dumps action id", `  - id: primary
     entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> out.txt'
   - id: secondary
     entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> out.txt'
-`
+`)
 
 // RunAction with an empty id must run the default action (actions[0]); an
 // explicit id must run exactly that action. Both runs must see their own id

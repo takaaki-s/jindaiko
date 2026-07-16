@@ -196,10 +196,23 @@ func runPluginInstallLink(cmd *cobra.Command, link string) error {
 	}
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "name: %s\n", m.Name)
-	fmt.Fprintf(out, "on: %s\n", strings.Join(m.On, ", "))
-	fmt.Fprintf(out, "entrypoint: %s\n", m.Entrypoint())
+	for i := range m.Actions {
+		printActionLine(out, "action ", &m.Actions[i])
+	}
 	fmt.Fprintln(out, "linked")
 	return nil
+}
+
+// printActionLine renders one manifest action as "<prefix><id>: <entrypoint>
+// (on: ...)", omitting the on-clause for actions without event matchers.
+// Shared by the link confirmation and the install/update consent screen so
+// both surfaces describe exactly what the dispatcher will execute.
+func printActionLine(out io.Writer, prefix string, a *manifest.Action) {
+	fmt.Fprintf(out, "%s%s: %s", prefix, a.ID, a.Entrypoint)
+	if len(a.On) > 0 {
+		fmt.Fprintf(out, " (on: %s)", strings.Join(a.On, ", "))
+	}
+	fmt.Fprintln(out)
 }
 
 func runPluginInstallBySource(cmd *cobra.Command, arg string) error {
@@ -406,6 +419,8 @@ func jinDisplayVersion() string {
 
 // printPluginPlan renders the confirmation block shared by install and update.
 // source is the raw install argument (install) or the locked source (update).
+// Actions are listed one per line so the user consents to every entrypoint
+// and matcher set the dispatcher will run, not just the default action.
 func printPluginPlan(out io.Writer, m *manifest.Manifest, source, commitSHA string) {
 	fmt.Fprintf(out, "Plugin: %s v%s\n", m.Name, m.Version)
 	fmt.Fprintf(out, "Source: %s\n", source)
@@ -413,8 +428,9 @@ func printPluginPlan(out io.Writer, m *manifest.Manifest, source, commitSHA stri
 	if m.Jin != "" {
 		fmt.Fprintf(out, "Jin:    %s\n", m.Jin)
 	}
-	fmt.Fprintf(out, "Events: %s\n", strings.Join(m.On, ", "))
-	fmt.Fprintf(out, "Entry:  %s\n", m.Entrypoint())
+	for i := range m.Actions {
+		printActionLine(out, "Action: ", &m.Actions[i])
+	}
 	if cmds := m.BuildCommands(); len(cmds) > 0 {
 		fmt.Fprintf(out, "Build:  %s\n", strings.Join(cmds, " && "))
 	}
