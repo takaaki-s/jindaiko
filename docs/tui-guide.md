@@ -197,10 +197,24 @@ keybindings:
     #   keys: []                  # explicit empty ⇒ no binding
 ```
 
-Each key must be a **modifier-prefixed** tmux bind-key notation (`M-n`, `C-x`,
-etc.). Bare-letter keys are captured before reaching the display pane and
-would starve the agent of input — the same constraint the other outer-tmux
-bindings enforce.
+Each key must be a **modifier-prefixed** binding. Both notations are
+accepted and normalized to tmux `bind-key` form at load time:
+
+- tmux style — `M-n`, `C-f`, `S-Tab`, `C-M-p`
+- "+" style — `alt+n`, `ctrl+f`, `shift+tab`, `ctrl+alt+p`
+
+Modifier names are matched case-insensitively; the trailing key token is
+preserved verbatim so tmux's own case sensitivity (e.g. `M-p` vs `M-P`) is
+not smoothed away. Symbols like `M-\` stay as-is. Bare-letter keys are
+captured before reaching the display pane and would starve the agent of
+input — the same constraint the other outer-tmux bindings enforce.
+
+The `keybindings` block ends up mixing the two styles: inner-TUI keys
+(`quit`, `detach`, form submit) always use the bubbletea "+" form
+(`ctrl+c`, `ctrl+]`) because bubbletea itself only understands that
+notation; outer-tmux keys (`toggle_pane`, `action_panel`, `search`,
+`plugins.*.keys`) travel through the normalizer above, so pick whichever
+form you find easier to read.
 
 The tmux command issued is `run-shell '<jin>' plugin run <name>`, which
 returns immediately (the daemon dispatches the plugin asynchronously). If

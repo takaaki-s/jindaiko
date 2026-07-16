@@ -205,7 +205,7 @@ func TestApplyPluginActionBindings_IssuesRunShell(t *testing.T) {
 	yaml := "keybindings:\n  plugins:\n    notifier: { keys: [\"M-n\"] }\n"
 	applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
 	want := [][]string{
-		{"M-n", "run-shell", "'/usr/local/bin/jin' plugin run notifier"},
+		{"M-n", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
@@ -227,7 +227,7 @@ func TestApplyPluginActionBindings_EmptyKeyIsSkipped(t *testing.T) {
 	yaml := "keybindings:\n  plugins:\n    notifier: { keys: [\"\", \"M-n\"] }\n"
 	applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
 	want := [][]string{
-		{"M-n", "run-shell", "'/usr/local/bin/jin' plugin run notifier"},
+		{"M-n", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
@@ -239,8 +239,8 @@ func TestApplyPluginActionBindings_MultipleKeysPerPlugin(t *testing.T) {
 	yaml := "keybindings:\n  plugins:\n    notifier: { keys: [\"M-n\", \"M-!\"] }\n"
 	applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
 	want := [][]string{
-		{"M-n", "run-shell", "'/usr/local/bin/jin' plugin run notifier"},
-		{"M-!", "run-shell", "'/usr/local/bin/jin' plugin run notifier"},
+		{"M-n", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier"},
+		{"M-!", "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
@@ -273,6 +273,36 @@ func TestApplyPluginActionBindings_LogsCollisionWithCoreKey(t *testing.T) {
 			}
 			if len(fb.calls) != 1 {
 				t.Errorf("expected 1 BindKey despite collision, got %d: %v", len(fb.calls), fb.calls)
+			}
+		})
+	}
+}
+
+func TestApplyPluginActionBindings_NormalizesPlusNotation(t *testing.T) {
+	// The "+" style is the more natural notation to reach for and appears in
+	// other keybindings.* fields (quit / detach) as bubbletea-style tokens.
+	// Silently accepting it on the tmux-side plugin bindings keeps the two
+	// styles from being confusing without exposing raw yaml errors.
+	cases := []struct {
+		yamlKey string
+		wantKey string
+	}{
+		{"ctrl+f", "C-f"},
+		{"Ctrl+F", "C-F"},
+		{"alt+n", "M-n"},
+		{"shift+tab", "S-tab"},
+		{"ctrl+alt+p", "C-M-p"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.yamlKey, func(t *testing.T) {
+			fb := &fakeBinder{}
+			yaml := fmt.Sprintf("keybindings:\n  plugins:\n    notifier: { keys: [\"%s\"] }\n", tc.yamlKey)
+			applyPluginActionBindings(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin", pluginSet("notifier"))
+			want := [][]string{
+				{tc.wantKey, "run-shell", "-b", "'/usr/local/bin/jin' plugin run notifier"},
+			}
+			if !reflect.DeepEqual(fb.calls, want) {
+				t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
 			}
 		})
 	}
@@ -437,7 +467,7 @@ func TestApplySessionFilterBinding_EmptyKeySkip(t *testing.T) {
 	yaml := "keybindings:\n  search: [\"\", \"ctrl+p\"]\n"
 	applySessionFilterBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
 	want := [][]string{
-		{"ctrl+p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
+		{"C-p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)

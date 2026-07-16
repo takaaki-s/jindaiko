@@ -160,7 +160,11 @@ func applyPluginActionBindings(tc actionPanelBinder, configMgr *config.Manager, 
 			if other, ok := reserved[key]; ok {
 				log.Printf("plugin %s key %q collides with %s; last binding wins", name, key, other)
 			}
-			_ = tc.BindKey(key, "run-shell", runShellCmd)
+			// `-b` detaches the shell from tmux's copy-mode output viewer so
+			// `Started plugin ...` (runPluginRun stdout) does not surface in
+			// the active pane. The daemon dispatches asynchronously anyway,
+			// so nothing waits on the exit status here.
+			_ = tc.BindKey(key, "run-shell", "-b", runShellCmd)
 		}
 	}
 }

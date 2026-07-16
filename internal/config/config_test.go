@@ -410,7 +410,9 @@ func TestGetSessionFilterKeys_UserSet(t *testing.T) {
 		Keybindings: KeybindingsConfig{Search: []string{"ctrl+p"}},
 	}}
 	got := m.GetSessionFilterKeys()
-	want := []string{"ctrl+p"}
+	// "+"-notation input is normalized to tmux bind-key notation so tmux
+	// actually accepts the binding (see normalizeTmuxKey).
+	want := []string{"C-p"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("GetSessionFilterKeys() = %v, want %v", got, want)
 	}

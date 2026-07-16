@@ -672,7 +672,7 @@ func (m *Manager) GetTogglePaneKeys() []string {
 	if m.config.Keybindings.TogglePane == nil {
 		return DefaultKeybindings().TogglePane
 	}
-	return m.config.Keybindings.TogglePane
+	return normalizeTmuxKeys(m.config.Keybindings.TogglePane)
 }
 
 // GetActionPanelKeys returns the tmux bind-key strings for the outer-tmux
@@ -689,7 +689,7 @@ func (m *Manager) GetActionPanelKeys() []string {
 	if m.config.Keybindings.ActionPanel == nil {
 		return DefaultKeybindings().ActionPanel
 	}
-	return m.config.Keybindings.ActionPanel
+	return normalizeTmuxKeys(m.config.Keybindings.ActionPanel)
 }
 
 // GetPluginKeybindings returns the per-plugin outer-tmux bindings. Returns
@@ -708,7 +708,7 @@ func (m *Manager) GetPluginKeybindings() map[string]PluginKeybinding {
 	for name, kb := range src {
 		var keys []string
 		if len(kb.Keys) > 0 {
-			keys = append([]string(nil), kb.Keys...)
+			keys = normalizeTmuxKeys(append([]string(nil), kb.Keys...))
 		}
 		out[name] = PluginKeybinding{Keys: keys}
 	}
@@ -726,7 +726,7 @@ func (m *Manager) GetSessionFilterKeys() []string {
 	if m.config.Keybindings.Search == nil {
 		return DefaultKeybindings().Search
 	}
-	return m.config.Keybindings.Search
+	return normalizeTmuxKeys(m.config.Keybindings.Search)
 }
 
 // GetPopupSize returns tmux-formatted width/height strings (e.g. "70%") for a

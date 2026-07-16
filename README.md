@@ -325,13 +325,17 @@ keybindings:
                           # action_panel: ["M-x"]      to rebind
   # Outer tmux (jin-mgr) — per-plugin action triggers (both panes)
   # No default — user opts in per plugin. Fires `jin plugin run <name>`
-  # via tmux `run-shell`, so the plugin itself is responsible for opening
-  # any popup (matches the `jin pane popup --here` model). Uninstalled
-  # plugins are silently skipped with one log line. Key collisions with
-  # core outer-tmux bindings are warned only; tmux last-write-wins.
+  # via tmux `run-shell -b` (background, no output to the active pane), so
+  # the plugin itself is responsible for opening any popup (matches the
+  # `jin pane popup --here` model). Uninstalled plugins are silently
+  # skipped with one log line. Key collisions with core outer-tmux
+  # bindings are warned only; tmux last-write-wins.
+  # Outer-tmux keys accept both tmux notation (`M-n`, `C-f`) and the "+"
+  # style (`alt+n`, `ctrl+f`); they are normalized to tmux form at load.
   plugins:
     # notifier:         { keys: ["M-n"] }        # 1 打鍵で通知一覧
     # worktree-cleanup: { keys: ["M-w", "M-c"] } # 複数キー可
+    # journal:          { keys: ["ctrl+f"] }     # "+" style も可
 
 # Optional: popup sizes (percent, int 1-100). Every entry is optional;
 # omitted popups keep their default (create/session_filter/action = 70-80).
