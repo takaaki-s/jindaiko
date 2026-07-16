@@ -54,6 +54,9 @@ func TestParseValidMinimal(t *testing.T) {
 	if got := m.EffectiveTimeout(); got != DefaultTimeout {
 		t.Errorf("EffectiveTimeout = %s, want %s", got, DefaultTimeout)
 	}
+	if len(m.Actions) != 1 || m.Actions[0].ID != "default" {
+		t.Errorf("Actions = %+v, want a single synthesized default action", m.Actions)
+	}
 }
 
 func TestParseValidReleaseAsset(t *testing.T) {
@@ -199,6 +202,201 @@ func TestLoadFileHappyPath(t *testing.T) {
 	}
 	if m.Name != "hello-plugin" || len(unknown) != 0 {
 		t.Errorf("LoadFile returned unexpected state: name=%q unknown=%v", m.Name, unknown)
+	}
+}
+
+func TestNormalizeV1MinimalSynthesizesDefaultAction(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_minimal.yaml")
+	if len(m.Actions) != 1 {
+		t.Fatalf("Actions len = %d, want 1", len(m.Actions))
+	}
+	a := m.Actions[0]
+	if a.ID != "default" {
+		t.Errorf("Actions[0].ID = %q, want default", a.ID)
+	}
+	if a.Label != "hello-plugin" {
+		t.Errorf("Actions[0].Label = %q, want hello-plugin", a.Label)
+	}
+	if a.Entrypoint != "./bin/hello" {
+		t.Errorf("Actions[0].Entrypoint = %q, want ./bin/hello", a.Entrypoint)
+	}
+	if len(a.On) != 1 || a.On[0] != "status_changed" {
+		t.Errorf("Actions[0].On = %v, want [status_changed]", a.On)
+	}
+}
+
+func TestNormalizeV1FullSynthesizesDefaultActionWithOnAndPopup(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_runtime_full.yaml")
+	if len(m.Actions) != 1 {
+		t.Fatalf("Actions len = %d, want 1", len(m.Actions))
+	}
+	a := m.Actions[0]
+	if len(a.On) != 2 || a.On[1] != "status_changed:permission" {
+		t.Errorf("Actions[0].On = %v, unexpected", a.On)
+	}
+	if a.Popup == nil || a.Popup.Width != 40 || a.Popup.Height != 20 {
+		t.Errorf("Actions[0].Popup = %+v, want {Width:40 Height:20}", a.Popup)
+	}
+}
+
+func TestNormalizeV1WithoutEntrypointDoesNotSynthesize(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 1
+name: hello
+version: 0.1.0
+description: v1 manifest without an entrypoint
+jin: ">=0.7.0"
+install:
+  source:
+    build: [go build]
+`)
+	m, _, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(m.Actions) != 0 {
+		t.Errorf("Actions len = %d, want 0 (no entrypoint to synthesize from)", len(m.Actions))
+	}
+}
+
+func TestNormalizeIsNoOpForV2(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_v2_multi_action.yaml")
+	if len(m.Actions) != 2 {
+		t.Fatalf("Actions len = %d, want 2 (normalize must not touch explicit v2 actions)", len(m.Actions))
+	}
+	if m.Actions[0].ID != "notify" || m.Actions[0].Entrypoint != "./bin/notify" {
+		t.Errorf("Actions[0] = %+v, unexpected", m.Actions[0])
+	}
+	if m.Actions[1].ID != "send-dm" || m.Actions[1].Entrypoint != "./bin/send-dm" {
+		t.Errorf("Actions[1] = %+v, unexpected", m.Actions[1])
+	}
+}
+
+func TestDefaultAction(t *testing.T) {
+	var empty Manifest
+	if got := empty.DefaultAction(); got != nil {
+		t.Errorf("DefaultAction() on empty Actions = %+v, want nil", got)
+	}
+	m := Manifest{Actions: []Action{
+		{ID: "default", Entrypoint: "./bin/hello"},
+		{ID: "extra", Entrypoint: "./bin/extra"},
+	}}
+	got := m.DefaultAction()
+	if got == nil || got.ID != m.Actions[0].ID || got.Entrypoint != m.Actions[0].Entrypoint {
+		t.Errorf("DefaultAction() = %+v, want %+v", got, m.Actions[0])
+	}
+}
+
+func TestFindAction(t *testing.T) {
+	m := Manifest{Actions: []Action{
+		{ID: "default", Entrypoint: "./bin/hello"},
+		{ID: "send-dm", Entrypoint: "./bin/send-dm"},
+	}}
+	if got := m.FindAction("send-dm"); got == nil || got.Entrypoint != "./bin/send-dm" {
+		t.Errorf("FindAction(send-dm) = %+v, want Entrypoint ./bin/send-dm", got)
+	}
+	if got := m.FindAction("missing"); got != nil {
+		t.Errorf("FindAction(missing) = %+v, want nil", got)
+	}
+	if got := m.FindAction(""); got != nil {
+		t.Errorf(`FindAction("") = %+v, want nil`, got)
+	}
+}
+
+func TestActionIDs(t *testing.T) {
+	m := Manifest{Actions: []Action{{ID: "notify"}, {ID: "send-dm"}}}
+	got := m.ActionIDs()
+	want := []string{"notify", "send-dm"}
+	if !equalStrings(got, want) {
+		t.Errorf("ActionIDs() = %v, want %v", got, want)
+	}
+}
+
+func TestEntrypointFromDefaultAction(t *testing.T) {
+	v1, _ := mustParse(t, "testdata/manifests/valid_minimal.yaml")
+	if got, want := v1.Entrypoint(), v1.Actions[0].Entrypoint; got != want {
+		t.Errorf("v1 Entrypoint() = %q, want %q (Actions[0].Entrypoint)", got, want)
+	}
+	v2, _ := mustParse(t, "testdata/manifests/valid_v2_multi_action.yaml")
+	if got, want := v2.Entrypoint(), v2.Actions[0].Entrypoint; got != want {
+		t.Errorf("v2 Entrypoint() = %q, want %q (Actions[0].Entrypoint)", got, want)
+	}
+}
+
+func TestParseValidV2MultiAction(t *testing.T) {
+	m, unknown := mustParse(t, "testdata/manifests/valid_v2_multi_action.yaml")
+	if len(unknown) != 0 {
+		t.Errorf("unexpected unknown fields: %v", unknown)
+	}
+	if m.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2", m.SchemaVersion)
+	}
+	if len(m.Actions) != 2 {
+		t.Fatalf("Actions len = %d, want 2", len(m.Actions))
+	}
+	notify := m.Actions[0]
+	if notify.ID != "notify" || notify.Entrypoint != "./bin/notify" {
+		t.Errorf("Actions[0] = %+v, unexpected", notify)
+	}
+	if len(notify.On) != 1 || notify.On[0] != "status_changed" {
+		t.Errorf("Actions[0].On = %v, unexpected", notify.On)
+	}
+	if notify.Popup == nil || notify.Popup.Width != 40 || notify.Popup.Height != 20 {
+		t.Errorf("Actions[0].Popup = %+v, want {Width:40 Height:20}", notify.Popup)
+	}
+	sendDM := m.Actions[1]
+	if sendDM.ID != "send-dm" || sendDM.Entrypoint != "./bin/send-dm" {
+		t.Errorf("Actions[1] = %+v, unexpected", sendDM)
+	}
+	if len(sendDM.On) != 0 {
+		t.Errorf("Actions[1].On = %v, want empty (no on: declared)", sendDM.On)
+	}
+	if sendDM.Popup != nil {
+		t.Errorf("Actions[1].Popup = %+v, want nil (no popup: declared)", sendDM.Popup)
+	}
+}
+
+func TestParseUnknownActionField(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 2
+name: hello
+version: 0.1.0
+description: action with an unknown field
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: default
+    entrypoint: ./bin/hello
+    future_field: x
+`)
+	_, unknown, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{"actions[default].future_field"}; !equalStrings(unknown, want) {
+		t.Errorf("unknown = %v, want %v", unknown, want)
+	}
+}
+
+func TestParseUnknownActionFieldWithoutID(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 2
+name: hello
+version: 0.1.0
+description: action without an id has an unknown field
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - entrypoint: ./bin/hello
+    future_field: x
+`)
+	_, unknown, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if want := []string{"actions[].future_field"}; !equalStrings(unknown, want) {
+		t.Errorf("unknown = %v, want %v", unknown, want)
 	}
 }
 

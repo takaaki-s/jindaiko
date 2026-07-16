@@ -1,0 +1,13 @@
+schema_version: 2
+name: hello-plugin-v2-single
+version: 0.1.0
+description: A v2 test plugin with a single default action
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: default
+    entrypoint: ./bin/hello
+    on:
+      - status_changed

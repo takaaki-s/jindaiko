@@ -19,10 +19,13 @@ import (
 // directory root (either the source repo or the installed plugin directory).
 const Filename = "jind-ai-plugin.yaml"
 
+// MinSchemaVersion is the oldest schema_version this build still accepts.
+// Manifests below this value are rejected by rule #3.
+const MinSchemaVersion = 1
+
 // CurrentSchemaVersion is the newest schema_version this build understands.
-// A future N-2 window will land when the first bump ships; today the check
-// is strict equality against this value.
-const CurrentSchemaVersion = 1
+// checkSchemaVersion accepts the closed range [MinSchemaVersion, CurrentSchemaVersion].
+const CurrentSchemaVersion = 2
 
 // DefaultTimeout is applied to a plugin run when the manifest omits timeout.
 const DefaultTimeout = 30 * time.Second
@@ -44,6 +47,23 @@ type Manifest struct {
 	On      []string      `yaml:"on,omitempty"`
 	Timeout time.Duration `yaml:"-"`
 	Popup   *PopupConfig  `yaml:"popup,omitempty"`
+
+	// Actions declares one or more executable units per plugin (schema v2+).
+	// For v1 manifests, normalize() synthesizes a single default action from
+	// the top-level Install.Source.Entrypoint / On / Popup so downstream code
+	// can uniformly consume Actions regardless of the source schema version.
+	Actions []Action `yaml:"actions,omitempty"`
+}
+
+// Action is a single executable unit within a plugin. A plugin declares one
+// or more actions; the first entry acts as the implicit default when the
+// caller does not specify an action id.
+type Action struct {
+	ID         string       `yaml:"id"`
+	Label      string       `yaml:"label,omitempty"`
+	Entrypoint string       `yaml:"entrypoint"`
+	On         []string     `yaml:"on,omitempty"`
+	Popup      *PopupConfig `yaml:"popup,omitempty"`
 }
 
 // Install carries either a source build recipe or a release asset pattern.
@@ -110,15 +130,77 @@ func (m *Manifest) EffectiveTimeout() time.Duration {
 	return m.Timeout
 }
 
-// Entrypoint returns the runtime-executable path declared by install.source,
-// or "" for release_asset installs (whose runtime path is decided at fetch
-// time by the installer). Callers use this in place of the historical `run`
-// field on the runtime manifest.
+// Entrypoint returns the runtime-executable path of the default action.
+// For v1 manifests this resolves via normalize() to Install.Source.Entrypoint;
+// for v2 it is Actions[0].Entrypoint. Returns "" when no default action
+// exists (release_asset installs, or v1 manifests missing an entrypoint —
+// the latter is rejected by checks.go).
 func (m *Manifest) Entrypoint() string {
-	if m.Install.Source == nil {
-		return ""
+	if a := m.DefaultAction(); a != nil {
+		return a.Entrypoint
 	}
-	return m.Install.Source.Entrypoint
+	return ""
+}
+
+// DefaultAction returns Actions[0] or nil when Actions is empty. Callers
+// running the plugin without an explicit action id use this.
+func (m *Manifest) DefaultAction() *Action {
+	if len(m.Actions) == 0 {
+		return nil
+	}
+	return &m.Actions[0]
+}
+
+// FindAction returns the action whose ID matches id, or nil when not found.
+// An empty id is treated as no-match; callers wanting the default should
+// use DefaultAction instead.
+func (m *Manifest) FindAction(id string) *Action {
+	if id == "" {
+		return nil
+	}
+	for i := range m.Actions {
+		if m.Actions[i].ID == id {
+			return &m.Actions[i]
+		}
+	}
+	return nil
+}
+
+// ActionIDs returns action IDs in declaration order. Useful for completion
+// and for error messages listing available actions.
+func (m *Manifest) ActionIDs() []string {
+	ids := make([]string, 0, len(m.Actions))
+	for _, a := range m.Actions {
+		ids = append(ids, a.ID)
+	}
+	return ids
+}
+
+// normalize synthesizes Actions[] for v1 manifests so downstream helpers
+// (DefaultAction / FindAction / Entrypoint) can uniformly read Actions[]
+// regardless of the source schema version. The original top-level
+// Install.Source.Entrypoint / On / Popup are intentionally left populated
+// because P1 only touches this package; v1-shaped downstream code (dispatcher,
+// action bindings) still reads those fields and would break if cleared. A
+// later phase migrates the readers and then clears the originals.
+//
+// No-op when the manifest is v2 (author supplied Actions explicitly), when
+// Actions is already non-empty, or when the v1 manifest lacks an entrypoint
+// (checks.go rejects the latter via rule #4).
+func (m *Manifest) normalize() {
+	if m.SchemaVersion >= 2 || len(m.Actions) > 0 {
+		return
+	}
+	if m.Install.Source == nil || m.Install.Source.Entrypoint == "" {
+		return
+	}
+	m.Actions = []Action{{
+		ID:         "default",
+		Label:      m.Name,
+		Entrypoint: m.Install.Source.Entrypoint,
+		On:         m.On,
+		Popup:      m.Popup,
+	}}
 }
 
 // BuildCommands returns the ordered list of build commands for install.source,
@@ -156,6 +238,7 @@ func Parse(data []byte) (*Manifest, []string, error) {
 	if err := top.Decode(&m); err != nil {
 		return nil, nil, fmt.Errorf("invalid YAML: %w", err)
 	}
+	m.normalize()
 	return &m, unknownFieldsFromNode(top), nil
 }
 
@@ -183,6 +266,7 @@ var knownTopLevel = map[string]struct{}{
 	"on":             {},
 	"timeout":        {},
 	"popup":          {},
+	"actions":        {},
 }
 
 var knownInstall = map[string]struct{}{
@@ -190,30 +274,78 @@ var knownInstall = map[string]struct{}{
 	"release_asset": {},
 }
 
+var knownAction = map[string]struct{}{
+	"id":         {},
+	"label":      {},
+	"entrypoint": {},
+	"on":         {},
+	"popup":      {},
+}
+
 // unknownFieldsFromNode walks the top-level mapping and its nested `install`
-// mapping (when present) once, collecting any keys the current schema does
+// and `actions` structures once, collecting any keys the current schema does
 // not recognise. The order of returned entries follows the mapping's own
 // key order, so diagnostics are deterministic per input.
 func unknownFieldsFromNode(mapping *yaml.Node) []string {
 	var out []string
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		key := mapping.Content[i].Value
+		val := mapping.Content[i+1]
 		if _, ok := knownTopLevel[key]; !ok {
 			out = append(out, key)
 			continue
 		}
-		if key != "install" {
-			continue
-		}
-		val := mapping.Content[i+1]
-		if val.Kind != yaml.MappingNode {
-			continue
-		}
-		for j := 0; j+1 < len(val.Content); j += 2 {
-			sub := val.Content[j].Value
-			if _, ok := knownInstall[sub]; !ok {
-				out = append(out, "install."+sub)
+		switch key {
+		case "install":
+			if val.Kind != yaml.MappingNode {
+				continue
 			}
+			for j := 0; j+1 < len(val.Content); j += 2 {
+				sub := val.Content[j].Value
+				if _, ok := knownInstall[sub]; !ok {
+					out = append(out, "install."+sub)
+				}
+			}
+		case "actions":
+			out = append(out, actionsUnknownFields(val)...)
+		}
+	}
+	return out
+}
+
+// actionsUnknownFields collects unknown keys from every mapping element under
+// an `actions:` sequence. It walks each element in a single pass, finding the
+// action's `id` (if present) and unknown keys together so downstream diagnostics
+// can be tagged with `actions[<id>].<key>` (or `actions[].<key>` when id is
+// absent). A non-mapping sequence element is silently skipped — schema errors
+// there surface via yaml.Decode.
+func actionsUnknownFields(seq *yaml.Node) []string {
+	if seq.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var out []string
+	for _, elem := range seq.Content {
+		if elem.Kind != yaml.MappingNode {
+			continue
+		}
+		var actionID string
+		var unknownKeys []string
+		for j := 0; j+1 < len(elem.Content); j += 2 {
+			key := elem.Content[j].Value
+			if key == "id" {
+				actionID = elem.Content[j+1].Value
+				continue
+			}
+			if _, ok := knownAction[key]; !ok {
+				unknownKeys = append(unknownKeys, key)
+			}
+		}
+		prefix := "actions[]."
+		if actionID != "" {
+			prefix = "actions[" + actionID + "]."
+		}
+		for _, k := range unknownKeys {
+			out = append(out, prefix+k)
 		}
 	}
 	return out

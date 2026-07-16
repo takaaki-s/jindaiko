@@ -1,0 +1,19 @@
+schema_version: 2
+name: hello-plugin-v2
+version: 0.1.0
+description: A v2 test plugin with two actions
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: notify
+    label: Notify
+    entrypoint: ./bin/notify
+    on:
+      - status_changed
+    popup:
+      width: 40
+      height: 20
+  - id: send-dm
+    entrypoint: ./bin/send-dm

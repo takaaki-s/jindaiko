@@ -1,0 +1,8 @@
+schema_version: 2
+name: bad-v2-no-actions
+version: 0.1.0
+description: v2 manifest omits actions entirely
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"

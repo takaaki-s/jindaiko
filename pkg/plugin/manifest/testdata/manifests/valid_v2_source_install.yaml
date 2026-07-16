@@ -1,0 +1,16 @@
+schema_version: 2
+name: notifier-v2
+version: 0.1.0
+description: A v2 plugin with source install and multiple actions sharing one build
+jin: ">=0.7.0"
+install:
+  source:
+    build:
+      - go build -o bin/notifier ./cmd/notifier
+actions:
+  - id: notify
+    entrypoint: ./bin/notifier notify
+    on:
+      - status_changed
+  - id: send-dm
+    entrypoint: ./bin/notifier send-dm

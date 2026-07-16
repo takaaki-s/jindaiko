@@ -1,0 +1,13 @@
+schema_version: 2
+name: bad-v2-top-on
+version: 0.1.0
+description: v2 manifest illegally sets a top-level on
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+on:
+  - status_changed
+actions:
+  - id: default
+    entrypoint: ./bin/hello

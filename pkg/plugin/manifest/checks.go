@@ -54,6 +54,11 @@ const (
 	RuleEntrypointExists    RuleID = 14 // opt-in via `plugin validate --run-build`
 	RuleOnMatcher           RuleID = 15
 	RulePopupBounds         RuleID = 16
+	RuleActionID            RuleID = 17
+	RuleActionDuplicateID   RuleID = 18
+	RuleActionEntrypoint    RuleID = 19
+	RuleV2Constraint        RuleID = 20  // schema v2 forbids top-level entrypoint / on / popup
+	RuleActionsRequired     RuleID = 21  // schema v2 requires at least one action
 	RuleUnknownFieldWarning RuleID = 100 // synthetic; forward-compat WARN, out of the spec table range
 )
 
@@ -123,6 +128,12 @@ func Check(m *Manifest, opts CheckOptions) []Finding {
 	findings = append(findings, checkVersion(m)...)
 	findings = append(findings, checkJinRange(m)...)
 	findings = append(findings, checkInstallXOR(m)...)
+	findings = append(findings, checkV2Constraints(m)...)
+	findings = append(findings, checkActionsRequired(m)...)
+	findings = append(findings, checkActionIDs(m)...)
+	findings = append(findings, checkActionEntrypoints(m)...)
+	findings = append(findings, checkActionsOn(m)...)
+	findings = append(findings, checkActionsPopup(m)...)
 	findings = append(findings, checkOn(m)...)
 	findings = append(findings, checkPopup(m)...)
 
@@ -152,12 +163,12 @@ func Validate(m *Manifest) error {
 }
 
 func checkSchemaVersion(m *Manifest) []Finding {
-	if m.SchemaVersion != CurrentSchemaVersion {
+	if m.SchemaVersion < MinSchemaVersion || m.SchemaVersion > CurrentSchemaVersion {
 		return []Finding{{
 			Rule:     RuleSchemaVersion,
 			Severity: SeverityError,
-			Message: fmt.Sprintf("schema_version %d not supported (this build accepts %d)",
-				m.SchemaVersion, CurrentSchemaVersion),
+			Message: fmt.Sprintf("schema_version %d not supported (this build accepts %d-%d)",
+				m.SchemaVersion, MinSchemaVersion, CurrentSchemaVersion),
 			Field: "schema_version",
 		}}
 	}
@@ -255,6 +266,13 @@ func checkInstallXOR(m *Manifest) []Finding {
 			Field:    "install",
 		}}
 	case hasSource:
+		// v2 moves the entrypoint to actions[]; a v2 source install with only
+		// build steps is legitimate. Top-level entrypoint on v2 is forbidden by
+		// checkV2Constraints, and per-action entrypoint requirement is enforced
+		// by checkActionEntrypoints, so no source-level check applies here.
+		if m.SchemaVersion >= 2 {
+			return nil
+		}
 		return checkSourceInstall(m.Install.Source)
 	case hasAsset:
 		return checkReleaseAsset(m.Install.ReleaseAsset)
@@ -305,14 +323,21 @@ func checkReleaseAsset(a *ReleaseAssetInstall) []Finding {
 }
 
 func checkOn(m *Manifest) []Finding {
+	return onMatcherFindings(m.On, "on")
+}
+
+// onMatcherFindings runs ValidateMatcher over every matcher and emits an ERROR
+// per invalid entry. field scopes Finding.Field so callers can distinguish
+// top-level `on` from per-action `actions[<id>].on`.
+func onMatcherFindings(on []string, field string) []Finding {
 	var findings []Finding
-	for _, matcher := range m.On {
+	for _, matcher := range on {
 		if err := ValidateMatcher(matcher); err != nil {
 			findings = append(findings, Finding{
 				Rule:     RuleOnMatcher,
 				Severity: SeverityError,
 				Message:  fmt.Sprintf("invalid on matcher: %v", err),
-				Field:    "on",
+				Field:    field,
 			})
 		}
 	}
@@ -320,25 +345,158 @@ func checkOn(m *Manifest) []Finding {
 }
 
 func checkPopup(m *Manifest) []Finding {
-	if m.Popup == nil {
+	return popupBoundsFindings(m.Popup, "popup")
+}
+
+// popupBoundsFindings emits per-axis ERRORs for popup dimensions outside 1-100.
+// A zero axis is treated as "unset" and skipped. fieldPrefix scopes the
+// Finding.Field so callers can distinguish top-level popup from per-action.
+func popupBoundsFindings(p *PopupConfig, fieldPrefix string) []Finding {
+	if p == nil {
 		return nil
 	}
 	var findings []Finding
-	if m.Popup.Width != 0 && (m.Popup.Width < 1 || m.Popup.Width > 100) {
+	if p.Width != 0 && (p.Width < 1 || p.Width > 100) {
 		findings = append(findings, Finding{
 			Rule:     RulePopupBounds,
 			Severity: SeverityError,
-			Message:  fmt.Sprintf("popup.width must be 1-100 (got %d)", m.Popup.Width),
-			Field:    "popup.width",
+			Message:  fmt.Sprintf("%s.width must be 1-100 (got %d)", fieldPrefix, p.Width),
+			Field:    fieldPrefix + ".width",
 		})
 	}
-	if m.Popup.Height != 0 && (m.Popup.Height < 1 || m.Popup.Height > 100) {
+	if p.Height != 0 && (p.Height < 1 || p.Height > 100) {
 		findings = append(findings, Finding{
 			Rule:     RulePopupBounds,
 			Severity: SeverityError,
-			Message:  fmt.Sprintf("popup.height must be 1-100 (got %d)", m.Popup.Height),
-			Field:    "popup.height",
+			Message:  fmt.Sprintf("%s.height must be 1-100 (got %d)", fieldPrefix, p.Height),
+			Field:    fieldPrefix + ".height",
 		})
+	}
+	return findings
+}
+
+// actionIDPattern is the grammar for actions[].id: lowercase, starts with a
+// letter, up to 32 chars total. Kept intentionally narrower than NamePattern
+// because action ids are also used as CLI arg tokens.
+var actionIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// checkV2Constraints enforces that a v2 manifest does not carry top-level
+// entrypoint / on / popup — those fields belong under actions[] in v2. v1
+// manifests are unaffected and continue to use the top-level forms.
+func checkV2Constraints(m *Manifest) []Finding {
+	if m.SchemaVersion != 2 {
+		return nil
+	}
+	forbid := func(field, msg string) Finding {
+		return Finding{Rule: RuleV2Constraint, Severity: SeverityError, Field: field, Message: msg}
+	}
+	var findings []Finding
+	if m.Install.Source != nil && m.Install.Source.Entrypoint != "" {
+		findings = append(findings, forbid("install.source.entrypoint",
+			"install.source.entrypoint is not allowed in schema_version 2 (move to actions[].entrypoint)"))
+	}
+	if len(m.On) > 0 {
+		findings = append(findings, forbid("on",
+			`top-level "on" is not allowed in schema_version 2 (move to actions[].on)`))
+	}
+	if m.Popup != nil {
+		findings = append(findings, forbid("popup",
+			`top-level "popup" is not allowed in schema_version 2 (move to actions[].popup)`))
+	}
+	return findings
+}
+
+// checkActionsRequired enforces at least one action for v2 manifests. v1
+// manifests reach here with Actions synthesized by normalize(); if that
+// synthesis was skipped (missing entrypoint) the required-field check
+// already reports the underlying cause.
+func checkActionsRequired(m *Manifest) []Finding {
+	if m.SchemaVersion != 2 || len(m.Actions) > 0 {
+		return nil
+	}
+	return []Finding{{
+		Rule:     RuleActionsRequired,
+		Severity: SeverityError,
+		Message:  "schema_version 2 requires at least one action",
+		Field:    "actions",
+	}}
+}
+
+func checkActionIDs(m *Manifest) []Finding {
+	var findings []Finding
+	seen := make(map[string]bool, len(m.Actions))
+	for i, a := range m.Actions {
+		field := fmt.Sprintf("actions[%d].id", i)
+		if !actionIDPattern.MatchString(a.ID) {
+			findings = append(findings, Finding{
+				Rule:     RuleActionID,
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("action id %q must match %s", a.ID, actionIDPattern.String()),
+				Field:    field,
+			})
+			continue
+		}
+		if seen[a.ID] {
+			findings = append(findings, Finding{
+				Rule:     RuleActionDuplicateID,
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("duplicate action id %q", a.ID),
+				Field:    field,
+			})
+			continue
+		}
+		seen[a.ID] = true
+	}
+	return findings
+}
+
+// actionRef returns the field-path prefix for an action ("actions[<id>]" when
+// the action has an id, "actions[<index>]" otherwise). Diagnostics that name
+// an action route through this helper so the id-vs-index fallback is defined
+// in one place — Message-side rendering follows the same rule inline.
+func actionRef(i int, id string) string {
+	if id != "" {
+		return "actions[" + id + "]"
+	}
+	return fmt.Sprintf("actions[%d]", i)
+}
+
+func checkActionEntrypoints(m *Manifest) []Finding {
+	var findings []Finding
+	for i, a := range m.Actions {
+		if a.Entrypoint != "" {
+			continue
+		}
+		ref := actionRef(i, a.ID)
+		message := fmt.Sprintf("action at %s is missing entrypoint", ref)
+		if a.ID != "" {
+			message = fmt.Sprintf("action %q is missing entrypoint", a.ID)
+		}
+		findings = append(findings, Finding{
+			Rule:     RuleActionEntrypoint,
+			Severity: SeverityError,
+			Message:  message,
+			Field:    ref + ".entrypoint",
+		})
+	}
+	return findings
+}
+
+func checkActionsOn(m *Manifest) []Finding {
+	var findings []Finding
+	for i, a := range m.Actions {
+		findings = append(findings, onMatcherFindings(a.On, actionRef(i, a.ID)+".on")...)
+	}
+	return findings
+}
+
+func checkActionsPopup(m *Manifest) []Finding {
+	var findings []Finding
+	for i, a := range m.Actions {
+		if a.Popup == nil {
+			continue
+		}
+		findings = append(findings, popupBoundsFindings(a.Popup, actionRef(i, a.ID)+".popup")...)
 	}
 	return findings
 }

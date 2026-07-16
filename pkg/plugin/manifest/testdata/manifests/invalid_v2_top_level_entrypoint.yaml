@@ -1,0 +1,11 @@
+schema_version: 2
+name: bad-v2-top-entrypoint
+version: 0.1.0
+description: v2 manifest illegally sets a top-level install.source.entrypoint
+jin: ">=0.7.0"
+install:
+  source:
+    entrypoint: ./bin/hello
+actions:
+  - id: default
+    entrypoint: ./bin/hello

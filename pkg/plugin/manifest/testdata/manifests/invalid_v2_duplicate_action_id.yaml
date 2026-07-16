@@ -1,0 +1,13 @@
+schema_version: 2
+name: bad-v2-duplicate-action-id
+version: 0.1.0
+description: v2 manifest declares the same action id twice
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: default
+    entrypoint: ./bin/hello
+  - id: default
+    entrypoint: ./bin/hello-2

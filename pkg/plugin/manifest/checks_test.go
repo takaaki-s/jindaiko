@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,12 +20,7 @@ func mustParse(t *testing.T, path string) (*Manifest, []string) {
 }
 
 func hasFinding(findings []Finding, rule RuleID, sev Severity) bool {
-	for _, f := range findings {
-		if f.Rule == rule && f.Severity == sev {
-			return true
-		}
-	}
-	return false
+	return findFinding(findings, rule, sev) != nil
 }
 
 func findingsSummary(findings []Finding) string {
@@ -340,6 +336,234 @@ func TestHasErrorsWarnings(t *testing.T) {
 	}
 }
 
+func TestCheckV2MultiActionPasses(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_v2_multi_action.yaml")
+	findings := Check(m, CheckOptions{})
+	if HasErrors(findings) {
+		t.Errorf("expected no ERROR findings, got:\n%s", findingsSummary(findings))
+	}
+}
+
+// TestCheckV2SourceInstallPasses guards the "one build, many actions" pattern:
+// a v2 manifest with install.source (no top-level entrypoint) plus multiple
+// per-action entrypoints must validate. Before the fix, checkSourceInstall
+// unconditionally required a top-level entrypoint and blocked this case.
+func TestCheckV2SourceInstallPasses(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_v2_source_install.yaml")
+	findings := Check(m, CheckOptions{})
+	if HasErrors(findings) {
+		t.Errorf("expected no ERROR findings, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckV2TopLevelEntrypointRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_top_level_entrypoint.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleV2Constraint, SeverityError) {
+		t.Errorf("expected RuleV2Constraint ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckV2TopLevelOnRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_top_level_on.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleV2Constraint, SeverityError) {
+		t.Errorf("expected RuleV2Constraint ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckV2NoActionsRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_no_actions.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleActionsRequired, SeverityError) {
+		t.Errorf("expected RuleActionsRequired ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckV2EmptyActionsArrayRejected(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 2
+name: hello
+version: 0.1.0
+description: v2 with an explicit empty actions array
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions: []
+`)
+	m, _, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleActionsRequired, SeverityError) {
+		t.Errorf("expected RuleActionsRequired ERROR for explicit empty actions, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckActionBadIDRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_bad_action_id.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleActionID, SeverityError) {
+		t.Errorf("expected RuleActionID ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckActionDuplicateIDRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_duplicate_action_id.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleActionDuplicateID, SeverityError) {
+		t.Errorf("expected RuleActionDuplicateID ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckActionMissingEntrypointRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_action_no_entrypoint.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleActionEntrypoint, SeverityError) {
+		t.Errorf("expected RuleActionEntrypoint ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckActionOnBadMatcherRejected(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 2
+name: hello
+version: 0.1.0
+description: action declares an invalid on matcher
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: default
+    entrypoint: ./bin/hello
+    on:
+      - file_changed
+`)
+	m, _, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleOnMatcher, SeverityError) {
+		t.Errorf("expected RuleOnMatcher ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckActionPopupOutOfRangeRejected(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 2
+name: hello
+version: 0.1.0
+description: action popup width is out of range
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: default
+    entrypoint: ./bin/hello
+    popup:
+      width: 101
+`)
+	m, _, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RulePopupBounds, SeverityError) {
+		t.Errorf("expected RulePopupBounds ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckV1MinimalStillPassesUnderV2Build(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_minimal.yaml")
+	if m.SchemaVersion != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1 (fixture assumption)", m.SchemaVersion)
+	}
+	findings := Check(m, CheckOptions{})
+	if HasErrors(findings) {
+		t.Errorf("schema_version 1 should remain accepted under CurrentSchemaVersion=%d, got:\n%s",
+			CurrentSchemaVersion, findingsSummary(findings))
+	}
+}
+
+func TestCheckActionIDLengthBoundary(t *testing.T) {
+	cases := []struct {
+		name    string
+		idLen   int
+		wantErr bool
+	}{
+		{name: "32 chars ok", idLen: 32, wantErr: false},
+		{name: "33 chars rejected", idLen: 33, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := strings.Repeat("a", tc.idLen)
+			yamlDoc := []byte(fmt.Sprintf(`schema_version: 2
+name: hello
+version: 0.1.0
+description: action id length boundary
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: %s
+    entrypoint: ./bin/hello
+`, id))
+			m, _, err := Parse(yamlDoc)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			findings := Check(m, CheckOptions{})
+			if got := hasFinding(findings, RuleActionID, SeverityError); got != tc.wantErr {
+				t.Errorf("RuleActionID ERROR = %v, want %v (id len %d), findings:\n%s",
+					got, tc.wantErr, tc.idLen, findingsSummary(findings))
+			}
+		})
+	}
+}
+
+func TestCheckActionPopupWidthBoundary(t *testing.T) {
+	cases := []struct {
+		name    string
+		width   int
+		wantErr bool
+	}{
+		{name: "width 100 ok", width: 100, wantErr: false},
+		{name: "width 101 rejected", width: 101, wantErr: true},
+		{name: "width 0 unset skips validation", width: 0, wantErr: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var popupField string
+			if tc.width != 0 {
+				popupField = fmt.Sprintf("    popup:\n      width: %d\n", tc.width)
+			}
+			yamlDoc := []byte(fmt.Sprintf(`schema_version: 2
+name: hello
+version: 0.1.0
+description: action popup width boundary
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: default
+    entrypoint: ./bin/hello
+%s`, popupField))
+			m, _, err := Parse(yamlDoc)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			findings := Check(m, CheckOptions{})
+			if got := hasFinding(findings, RulePopupBounds, SeverityError); got != tc.wantErr {
+				t.Errorf("RulePopupBounds ERROR = %v, want %v, findings:\n%s", got, tc.wantErr, findingsSummary(findings))
+			}
+		})
+	}
+}
+
 func TestCheckJinCompat(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -364,4 +588,101 @@ func TestCheckJinCompat(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCheckV1OnMatcherReportedTwice pins the current behaviour where an
+// invalid v1 top-level `on:` matcher is reported by both checkOn (top) and
+// checkActionsOn (via the normalize-synthesized Actions[0].On). Design
+// consciously accepts this duplication for now (02_design.md §"実装設計 R3");
+// this test freezes the count so a future dedup can be detected as a
+// deliberate change rather than a silent regression. Adjust `want` when the
+// dedup lands.
+//
+// Inlined YAML (rather than a shared fixture) so the count assertion stays
+// coupled to this test's assumptions: exactly one invalid matcher at top
+// level, no per-action `on:`.
+func TestCheckV1OnMatcherReportedTwice(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 1
+name: hello
+version: 0.1.0
+description: v1 with one invalid top-level on matcher
+jin: ">=0.7.0"
+install:
+  source:
+    entrypoint: ./bin/hello
+on:
+  - "not a valid matcher"
+`)
+	m, _, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	findings := Check(m, CheckOptions{})
+	count := 0
+	for _, f := range findings {
+		if f.Rule == RuleOnMatcher && f.Severity == SeverityError {
+			count++
+		}
+	}
+	if want := 2; count != want {
+		t.Errorf("RuleOnMatcher ERROR count = %d, want %d (top-level + normalize-synthesized Actions[0]); if a dedup landed, update this test", count, want)
+	}
+}
+
+// TestCheckV2ActionWithEmptyIDAndEntrypoint drives the fallback branches in
+// checkActionEntrypoints / checkActionsOn / checkActionsPopup that only fire
+// when an action's ID is empty. Without this test the branches are dead
+// coverage — the id-populated fixtures never exercise them.
+func TestCheckV2ActionWithEmptyIDAndEntrypoint(t *testing.T) {
+	yamlDoc := []byte(`schema_version: 2
+name: hello
+version: 0.1.0
+description: v2 with an empty-id, empty-entrypoint action
+jin: ">=0.7.0"
+install:
+  release_asset:
+    pattern: "hello-{os}-{arch}"
+actions:
+  - id: ""
+    entrypoint: ""
+    on:
+      - "not a valid matcher"
+    popup:
+      width: 200
+`)
+	m, _, err := Parse(yamlDoc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleActionID, SeverityError) {
+		t.Errorf("expected RuleActionID ERROR (empty id fails pattern), got:\n%s", findingsSummary(findings))
+	}
+	entrypointFinding := findFinding(findings, RuleActionEntrypoint, SeverityError)
+	if entrypointFinding == nil {
+		t.Fatalf("expected RuleActionEntrypoint ERROR, got:\n%s", findingsSummary(findings))
+	}
+	if want := "actions[0].entrypoint"; entrypointFinding.Field != want {
+		t.Errorf("entrypoint Field = %q, want %q (index fallback when id is empty)", entrypointFinding.Field, want)
+	}
+	if !strings.Contains(entrypointFinding.Message, "actions[0]") {
+		t.Errorf("entrypoint Message = %q, want it to mention actions[0] for the empty-id case", entrypointFinding.Message)
+	}
+	onFinding := findFinding(findings, RuleOnMatcher, SeverityError)
+	if onFinding == nil || onFinding.Field != "actions[0].on" {
+		t.Errorf("expected RuleOnMatcher ERROR with Field=actions[0].on, got: %v", onFinding)
+	}
+	popupFinding := findFinding(findings, RulePopupBounds, SeverityError)
+	if popupFinding == nil || popupFinding.Field != "actions[0].popup.width" {
+		t.Errorf("expected RulePopupBounds ERROR with Field=actions[0].popup.width, got: %v", popupFinding)
+	}
+}
+
+func findFinding(findings []Finding, rule RuleID, sev Severity) *Finding {
+	for i := range findings {
+		if findings[i].Rule == rule && findings[i].Severity == sev {
+			return &findings[i]
+		}
+	}
+	return nil
 }
