@@ -475,6 +475,22 @@ actions:
 	}
 }
 
+func TestCheckListenerWithOnAccepted(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/valid_v2_listener_action.yaml")
+	findings := Check(m, CheckOptions{})
+	if hasFinding(findings, RuleListenerRequiresOn, SeverityError) {
+		t.Errorf("listener with on: should pass, got:\n%s", findingsSummary(findings))
+	}
+}
+
+func TestCheckListenerWithoutOnRejected(t *testing.T) {
+	m, _ := mustParse(t, "testdata/manifests/invalid_v2_listener_without_on.yaml")
+	findings := Check(m, CheckOptions{})
+	if !hasFinding(findings, RuleListenerRequiresOn, SeverityError) {
+		t.Errorf("expected RuleListenerRequiresOn ERROR, got:\n%s", findingsSummary(findings))
+	}
+}
+
 func TestCheckV1MinimalStillPassesUnderV2Build(t *testing.T) {
 	m, _ := mustParse(t, "testdata/manifests/valid_minimal.yaml")
 	if m.SchemaVersion != 1 {

@@ -501,8 +501,11 @@ func completePluginRunArgs(cmd *cobra.Command, args []string, toComplete string)
 }
 
 // completePluginActions suggests the action IDs declared by pluginName's
-// manifest. An unknown or broken plugin yields no suggestions (cobra then
-// completes nothing) rather than an error — completion must never fail loudly.
+// manifest. Actions with `listener: true` are event-only endpoints and are
+// omitted from the suggestion list (they remain accepted at runtime for
+// debug invocation — completion just does not surface them). An unknown or
+// broken plugin yields no suggestions (cobra then completes nothing) rather
+// than an error — completion must never fail loudly.
 func completePluginActions(pluginName, toComplete string) ([]string, cobra.ShellCompDirective) {
 	entries, err := loadPluginEntries()
 	if err != nil {
@@ -513,9 +516,12 @@ func completePluginActions(pluginName, toComplete string) ([]string, cobra.Shell
 			continue
 		}
 		var ids []string
-		for _, id := range e.Manifest.ActionIDs() {
-			if strings.HasPrefix(id, toComplete) {
-				ids = append(ids, id)
+		for _, a := range e.Manifest.Actions {
+			if a.Listener {
+				continue
+			}
+			if strings.HasPrefix(a.ID, toComplete) {
+				ids = append(ids, a.ID)
 			}
 		}
 		return ids, cobra.ShellCompDirectiveNoFileComp

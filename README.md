@@ -639,11 +639,27 @@ Write new manifests as v2.
 | `actions[].label` | No | Human-readable label shown in the palette and help popup. When empty, the palette displays `<plugin>:<action-id>` (or just `<plugin>` when the default action's ID is `default`) |
 | `actions[].timeout` | No | Per-action override for `timeout`; default `30s` |
 | `actions[].popup.width` / `.height` | No | Per-action manifest hint for `jin pane popup --here` size (1–100, percent of terminal) |
+| `actions[].listener` | No | Marks the action as an event-only endpoint. It still fires on matching `on:` events, but is hidden from every user-facing surface (palette, help popup, shell completion). Direct invocation via `jin plugin run <plugin> <action>` remains available for debugging. Requires a non-empty `on:` — a listener with no events has no runtime purpose |
 | `on` / `timeout` / `popup` (top-level) | v1 only | Legacy v1 fields; forbidden in v2 (validation error). Put them under `actions[]` instead |
 
 `install.source` and `install.release_asset` are mutually exclusive.
 
 `config.yaml` only enables/disables plugins and tunes dispatch timing (below) — it never duplicates manifest fields.
+
+**Listener actions** are the common pattern for a plugin that both reacts to
+events and exposes a UI. Split the two concerns so only the UI part appears
+in the palette:
+
+```yaml
+actions:
+  - id: list                        # user-facing: appears in the palette
+    entrypoint: ./notifier.sh list
+    label: "Show pending sessions"
+  - id: listen                      # event listener: hidden from the palette
+    entrypoint: ./notifier.sh listen
+    on: ["status_changed"]
+    listener: true                  # requires a non-empty on:
+```
 
 ### What a plugin receives
 

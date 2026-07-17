@@ -562,11 +562,25 @@ actions:
 | `actions[].label` | なし | パレット / help popup に表示される人間可読ラベル。空の場合パレットは `<plugin>:<action-id>` を表示（default action の ID が `default` のときは plugin 名のみ） |
 | `actions[].timeout` | なし | この action 個別の `timeout` 上書き。デフォルト `30s` |
 | `actions[].popup.width` / `.height` | なし | `jin pane popup --here` の action 単位のサイズヒント（1–100、%） |
+| `actions[].listener` | なし | この action を「イベント購読専用」とマーク。`on:` にマッチしたときは通常通り発火するが、ユーザー向けサーフェス（パレット / help popup / shell 補完）からは非表示になる。`jin plugin run <plugin> <action>` による直接起動は debug 目的で許可されたまま。`on:` 非空必須（listener with no events は無意味） |
 | `on` / `timeout` / `popup`（top-level） | v1 のみ | v1 レガシーフィールド。v2 では validate エラーになるため `actions[]` 側に書く |
 
 `install.source` と `install.release_asset` は排他です。
 
 `config.yaml` はプラグインの有効/無効切り替えと dispatch タイミングの調整（下記）のみを行います — マニフェストのフィールドを重複して持つことはありません。
+
+**Listener action** はイベント購読と UI を両方持つプラグインの定番パターンです。責務を分けて、UI 側だけをパレットに露出させます:
+
+```yaml
+actions:
+  - id: list                        # ユーザー向け: パレットに表示
+    entrypoint: ./notifier.sh list
+    label: "Show pending sessions"
+  - id: listen                      # event listener: パレット非表示
+    entrypoint: ./notifier.sh listen
+    on: ["status_changed"]
+    listener: true                  # on: 非空必須
+```
 
 ### プラグインが受け取る情報
 

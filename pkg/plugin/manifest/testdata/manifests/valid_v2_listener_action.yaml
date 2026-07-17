@@ -1,0 +1,19 @@
+schema_version: 2
+name: hello-listener
+version: 0.1.0
+description: A v2 plugin with a user-facing action and an internal listener
+jin: ">=0.8.0"
+install:
+  source:
+    build: ["true"]
+    entrypoint: ./bin/hello
+actions:
+  - id: list
+    label: Show pending sessions
+    entrypoint: ./bin/hello list
+    on: []
+  - id: listen
+    entrypoint: ./bin/hello listen
+    on:
+      - status_changed
+    listener: true

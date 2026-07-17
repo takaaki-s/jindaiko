@@ -59,6 +59,7 @@ const (
 	RuleActionEntrypoint    RuleID = 19
 	RuleV2Constraint        RuleID = 20  // schema v2 forbids top-level entrypoint / on / popup
 	RuleActionsRequired     RuleID = 21  // schema v2 requires at least one action
+	RuleListenerRequiresOn  RuleID = 22  // listener: true actions must declare a non-empty on
 	RuleUnknownFieldWarning RuleID = 100 // synthetic; forward-compat WARN, out of the spec table range
 )
 
@@ -134,6 +135,7 @@ func Check(m *Manifest, opts CheckOptions) []Finding {
 	findings = append(findings, checkActionEntrypoints(m)...)
 	findings = append(findings, checkActionsOn(m)...)
 	findings = append(findings, checkActionsPopup(m)...)
+	findings = append(findings, checkListenerRequiresOn(m)...)
 	findings = append(findings, checkOn(m)...)
 	findings = append(findings, checkPopup(m)...)
 
@@ -497,6 +499,25 @@ func checkActionsPopup(m *Manifest) []Finding {
 			continue
 		}
 		findings = append(findings, popupBoundsFindings(a.Popup, actionRef(i, a.ID)+".popup")...)
+	}
+	return findings
+}
+
+// checkListenerRequiresOn rejects listener actions that declare no events to
+// subscribe to. A listener with `on: []` has no runtime purpose — it is
+// hidden from every user-facing surface, so it can never be invoked either.
+func checkListenerRequiresOn(m *Manifest) []Finding {
+	var findings []Finding
+	for i, a := range m.Actions {
+		if !a.Listener || len(a.On) > 0 {
+			continue
+		}
+		findings = append(findings, Finding{
+			Rule:     RuleListenerRequiresOn,
+			Severity: SeverityError,
+			Message:  "listener actions must declare at least one on: matcher (hidden from every user-facing surface, so an empty on has no runtime purpose)",
+			Field:    actionRef(i, a.ID) + ".listener",
+		})
 	}
 	return findings
 }

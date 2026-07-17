@@ -243,11 +243,16 @@ palette invokes plugins today.
 
 **Bindings appear in two other places automatically:**
 
-- The action palette (`M-p`) shows one row per plugin action. The
-  Shortcut column carries the first configured key for that action,
-  mirroring how core actions display theirs. When a default action's ID
-  is `default` and it has no label, the row displays the bare plugin
-  name (preserving the pre-0.8.0 look for single-action plugins).
+- The action palette (`M-p`) shows one row per plugin action, **except**
+  actions declared with `listener: true` in the manifest — those are
+  event-only endpoints and stay hidden from the palette on purpose (a
+  plugin author uses the flag to split an internal listener from the
+  user-facing action so the palette does not gain a row that does
+  nothing when clicked). The Shortcut column carries the first
+  configured key for that action, mirroring how core actions display
+  theirs. When a default action's ID is `default` and it has no label,
+  the row displays the bare plugin name (preserving the pre-0.8.0 look
+  for single-action plugins).
 - The help popup (`?`) grows a `Plugins` section listing every bound
   plugin×action as its own line (`plugin: notifier / send-dm`). The
   section is hidden entirely when no plugin bindings are configured, so

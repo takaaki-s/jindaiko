@@ -219,6 +219,41 @@ func TestPluginActions_SkipsEntriesWithoutActions(t *testing.T) {
 	}
 }
 
+func TestPluginActions_SkipsListenerActions(t *testing.T) {
+	entries := []plugin.Entry{
+		{Name: "notifier", Manifest: &manifest.Manifest{
+			Actions: []manifest.Action{
+				{ID: "list", Label: "Show pending", Entrypoint: "bin/list"},
+				{ID: "listen", Entrypoint: "bin/listen", On: []string{"status_changed"}, Listener: true},
+			},
+		}},
+	}
+	actions := PluginActions(entries, nil)
+	if len(actions) != 1 {
+		t.Fatalf("len(actions) = %d, want 1 (listener excluded)", len(actions))
+	}
+	if actions[0].ID != "plugin:notifier:list" {
+		t.Errorf("actions[0].ID = %q, want plugin:notifier:list", actions[0].ID)
+	}
+}
+
+func TestPluginActions_ListenerHonorsKeybindingButStaysHiddenFromPalette(t *testing.T) {
+	entries := []plugin.Entry{
+		{Name: "notifier", Manifest: &manifest.Manifest{
+			Actions: []manifest.Action{
+				{ID: "listen", Entrypoint: "bin/listen", On: []string{"status_changed"}, Listener: true},
+			},
+		}},
+	}
+	// Even when the user explicitly binds a key to a listener action, it must
+	// not surface in the palette — keybindings and palette are independent
+	// user-facing surfaces and only the palette hides listeners.
+	pluginKeys := map[string]map[string][]string{"notifier": {"listen": {"M-l"}}}
+	if actions := PluginActions(entries, pluginKeys); len(actions) != 0 {
+		t.Errorf("listener with keybinding produced %d palette rows, want 0", len(actions))
+	}
+}
+
 func TestPluginActions_NoPluginKeysMeansNoShortcut(t *testing.T) {
 	entries := []plugin.Entry{
 		{Name: "notifier", Manifest: singleActionManifest("notifier", "")},

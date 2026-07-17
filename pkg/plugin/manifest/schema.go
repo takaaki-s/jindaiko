@@ -64,6 +64,12 @@ type Action struct {
 	Entrypoint string       `yaml:"entrypoint"`
 	On         []string     `yaml:"on,omitempty"`
 	Popup      *PopupConfig `yaml:"popup,omitempty"`
+	// Listener declares this action as an event-only endpoint: it still fires
+	// on matching On events, but is excluded from user-facing surfaces
+	// (palette, help popup, keybindings config, `jin plugin run` completion).
+	// Direct invocation via `jin plugin run <plugin> <action>` remains
+	// possible for debugging. Listener actions must declare a non-empty On.
+	Listener bool `yaml:"listener,omitempty"`
 }
 
 // Install carries either a source build recipe or a release asset pattern.
@@ -281,6 +287,7 @@ var knownAction = map[string]struct{}{
 	"entrypoint": {},
 	"on":         {},
 	"popup":      {},
+	"listener":   {},
 }
 
 // unknownFieldsFromNode walks the top-level mapping and its nested `install`

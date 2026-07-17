@@ -109,13 +109,16 @@ func CoreActions(kb KeyBindings) []Action {
 // declared action. Callers pass the result of Registry.Runnable, which
 // already filters to StateEnabled entries; entries without a manifest (or
 // with no actions — e.g. release_asset installs) contribute no rows.
-// Description (when the manifest declares one) rides along so the palette
-// fuzzy haystack treats plugin rows like core rows. pluginKeys maps plugin
-// name → action ID → tmux keys (the shape returned by
-// config.Manager.GetPluginKeybindings). When an action has one or more keys,
-// the first is formatted via FormatKeyHint and shown in the Shortcut column —
-// the same `first(keys)` convention CoreActions uses. A nil / empty
-// pluginKeys map produces rows with empty Shortcut.
+// Actions declared with `listener: true` are event-only endpoints and are
+// excluded from the palette (they still fire on matching events; direct
+// invocation via `jin plugin run <plugin> <action>` is left available for
+// debugging). Description (when the manifest declares one) rides along so
+// the palette fuzzy haystack treats plugin rows like core rows.
+// pluginKeys maps plugin name → action ID → tmux keys (the shape returned
+// by config.Manager.GetPluginKeybindings). When an action has one or more
+// keys, the first is formatted via FormatKeyHint and shown in the Shortcut
+// column — the same `first(keys)` convention CoreActions uses. A nil /
+// empty pluginKeys map produces rows with empty Shortcut.
 func PluginActions(entries []plugin.Entry, pluginKeys map[string]map[string][]string) []Action {
 	out := make([]Action, 0, len(entries))
 	for _, e := range entries {
@@ -123,6 +126,9 @@ func PluginActions(entries []plugin.Entry, pluginKeys map[string]map[string][]st
 			continue
 		}
 		for i, act := range e.Manifest.Actions {
+			if act.Listener {
+				continue
+			}
 			a := Action{
 				ID:          PluginActionID(e.Name, act.ID),
 				Kind:        KindPlugin,

@@ -33,6 +33,15 @@ log.
 - **`jin plugin validate --run-build` checks every action's entrypoint**
   exists after build, not just the default action's — so multi-binary
   v2 plugins get the full sanity check.
+- **`actions[].listener: true`** — marks an action as an event-only
+  endpoint. It still fires on matching `on:` events, but is hidden from
+  every user-facing surface (palette, help popup, shell completion).
+  Lets a plugin split its listener from its user-invoked action without
+  the listener cluttering the palette as an entry that does nothing when
+  clicked. `jin plugin run <plugin> <action>` still accepts a listener
+  ID directly for debugging. A listener with `on: []` is a validation
+  error (`R22 RuleListenerRequiresOn`) — a listener with no events has
+  no runtime purpose.
 
 ### Breaking changes
 

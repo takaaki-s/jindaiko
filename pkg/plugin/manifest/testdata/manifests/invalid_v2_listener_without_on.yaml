@@ -1,0 +1,15 @@
+schema_version: 2
+name: hello-listener-empty
+version: 0.1.0
+description: "A listener action without any on: matcher — no runtime purpose"
+jin: ">=0.8.0"
+install:
+  source:
+    build: ["true"]
+    entrypoint: ./bin/hello
+actions:
+  - id: list
+    entrypoint: ./bin/hello
+  - id: watcher
+    entrypoint: ./bin/hello watcher
+    listener: true

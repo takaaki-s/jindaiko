@@ -293,6 +293,39 @@ func TestCompletePluginRunArgs(t *testing.T) {
 	}
 }
 
+// Listener actions are event-only endpoints: they must not appear in shell
+// completion (so users are not nudged toward invoking them by tab-completion)
+// even though direct invocation stays legal for debugging.
+func TestCompletePluginRunArgs_OmitsListenerActions(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	installPluginFixture(t, "notifier", `schema_version: 2
+name: notifier
+version: 0.1.0
+description: listener completion fixture
+jin: ">=0.0.0"
+install:
+  source:
+    build: ["true"]
+actions:
+  - id: list
+    entrypoint: ./list.sh
+  - id: listen
+    entrypoint: ./listen.sh
+    on: [status_changed]
+    listener: true
+`)
+
+	ids, _ := completePluginRunArgs(pluginRunCmd, []string{"notifier"}, "")
+	if len(ids) != 1 || ids[0] != "list" {
+		t.Errorf("completion = %v, want [list] (listener omitted)", ids)
+	}
+	if filtered, _ := completePluginRunArgs(pluginRunCmd, []string{"notifier"}, "lis"); len(filtered) != 1 || filtered[0] != "list" {
+		t.Errorf("prefix completion for %q = %v, want [list] (listener omitted even when prefix matches)", "lis", filtered)
+	}
+}
+
 // A --session flag that was never passed is a global action (no resolution, no
 // daemon contact — hence the nil client); an explicitly empty --session must
 // instead fail through the usual selector validation, never silently global.

@@ -355,6 +355,22 @@ func TestParseValidV2MultiAction(t *testing.T) {
 	}
 }
 
+func TestParseListenerAction(t *testing.T) {
+	m, unknown := mustParse(t, "testdata/manifests/valid_v2_listener_action.yaml")
+	if len(unknown) != 0 {
+		t.Errorf("unexpected unknown fields: %v", unknown)
+	}
+	if len(m.Actions) != 2 {
+		t.Fatalf("Actions len = %d, want 2", len(m.Actions))
+	}
+	if m.Actions[0].Listener {
+		t.Errorf("Actions[0].Listener = true, want false (list is user-facing)")
+	}
+	if !m.Actions[1].Listener {
+		t.Errorf("Actions[1].Listener = false, want true (listen is the listener)")
+	}
+}
+
 func TestParseUnknownActionField(t *testing.T) {
 	yamlDoc := []byte(`schema_version: 2
 name: hello
