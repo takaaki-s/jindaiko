@@ -1172,12 +1172,12 @@ func TestDispatchAction_CoreRouting_SessionFilter(t *testing.T) {
 	}
 }
 
-// TestDispatchAction_PluginRouting verifies the plugin: prefix routes to
-// handlePluginRun and that the m.client=nil guard prevents any panic /
-// spurious m.err when the daemon is unavailable.
+// TestDispatchAction_PluginRouting verifies the 3-segment plugin action ID
+// routes to handlePluginRun and that the m.client=nil guard prevents any
+// panic / spurious m.err when the daemon is unavailable.
 func TestDispatchAction_PluginRouting(t *testing.T) {
 	m := Model{deletingIDs: map[string]bool{}}
-	next, cmd := m.dispatchAction(action.PluginIDPrefix + "notifier")
+	next, cmd := m.dispatchAction(action.PluginActionID("notifier", "send-dm"))
 	if cmd != nil {
 		t.Errorf("expected nil Cmd, got %T", cmd)
 	}
@@ -1187,6 +1187,22 @@ func TestDispatchAction_PluginRouting(t *testing.T) {
 	}
 	if nm.err != nil {
 		t.Errorf("expected nil m.err on nil-client no-op, got %v", nm.err)
+	}
+}
+
+// TestDispatchAction_LegacyTwoSegmentPluginIDIgnored guards the "silently
+// ignore" contract for stale 2-segment IDs left in the tmux env by an older
+// binary — the palette expects the 3-segment form now.
+func TestDispatchAction_LegacyTwoSegmentPluginIDIgnored(t *testing.T) {
+	sentinel := errors.New("pre-existing error")
+	m := Model{deletingIDs: map[string]bool{}, err: sentinel}
+	next, cmd := m.dispatchAction(action.PluginIDPrefix + "notifier")
+	if cmd != nil {
+		t.Errorf("expected nil Cmd, got %T", cmd)
+	}
+	nm := next.(Model)
+	if !errors.Is(nm.err, sentinel) {
+		t.Errorf("legacy 2-segment ID must not touch m.err, got %v", nm.err)
 	}
 }
 

@@ -178,24 +178,40 @@ keybindings:
 
 ## Per-plugin Shortcuts
 
-Any installed plugin can be bound to an outer-tmux root key, so pressing the
-key from either pane fires `jin plugin run <name>` immediately — no action
-palette detour, no CLI. The 4th outer-tmux root binding after `toggle_pane`
-/ `action_panel` / `search`, with the same left/right-pane symmetry.
+Any installed plugin's action can be bound to an outer-tmux root key, so
+pressing the key from either pane fires `jin plugin run <name> <action>`
+immediately — no action palette detour, no CLI. The 4th outer-tmux root
+binding after `toggle_pane` / `action_panel` / `search`, with the same
+left/right-pane symmetry.
 
 Unlike the core three, there is **no default binding** — the user opts in
-per plugin under `keybindings.plugins.<name>.keys`:
+per plugin×action under `keybindings.plugins.<name>.actions.<id>.keys`:
 
 ```yaml
 keybindings:
   plugins:
     notifier:
-      keys: ["M-n"]              # single key
+      actions:
+        default:
+          keys: ["M-n"]                        # single key on the default action
+        send-dm:
+          keys: ["M-d", "C-M-d"]               # multiple keys on a named action
     worktree-cleanup:
-      keys: ["M-w", "M-c"]       # multiple keys per plugin
+      actions:
+        default:
+          keys: ["M-w"]
     # slack-sync:
-    #   keys: []                  # explicit empty ⇒ no binding
+    #   actions:
+    #     default:
+    #       keys: []                            # explicit empty ⇒ no binding
 ```
+
+The pre-0.8.0 shape (`keybindings.plugins.<name>.keys` at the plugin
+level, no `actions:` nesting) is **rejected**: a single WARN per plugin
+is logged at startup and that plugin's bindings are dropped. The TUI
+still starts — config drift never blocks it — but the shortcuts stay
+silent until the user migrates to the new shape. See
+[gotchas.md](gotchas.md) for the deprecated-shape entry.
 
 Each key must be a **modifier-prefixed** binding. Both notations are
 accepted and normalized to tmux `bind-key` form at load time:
@@ -213,22 +229,29 @@ The `keybindings` block ends up mixing the two styles: inner-TUI keys
 (`quit`, `detach`, form submit) always use the bubbletea "+" form
 (`ctrl+c`, `ctrl+]`) because bubbletea itself only understands that
 notation; outer-tmux keys (`toggle_pane`, `action_panel`, `search`,
-`plugins.*.keys`) travel through the normalizer above, so pick whichever
-form you find easier to read.
+`plugins.*.actions.*.keys`) travel through the normalizer above, so pick
+whichever form you find easier to read.
 
-The tmux command issued is `run-shell '<jin>' plugin run <name>`, which
-returns immediately (the daemon dispatches the plugin asynchronously). If
-the plugin wants to render a popup it does so itself via `jin pane popup
---here` — the shortcut path is deliberately transparent to the plugin's
-UI, matching how the action palette invokes plugins today.
+The tmux command issued is `run-shell '<jin>' plugin run <name> <action>`,
+which returns immediately (the daemon dispatches the plugin
+asynchronously). Even a plugin with only a default action gets the
+action ID rendered explicitly — the CLI accepts it and the daemon
+resolves it back to `actions[0]`. If the action wants to render a popup
+it does so itself via `jin pane popup --here` — the shortcut path is
+deliberately transparent to the plugin's UI, matching how the action
+palette invokes plugins today.
 
 **Bindings appear in two other places automatically:**
 
-- The action palette (`M-p`) shows the first configured key of each plugin
-  in its Shortcut column, mirroring how core actions display theirs.
-- The help popup (`?`) grows a `Plugins` section listing every plugin whose
-  binding is set. The section is hidden entirely when no plugin bindings
-  are configured, so the help view stays quiet for default installs.
+- The action palette (`M-p`) shows one row per plugin action. The
+  Shortcut column carries the first configured key for that action,
+  mirroring how core actions display theirs. When a default action's ID
+  is `default` and it has no label, the row displays the bare plugin
+  name (preserving the pre-0.8.0 look for single-action plugins).
+- The help popup (`?`) grows a `Plugins` section listing every bound
+  plugin×action as its own line (`plugin: notifier / send-dm`). The
+  section is hidden entirely when no plugin bindings are configured, so
+  the help view stays quiet for default installs.
 
 **Edge cases** (handled with fail-open policies, matching `PluginsConfig.Disabled`):
 
@@ -236,6 +259,12 @@ UI, matching how the action palette invokes plugins today.
   line is logged (`plugin key binding skipped: <name> not installed or
   disabled`). TUI startup is never blocked by config vs. installed set
   drift.
+- Action ID configured but not in the plugin's current manifest (e.g. a
+  v2 plugin was edited to remove an action) → the tmux key still binds
+  and fires `jin plugin run <name> <action>`, but the daemon rejects the
+  run with `plugin <name> has no action "<id>"`. Removing the stale
+  config entry is left to the user; the TUI does not warn at startup
+  because config-driven flexibility is preferred over speculative checks.
 - Same key bound to a core action (`M-p` etc.) → a collision warning is
   logged. Both bindings are issued and tmux's last-write-wins semantics
   decide which fires; the plugin binding is typically issued last (see

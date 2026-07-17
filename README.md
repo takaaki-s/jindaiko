@@ -564,21 +564,25 @@ by registry name with a commit-pinned consent screen.
 
 ### Two ways a plugin runs
 
-- **Event listener** — subscribes to `status_changed` via the manifest's
-  `on:` matcher. Good for notifications, logging, CI triggers — anything
-  non-interactive. Note: an event fires only when the status actually
-  changes; a notification without a status transition (e.g. a repeated stop
-  while already idle) does not dispatch.
-- **Action** — launched explicitly with `jin plugin run <name> [--session
-  <selector>]`. Good for interactive workflows (e.g. a popup-based diff review
-  UI). Set `on: []` to make a plugin action-only. Without `--session` the run
+- **Event listener** — a manifest action subscribes to `status_changed`
+  via its `on:` matcher. Good for notifications, logging, CI triggers —
+  anything non-interactive. Note: an event fires only when the status
+  actually changes; a notification without a status transition (e.g. a
+  repeated stop while already idle) does not dispatch. If a plugin
+  declares multiple actions, each is matched and debounced independently,
+  so the same event can fan out to several actions on the same plugin.
+- **Action** — launched explicitly with `jin plugin run <name> [action]
+  [--session <selector>]`. Good for interactive workflows (e.g. a
+  popup-based diff review UI). Omit `[action]` to run the plugin's default
+  action (`actions[0]`); pass an action ID to select a specific one. Set
+  an action's `on: []` to make it action-only. Without `--session` the run
   is a **global action**: all session-derived env vars are empty. On every
   action run — global or session-scoped — `JIN_CALLER_TMUX_SOCKET` /
-  `JIN_CALLER_TMUX_PANE` identify where the invoking CLI was launched from,
-  when it sat inside a tmux client.
+  `JIN_CALLER_TMUX_PANE` identify where the invoking CLI was launched
+  from, when it sat inside a tmux client.
 
-Both entry points run the same `run:` command with the same environment;
-only the trigger differs.
+Both entry points execute the same action `entrypoint` with the same
+environment; only the trigger differs.
 
 ### Manifest (`jind-ai-plugin.yaml`)
 
@@ -587,36 +591,55 @@ read at runtime (dispatcher) and at publish time (registry crawler); one
 file, one source of truth.
 
 ```yaml
-schema_version: 1
+schema_version: 2
 name: notifier
-version: 0.1.0
+version: 0.2.0
 description: Desktop notifications for jin sessions
 license: MIT
 homepage: https://github.com/foo/notifier
-jin: ">=0.7.0"
+jin: ">=0.8.0"
 install:
   source:
     build:
       - go build -o bin/notifier ./cmd/notifier
     entrypoint: ./bin/notifier
-on: ["status_changed:idle", "status_changed:permission"]
-timeout: 30s
+actions:
+  - id: default                                      # actions[0] is the implicit default
+    entrypoint: ./bin/notifier notify
+    on: ["status_changed:idle", "status_changed:permission"]
+    label: "Desktop notification"
+    timeout: 30s
+  - id: send-dm                                      # `jin plugin run notifier send-dm`
+    entrypoint: ./bin/notifier send-dm
+    on: []                                           # action-only (no event subscription)
+    label: "Send DM to teammate"
+    popup: { width: 60, height: 30 }
 ```
+
+Existing v1 manifests (`schema_version: 1` with top-level `entrypoint` /
+`on` / `timeout` / `popup`) keep working: they are normalised at parse
+time into a single-action shape, so no author-side migration is required.
+Write new manifests as v2.
 
 | Field | Required | Description |
 |-------|----------|--------------|
-| `schema_version` | Yes | Manifest generation. Currently `1`. Bumped only on breaking schema changes |
+| `schema_version` | Yes | Manifest generation. `1` or `2`. v1 is auto-normalised to a single-action v2 shape at parse time |
 | `name` | Yes | `[a-z][a-z0-9-]{1,63}`; unique in the registry; must match the directory name jind-ai installs it under |
 | `version` | Yes | Plugin's own semver (`X.Y.Z`); pre-release/build metadata allowed |
 | `description` | Yes | One-liner shown in `jin plugin ls-remote` search results |
 | `license` / `homepage` | No | Optional metadata carried into the registry entry |
-| `jin` | Yes | Semver constraint on the jin binary (`">=0.7.0"`, `"^0.7"`, `">=0.7 <0.9"`). Checked at install and at every dispatch |
+| `jin` | Yes | Semver constraint on the jin binary (`">=0.8.0"`, `"^0.8"`, `">=0.8 <0.10"`). Checked at install and at every dispatch |
 | `install.source.build` | No | Ordered list of build commands (each element runs in its own `bash -c`, no piping across elements) — see [Language-specific guidance](#language-specific-guidance). Omit for plugins that ship a directly-executable entrypoint (shell scripts, prebuilt binaries in the repo) |
-| `install.source.entrypoint` | Conditional | Path (relative to the plugin dir) the dispatcher executes on every event. Required when `install.source` is used |
+| `install.source.entrypoint` | Conditional | Default entrypoint the dispatcher executes if a specific action does not declare its own. Required when `install.source` is used |
 | `install.release_asset.pattern` | Conditional | Alternative to `install.source`. Downloads a prebuilt asset from the latest GitHub Release. Placeholders: `{os}`, `{arch}` |
-| `on` | No | List of `status_changed` or `status_changed:<status>` matchers. Empty or omitted = action-only |
-| `timeout` | No | Duration string (`"30s"`, `"5m"`); default `30s` |
-| `popup.width` / `popup.height` | No | Manifest hint for `jin pane popup --here` size (1–100, percent of terminal) |
+| `actions[]` | v2 only | List of actions the plugin exposes. `actions[0]` is the implicit default. Each element carries `id` / `entrypoint` / `on` / `label` / `timeout` / `popup` (fields below) |
+| `actions[].id` | Yes | `[a-z][a-z0-9-]{0,63}`; unique within the plugin. Explicit IDs are strongly recommended — palette, keybindings, and `jin plugin run` all reference actions by ID |
+| `actions[].entrypoint` | Conditional | Path (relative to the plugin dir) executed for this action. May be omitted when `install.source.entrypoint` covers it |
+| `actions[].on` | No | Per-action `status_changed` matchers, same syntax as v1's top-level `on`. Empty or omitted = action-only. Matching / debouncing is independent per action |
+| `actions[].label` | No | Human-readable label shown in the palette and help popup. When empty, the palette displays `<plugin>:<action-id>` (or just `<plugin>` when the default action's ID is `default`) |
+| `actions[].timeout` | No | Per-action override for `timeout`; default `30s` |
+| `actions[].popup.width` / `.height` | No | Per-action manifest hint for `jin pane popup --here` size (1–100, percent of terminal) |
+| `on` / `timeout` / `popup` (top-level) | v1 only | Legacy v1 fields; forbidden in v2 (validation error). Put them under `actions[]` instead |
 
 `install.source` and `install.release_asset` are mutually exclusive.
 
@@ -629,6 +652,7 @@ Environment variables:
 | Variable | Description |
 |----------|--------------|
 | `JIN_EVENT` | `status_changed` or `action` |
+| `JIN_ACTION_ID` | ID of the manifest action that fired this run (`default` for v1 manifests / v2 default actions synthesised as `default`). A shared entrypoint script can dispatch on this instead of parsing argv |
 | `JIN_SESSION_ID` | Session ID |
 | `JIN_STATUS` | Current status |
 | `JIN_PREV_STATUS` | Previous status (empty for an `action` run) |

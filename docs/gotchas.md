@@ -193,3 +193,14 @@ Common pitfalls and caveats that agents tend to fall into.
   Plugin manifest out-of-range (`popup.width: 150` in `jin-plugin.yaml`)
   hard-fails `Validate()` and the plugin lands in `StateBroken` — a plugin
   author is expected to fix the manifest.
+
+- **`keybindings.plugins.<name>.keys` (0.7.x shape) is dropped on 0.8.0**.
+  0.8.0 replaced it with `keybindings.plugins.<name>.actions.<id>.keys` to
+  match the multi-action manifest schema. At startup, jind-ai logs one
+  `plugin keybindings config: %s uses deprecated v1 shape ...` WARN per
+  affected plugin and drops that plugin's bindings — the TUI itself still
+  starts, so this is not a hard failure, but the shortcuts stay silent
+  until the config is rewritten. For a plugin with only a default action,
+  `actions.default.keys: [...]` is the shortest translation. The 0.8.0
+  release note in [CHANGELOG.md](../CHANGELOG.md) has a full before/after
+  example.

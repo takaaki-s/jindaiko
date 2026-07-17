@@ -843,24 +843,23 @@ func (m Model) dispatchAction(id string) (tea.Model, tea.Cmd) {
 	// anything else — a core ID that missed the switch above, or a stale
 	// two-segment ID left in the tmux env by an older binary — falls through
 	// to the no-op return.
-	if name, _, ok := action.ParsePluginActionID(id); ok {
-		// TODO(plugin-multi-action): forward the parsed action ID once
-		// daemon.PluginRunRequest grows an Action field (dispatcher phase);
-		// until then the daemon always runs the plugin's default action.
-		return m.handlePluginRun(name)
+	if name, actionID, ok := action.ParsePluginActionID(id); ok {
+		return m.handlePluginRun(name, actionID)
 	}
 	return m, nil
 }
 
 // handlePluginRun issues a plugin-run request to the daemon for the given
-// plugin name, targeting the current cursor session (empty ID => global
-// action). Failures surface on m.err.
-func (m Model) handlePluginRun(name string) (tea.Model, tea.Cmd) {
+// plugin name and action ID, targeting the current cursor session (empty
+// session ID => global action). An empty actionID lets the daemon select
+// the plugin's default action. Failures surface on m.err.
+func (m Model) handlePluginRun(name, actionID string) (tea.Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
 	}
 	req := daemon.PluginRunRequest{
 		Plugin:           name,
+		Action:           actionID,
 		SessionID:        m.currentCursorSessionID(),
 		Depth:            0,
 		CallerTmuxSocket: tmux.SocketPathFromEnv(os.Getenv("TMUX")),

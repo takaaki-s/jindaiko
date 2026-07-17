@@ -91,12 +91,12 @@ Model.openPopup(name)                  cmd/jin/cmd/tui.go
                                      └─ wraps GetPluginPopupSize
 
 [dispatch]
-  d.run(entry)
-    ├─ d.popupResolver(name, manifest.Popup)
-    │    priority: user config popups.plugins[name]
-    │            > manifest popup
-    │            > user config popups.plugin_default
-    │            > hardcoded plugin_default
+  d.run(entry, action)
+    ├─ d.popupResolver(name, action.ID, action.Popup)
+    │    priority: user config popups.plugins[name]     # per-action popup config
+    │            > action.Popup (v2 manifest per-action) # is out of scope this release,
+    │            > user config popups.plugin_default    # so actionID is currently
+    │            > hardcoded plugin_default              # ignored by the resolver
     ├─ ExecOptions.PopupWidth/Height ← resolved
     └─ buildEnv: JIN_PLUGIN_POPUP_{WIDTH,HEIGHT} exported
                    ↓
@@ -110,7 +110,10 @@ Model.openPopup(name)                  cmd/jin/cmd/tui.go
 Import boundary: `internal/plugin` does not depend on `internal/config`.
 The resolver is passed as a `PopupSizeResolver` callback at daemon startup;
 `internal/daemon/server.go` converts between `plugin.PopupConfig` and
-`config.PopupSizeConfig` at the boundary.
+`config.PopupSizeConfig` at the boundary. The resolver signature carries
+the action ID so a later config schema can widen to per-action popup size
+without another breaking signature change; today the daemon-side resolver
+ignores it and treats popup size as a plugin-level knob.
 
 See [tui-guide.md](tui-guide.md#popup-sizes) for the config schema and
 defaults, and [conventions.md](conventions.md#plugin-manifest-popup-declaration)
@@ -163,21 +166,33 @@ the status pipeline):
 ```
 session.Manager.HandleHookEvent()  (status actually changed)
   → plugin.Dispatcher.Publish(Event{status_changed, notify_kind, ...})   (returns immediately)
-    → for each matching, enabled plugin: exec.ExecPlugin()  (background goroutine,
-                                                               debounced, JIN_* env + stdin JSON)
+    → for each enabled plugin:
+        for each manifest.Actions[i]:                # per-action match/debounce/run
+          if action.On matches event:
+            go exec.ExecPlugin(entry, action, ...)   # background goroutine,
+                                                        debounce key includes action ID,
+                                                        JIN_* env (incl. JIN_ACTION_ID)
+                                                        + stdin JSON
 ```
 
 The Event carries the adapter-determined notification kind (`notify_kind` /
 `JIN_NOTIFY_KIND`: task-complete / error / permission, empty when none) so
-plugins never re-derive notification semantics from status pairs.
+plugins never re-derive notification semantics from status pairs. Actions
+match and debounce independently, so a single event can fan out to
+multiple actions on the same plugin without any interfering with the
+others.
 
-`jin plugin run <name> [--session <id>]` takes a separate, synchronous-trigger
-path (`Dispatcher.RunAction`) that skips matcher/debounce but shares the same
-`ExecPlugin` runner; without `--session` it dispatches a global action with
-empty session fields, carrying the invoking CLI's tmux context
-(`JIN_CALLER_TMUX_SOCKET`/`JIN_CALLER_TMUX_PANE`) when available. See `internal/plugin/` (`manifest.go`, `dispatcher.go`,
-`exec.go`) and [ipc-protocol.md](ipc-protocol.md) for the `plugin-run` /
-`pane-*` actions plugins use as their CLI-facing API.
+`jin plugin run <name> [action] [--session <id>]` takes a separate,
+synchronous-trigger path (`Dispatcher.RunAction(name, actionID, ev, depth,
+actx)`) that skips matcher/debounce but shares the same `ExecPlugin`
+runner. An empty `actionID` selects the default action (`actions[0]`); an
+unknown ID returns a synchronous error that lists the available actions.
+Without `--session` it dispatches a global action with empty session
+fields, carrying the invoking CLI's tmux context
+(`JIN_CALLER_TMUX_SOCKET`/`JIN_CALLER_TMUX_PANE`) when available. See
+`internal/plugin/` (`manifest.go`, `dispatcher.go`, `exec.go`) and
+[ipc-protocol.md](ipc-protocol.md) for the `plugin-run` / `pane-*`
+actions plugins use as their CLI-facing API.
 
 ## Agent Adapters
 
