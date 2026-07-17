@@ -107,7 +107,9 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir string) (*Server, er
 	pluginReg := plugin.NewRegistry(paths.Plugins(), stateDir, pluginCfg)
 	pluginDisp := plugin.NewDispatcher(pluginReg, paths.Plugins(), stateDir, socketPath,
 		time.Duration(pluginCfg.Debounce)*time.Second,
-		func(pluginName string, m *manifest.PopupConfig) (string, string) {
+		// actionID is accepted but unused for now: user config keys popup size
+		// by plugin name only, so every action shares the plugin-level setting.
+		func(pluginName, _ string, m *manifest.PopupConfig) (string, string) {
 			var cfgManifest *config.PopupSizeConfig
 			if m != nil {
 				cfgManifest = &config.PopupSizeConfig{Width: m.Width, Height: m.Height}
@@ -763,15 +765,19 @@ func (s *Server) handlePaneSendKeys(data json.RawMessage) Response {
 }
 
 // PluginRunRequest is the request payload for the "plugin-run" action. It runs
-// one plugin on demand, bypassing matcher and debounce: against a session's
-// current snapshot when SessionID is set, or as a global action (all session
-// fields empty) when it is not. Depth carries the caller CLI's
-// JIN_PLUGIN_DEPTH so the dispatcher can reject a plugin that tries to chain
-// another plugin run. CallerTmuxSocket/CallerTmuxPane carry the invoking
-// CLI's tmux context (from $TMUX/$TMUX_PANE) so the plugin can address the
-// pane it was launched from.
+// one plugin action on demand, bypassing matcher and debounce: against a
+// session's current snapshot when SessionID is set, or as a global action
+// (all session fields empty) when it is not. Action selects which manifest
+// action runs; empty means the plugin's default action (actions[0]), so old
+// clients that never send the field keep their pre-multi-action behaviour.
+// Depth carries the caller CLI's JIN_PLUGIN_DEPTH so the dispatcher can
+// reject a plugin that tries to chain another plugin run.
+// CallerTmuxSocket/CallerTmuxPane carry the invoking CLI's tmux context
+// (from $TMUX/$TMUX_PANE) so the plugin can address the pane it was
+// launched from.
 type PluginRunRequest struct {
 	Plugin           string `json:"plugin"`
+	Action           string `json:"action,omitempty"`
 	SessionID        string `json:"session_id,omitempty"`
 	Depth            int    `json:"depth,omitempty"`
 	CallerTmuxSocket string `json:"caller_tmux_socket,omitempty"`
@@ -810,7 +816,7 @@ func (s *Server) handlePluginRun(data json.RawMessage) Response {
 		TmuxSocket: req.CallerTmuxSocket,
 		TmuxPane:   req.CallerTmuxPane,
 	}
-	if err := s.pluginDisp.RunAction(req.Plugin, ev, req.Depth, actx); err != nil {
+	if err := s.pluginDisp.RunAction(req.Plugin, req.Action, ev, req.Depth, actx); err != nil {
 		return Response{Success: false, Error: err.Error()}
 	}
 	return Response{Success: true}

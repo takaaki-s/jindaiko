@@ -179,10 +179,11 @@ func (m *Manifest) ActionIDs() []string {
 // normalize synthesizes Actions[] for v1 manifests so downstream helpers
 // (DefaultAction / FindAction / Entrypoint) can uniformly read Actions[]
 // regardless of the source schema version. The original top-level
-// Install.Source.Entrypoint / On / Popup are intentionally left populated
-// because P1 only touches this package; v1-shaped downstream code (dispatcher,
-// action bindings) still reads those fields and would break if cleared. A
-// later phase migrates the readers and then clears the originals.
+// Install.Source.Entrypoint / On / Popup are intentionally left populated:
+// validation (checks.go) runs after normalize and reports v1 findings
+// against the fields the author actually wrote, so clearing them here would
+// misfire the required-field, matcher, and popup rules. Runtime consumers
+// read Actions[] only.
 //
 // No-op when the manifest is v2 (author supplied Actions explicitly), when
 // Actions is already non-empty, or when the v1 manifest lacks an entrypoint

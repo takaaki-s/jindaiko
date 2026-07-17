@@ -213,23 +213,33 @@ func runBuildChecks(out io.Writer, m *manifest.Manifest, pluginDir string) []man
 			}}
 		}
 	}
-	entry := m.Entrypoint()
-	if entry == "" {
-		return nil
+	// Every action's entrypoint must materialise, not just the default one —
+	// the dispatcher execs each of them. v1 findings keep the field path the
+	// author actually wrote; v2 findings point at the per-action key.
+	var findings []manifest.Finding
+	for i := range m.Actions {
+		a := &m.Actions[i]
+		if a.Entrypoint == "" {
+			continue
+		}
+		entryPath := a.Entrypoint
+		if !filepath.IsAbs(entryPath) {
+			entryPath = filepath.Join(pluginDir, entryPath)
+		}
+		if _, err := os.Stat(entryPath); err != nil {
+			field := "actions[" + a.ID + "].entrypoint"
+			if m.SchemaVersion < 2 {
+				field = "install.source.entrypoint"
+			}
+			findings = append(findings, manifest.Finding{
+				Rule:     manifest.RuleEntrypointExists,
+				Severity: manifest.SeverityError,
+				Message:  fmt.Sprintf("entrypoint %q not found after build: %v", a.Entrypoint, err),
+				Field:    field,
+			})
+		}
 	}
-	entryPath := entry
-	if !filepath.IsAbs(entryPath) {
-		entryPath = filepath.Join(pluginDir, entryPath)
-	}
-	if _, err := os.Stat(entryPath); err != nil {
-		return []manifest.Finding{{
-			Rule:     manifest.RuleEntrypointExists,
-			Severity: manifest.SeverityError,
-			Message:  fmt.Sprintf("entrypoint %q not found after build: %v", entry, err),
-			Field:    "install.source.entrypoint",
-		}}
-	}
-	return nil
+	return findings
 }
 
 var (

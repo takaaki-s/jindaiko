@@ -41,6 +41,7 @@ func TestExecPlugin_Success(t *testing.T) {
 	err := ExecPlugin(context.Background(), ExecOptions{
 		PluginDir:  pluginDir,
 		Run:        run,
+		ActionID:   "notify",
 		Env:        sampleEvent(),
 		Depth:      0,
 		SocketPath: "/run/jin.sock",
@@ -66,6 +67,7 @@ func TestExecPlugin_Success(t *testing.T) {
 		"JIN_WORKDIR=/tmp/fake-work",
 		"JIN_TMUX_PANE_ID=%3",
 		"JIN_NOTIFY_KIND=task-complete",
+		"JIN_ACTION_ID=notify",
 		"JIN_PLUGIN_DEPTH=0",
 		"JIN_SOCKET=/run/jin.sock",
 	}
@@ -244,6 +246,28 @@ func TestLogPath(t *testing.T) {
 	want := filepath.Join("/state", "plugin-logs", "notifier.log")
 	if got != want {
 		t.Errorf("LogPath = %q, want %q", got, want)
+	}
+}
+
+// JIN_ACTION_ID follows the other JIN_* event vars: always exported, empty
+// when the caller did not name an action (unlike JIN_CALLER_TMUX_*, which
+// are omitted entirely when absent).
+func TestBuildEnv_ExportsActionID(t *testing.T) {
+	withID := strings.Join(buildEnv(ExecOptions{
+		Env:        sampleEvent(),
+		ActionID:   "send-dm",
+		SocketPath: "/run/jin.sock",
+	}), "\n")
+	if !strings.Contains(withID, "JIN_ACTION_ID=send-dm") {
+		t.Errorf("missing JIN_ACTION_ID=send-dm; env:\n%s", withID)
+	}
+
+	withoutID := strings.Join(buildEnv(ExecOptions{
+		Env:        sampleEvent(),
+		SocketPath: "/run/jin.sock",
+	}), "\n")
+	if !strings.Contains(withoutID, "JIN_ACTION_ID=\n") {
+		t.Errorf("JIN_ACTION_ID should be exported empty when unset; env:\n%s", withoutID)
 	}
 }
 

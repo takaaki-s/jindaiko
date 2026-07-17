@@ -91,9 +91,13 @@ type ActionContext struct {
 // notation, e.g. "70%") for the plugin's `jin pane popup --here` invocations.
 // Empty strings mean "no size hint" — buildEnv skips the corresponding env var
 // so the CLI falls through to its own fallback chain (flag > env > empty).
+//
+// ActionID is the manifest action being run, exported as JIN_ACTION_ID so a
+// shared entrypoint script can tell which of its plugin's actions invoked it.
 type ExecOptions struct {
 	PluginDir   string
 	Run         string
+	ActionID    string
 	Env         Event
 	Caller      ActionContext
 	Depth       int
@@ -209,6 +213,7 @@ func buildEnv(opts ExecOptions) []string {
 		"JIN_WORKDIR="+opts.Env.WorkDir,
 		"JIN_TMUX_PANE_ID="+opts.Env.TmuxPaneID,
 		"JIN_NOTIFY_KIND="+opts.Env.NotifyKind,
+		"JIN_ACTION_ID="+opts.ActionID,
 		"JIN_PLUGIN_DEPTH="+strconv.Itoa(opts.Depth),
 		"JIN_SOCKET="+opts.SocketPath,
 	)

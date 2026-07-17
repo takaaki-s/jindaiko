@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +22,7 @@ var pluginLog = debug.NewLogger("plugin-debug.log")
 const maxDepth = 2
 
 // DefaultDebounce is the minimum interval between deliveries of the same
-// (plugin, session, event) triple when the caller does not configure one.
+// (plugin, action, session, event) tuple when the caller does not configure one.
 const DefaultDebounce = 3 * time.Second
 
 // debouncePruneThreshold caps lastFired growth: sessions come and go for the
@@ -30,12 +31,14 @@ const DefaultDebounce = 3 * time.Second
 // information, making the sweep free of behaviour change.
 const debouncePruneThreshold = 128
 
-// PopupSizeResolver resolves the popup size a plugin should receive as
+// PopupSizeResolver resolves the popup size a plugin action should receive as
 // JIN_PLUGIN_POPUP_* env when it runs. Returning empty strings means "no
 // explicit size" and the caller of `jin pane popup --here` falls through to
 // tmux's built-in default. The resolver takes precedence in the order:
 // user config > manifest declaration > global plugin default > hardcoded.
-type PopupSizeResolver func(pluginName string, m *manifest.PopupConfig) (width, height string)
+// actionID identifies which of the plugin's actions is running so resolvers
+// can look up per-action user config.
+type PopupSizeResolver func(pluginName, actionID string, m *manifest.PopupConfig) (width, height string)
 
 // EventDispatcher fans events out to installed plugins. Publish never blocks:
 // registry reads and plugin processes run on background goroutines, and every
@@ -63,7 +66,7 @@ func NewDispatcher(registry *Registry, pluginsDir, stateDir, socketPath string, 
 		debounce = DefaultDebounce
 	}
 	if popupResolver == nil {
-		popupResolver = func(string, *manifest.PopupConfig) (string, string) { return "", "" }
+		popupResolver = func(string, string, *manifest.PopupConfig) (string, string) { return "", "" }
 	}
 	return &EventDispatcher{
 		registry:      registry,
@@ -98,22 +101,27 @@ func (d *EventDispatcher) publish(ev Event) {
 		default:
 			continue
 		}
-		if !d.matches(e.Manifest, ev) {
-			continue
+		for i := range e.Manifest.Actions {
+			a := &e.Manifest.Actions[i]
+			if !d.matches(a, ev) {
+				continue
+			}
+			if !d.passDebounce(e.Name, a.ID, ev) {
+				pluginLog("plugin %s:%s debounced for %s %s:%s", e.Name, a.ID, ev.SessionID, ev.Name, ev.Status)
+				continue
+			}
+			go d.run(e, a, ev, 1, ActionContext{})
 		}
-		if !d.passDebounce(e.Name, ev) {
-			pluginLog("plugin %s debounced for %s %s:%s", e.Name, ev.SessionID, ev.Name, ev.Status)
-			continue
-		}
-		go d.run(e, ev, 1, ActionContext{})
 	}
 }
 
-// RunAction executes one plugin on demand (the `jin plugin run` path). It
-// bypasses matcher and debounce but still enforces state and depth checks.
-// Validation errors are returned synchronously; the run itself is async.
-// actx carries the invoking CLI's tmux context (empty when not applicable).
-func (d *EventDispatcher) RunAction(name string, ev Event, callerDepth int, actx ActionContext) error {
+// RunAction executes one plugin action on demand (the `jin plugin run` path).
+// It bypasses matcher and debounce but still enforces state and depth checks.
+// actionID selects which of the plugin's actions runs; "" means the default
+// action (actions[0]) and an unknown id is a synchronous error. The run
+// itself is async. actx carries the invoking CLI's tmux context (empty when
+// not applicable).
+func (d *EventDispatcher) RunAction(name, actionID string, ev Event, callerDepth int, actx ActionContext) error {
 	if callerDepth+1 >= maxDepth {
 		return fmt.Errorf("plugin %s not run: depth limit reached (JIN_PLUGIN_DEPTH=%d) — plugins cannot chain plugin runs", name, callerDepth)
 	}
@@ -127,7 +135,20 @@ func (d *EventDispatcher) RunAction(name string, ev Event, callerDepth int, actx
 		}
 		switch e.State {
 		case StateEnabled:
-			go d.run(e, ev, callerDepth+1, actx)
+			var a *manifest.Action
+			if actionID == "" {
+				a = e.Manifest.DefaultAction()
+				if a == nil {
+					return fmt.Errorf("plugin %s has no actions", name)
+				}
+			} else {
+				a = e.Manifest.FindAction(actionID)
+				if a == nil {
+					return fmt.Errorf("plugin %s has no action %q (available: [%s])",
+						name, actionID, strings.Join(e.Manifest.ActionIDs(), ", "))
+				}
+			}
+			go d.run(e, a, ev, callerDepth+1, actx)
 			return nil
 		case StateIncompatible:
 			return fmt.Errorf("plugin %s is incompatible: %v (try: jin plugin update %s)", name, e.Err, name)
@@ -140,16 +161,17 @@ func (d *EventDispatcher) RunAction(name string, ev Event, callerDepth int, actx
 	return fmt.Errorf("plugin %s is not installed", name)
 }
 
-func (d *EventDispatcher) run(e Entry, ev Event, depth int, actx ActionContext) {
+func (d *EventDispatcher) run(e Entry, a *manifest.Action, ev Event, depth int, actx ActionContext) {
 	timeout := e.Manifest.EffectiveTimeout()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	popupWidth, popupHeight := d.popupResolver(e.Name, e.Manifest.Popup)
+	popupWidth, popupHeight := d.popupResolver(e.Name, a.ID, a.Popup)
 
 	err := ExecPlugin(ctx, ExecOptions{
 		PluginDir:   filepath.Join(d.pluginsDir, e.Name),
-		Run:         e.Manifest.Entrypoint(),
+		Run:         a.Entrypoint,
+		ActionID:    a.ID,
 		Env:         ev,
 		Caller:      actx,
 		Depth:       depth,
@@ -160,12 +182,12 @@ func (d *EventDispatcher) run(e Entry, ev Event, depth int, actx ActionContext) 
 		PopupHeight: popupHeight,
 	})
 	if err != nil {
-		d.warnOnce(e.Name+"|"+err.Error(), "plugin %s failed: %v", e.Name, err)
+		d.warnOnce(e.Name+"|"+a.ID+"|"+err.Error(), "plugin %s:%s failed: %v", e.Name, a.ID, err)
 	}
 }
 
-func (d *EventDispatcher) matches(m *manifest.Manifest, ev Event) bool {
-	for _, matcher := range m.On {
+func (d *EventDispatcher) matches(a *manifest.Action, ev Event) bool {
+	for _, matcher := range a.On {
 		if manifest.MatcherMatches(matcher, ev.Name, ev.Status) {
 			return true
 		}
@@ -173,10 +195,10 @@ func (d *EventDispatcher) matches(m *manifest.Manifest, ev Event) bool {
 	return false
 }
 
-// passDebounce reports whether the (plugin, session, event) triple is outside
-// its debounce window, and records the firing time when it is.
-func (d *EventDispatcher) passDebounce(name string, ev Event) bool {
-	key := name + "\x00" + ev.SessionID + "\x00" + ev.Name + ":" + ev.Status
+// passDebounce reports whether the (plugin, action, session, event) tuple is
+// outside its debounce window, and records the firing time when it is.
+func (d *EventDispatcher) passDebounce(name, actionID string, ev Event) bool {
+	key := name + "\x00" + actionID + "\x00" + ev.SessionID + "\x00" + ev.Name + ":" + ev.Status
 	now := time.Now()
 
 	d.mu.Lock()

@@ -190,10 +190,10 @@ func TestRunActionBypassesMatcherAndDebounce(t *testing.T) {
 	installTestPlugin(t, pluginsDir, stateDir, "dumper", dumpEntrypointRuntime)
 
 	ev := Event{Name: "action", SessionID: "sess-1", Status: "idle"}
-	if err := d.RunAction("dumper", ev, 0, ActionContext{}); err != nil {
+	if err := d.RunAction("dumper", "", ev, 0, ActionContext{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RunAction("dumper", ev, 0, ActionContext{}); err != nil {
+	if err := d.RunAction("dumper", "", ev, 0, ActionContext{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,10 +224,10 @@ func TestRunActionGlobalWithCallerContext(t *testing.T) {
 
 	global := Event{Name: "action"}
 	actx := ActionContext{TmuxSocket: "/tmp/tmux-1000/default", TmuxPane: "%3"}
-	if err := d.RunAction("callerdump", global, 0, actx); err != nil {
+	if err := d.RunAction("callerdump", "", global, 0, actx); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RunAction("callerdump", global, 0, ActionContext{}); err != nil {
+	if err := d.RunAction("callerdump", "", global, 0, ActionContext{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -258,7 +258,7 @@ func TestPassDebouncePrunesExpiredEntries(t *testing.T) {
 	}
 	d.mu.Unlock()
 
-	if !d.passDebounce("dumper", idleEvent()) {
+	if !d.passDebounce("dumper", "default", idleEvent()) {
 		t.Fatal("fresh event should pass debounce")
 	}
 
@@ -274,7 +274,7 @@ func TestRunActionRejectsDepthLimit(t *testing.T) {
 	d, pluginsDir, stateDir := newTestDispatcher(t, config.PluginsConfig{})
 	installTestPlugin(t, pluginsDir, stateDir, "dumper", dumpEntrypointRuntime)
 
-	err := d.RunAction("dumper", idleEvent(), 1, ActionContext{})
+	err := d.RunAction("dumper", "", idleEvent(), 1, ActionContext{})
 	if err == nil || !strings.Contains(err.Error(), "depth limit") {
 		t.Errorf("RunAction(depth=1) = %v, want depth limit error", err)
 	}
@@ -291,13 +291,13 @@ func TestRunActionErrors(t *testing.T) {
 	installTestPlugin(t, pluginsDir, stateDir, "off", off)
 	installTestPlugin(t, pluginsDir, stateDir, "old", old)
 
-	if err := d.RunAction("missing", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "not installed") {
+	if err := d.RunAction("missing", "", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Errorf("missing plugin: %v, want not installed", err)
 	}
-	if err := d.RunAction("off", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "disabled") {
+	if err := d.RunAction("off", "", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Errorf("disabled plugin: %v, want disabled", err)
 	}
-	if err := d.RunAction("old", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "jin plugin update") {
+	if err := d.RunAction("old", "", idleEvent(), 0, ActionContext{}); err == nil || !strings.Contains(err.Error(), "jin plugin update") {
 		t.Errorf("incompatible plugin: %v, want update hint", err)
 	}
 }
@@ -309,7 +309,7 @@ func TestNewDispatcher_NilResolver_UsesDefault(t *testing.T) {
 
 	d := NewDispatcher(reg, pluginsDir, stateDir, "/tmp/test.sock", 500*time.Millisecond, nil)
 
-	w, h := d.popupResolver("any-plugin", nil)
+	w, h := d.popupResolver("any-plugin", "any-action", nil)
 	if w != "" || h != "" {
 		t.Errorf("default popupResolver returned %q/%q, want empty/empty", w, h)
 	}
@@ -319,10 +319,11 @@ func TestDispatcher_CallsPopupResolver_WithManifestPopup(t *testing.T) {
 	pluginsDir := t.TempDir()
 	stateDir := t.TempDir()
 
-	var gotName string
+	var gotName, gotActionID string
 	var gotPopup *manifest.PopupConfig
-	resolver := func(name string, popup *manifest.PopupConfig) (string, string) {
+	resolver := func(name, actionID string, popup *manifest.PopupConfig) (string, string) {
 		gotName = name
+		gotActionID = actionID
 		gotPopup = popup
 		return "42%", "24%"
 	}
@@ -360,6 +361,9 @@ popup:
 	if gotName != "envcap" {
 		t.Errorf("resolver got name=%q, want envcap", gotName)
 	}
+	if gotActionID != "default" {
+		t.Errorf("resolver got actionID=%q, want default (v1 normalize)", gotActionID)
+	}
 	if gotPopup == nil || gotPopup.Width != 40 || gotPopup.Height != 20 {
 		t.Errorf("resolver got popup=%+v, want {40, 20}", gotPopup)
 	}
@@ -369,5 +373,184 @@ popup:
 	}
 	if !strings.Contains(env, "JIN_PLUGIN_POPUP_HEIGHT=24%") {
 		t.Errorf("plugin env missing JIN_PLUGIN_POPUP_HEIGHT=24%%; env:\n%s", env)
+	}
+}
+
+// v2Manifest renders a schema_version 2 fixture: the header (semver,
+// permissive jin range, no-op build) is shared by every v2 fixture in this
+// file so each test declares only its name and actions block (indented YAML
+// starting at "  - id: ...").
+func v2Manifest(name, description, actions string) string {
+	return fmt.Sprintf(`schema_version: 2
+name: %s
+version: 0.1.0
+description: %s
+jin: ">=0.0.0"
+install:
+  source:
+    build: ["true"]
+actions:
+%s`, name, description, actions)
+}
+
+// twoActionManifest is a v2 fixture with two actions on disjoint matchers:
+// on-idle appends to idle.txt for status_changed:idle, on-thinking appends to
+// thinking.txt for status_changed:thinking. Each line carries $JIN_ACTION_ID
+// so tests can also assert which action identity the run saw.
+var twoActionManifest = v2Manifest("multi", "two independent actions", `  - id: on-idle
+    entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> idle.txt'
+    on:
+      - status_changed:idle
+  - id: on-thinking
+    entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> thinking.txt'
+    on:
+      - status_changed:thinking
+`)
+
+// Two actions with disjoint matchers must fire independently: an idle event
+// runs only on-idle, a thinking event only on-thinking.
+func TestPublishRoutesEventsPerAction(t *testing.T) {
+	d, pluginsDir, stateDir := newTestDispatcher(t, config.PluginsConfig{})
+	installTestPlugin(t, pluginsDir, stateDir, "multi", twoActionManifest)
+
+	d.Publish(idleEvent())
+
+	idleOut := filepath.Join(pluginsDir, "multi", "idle.txt")
+	thinkingOut := filepath.Join(pluginsDir, "multi", "thinking.txt")
+	if !waitForFile(t, idleOut) {
+		t.Fatal("on-idle action did not run for idle event")
+	}
+	data, err := os.ReadFile(idleOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "on-idle" {
+		t.Errorf("JIN_ACTION_ID = %q, want on-idle", got)
+	}
+	if _, err := os.Stat(thinkingOut); err == nil {
+		t.Fatal("on-thinking action ran for idle event")
+	}
+
+	d.Publish(Event{Name: manifest.EventStatusChanged, SessionID: "sess-1", Status: "thinking", PrevStatus: "idle"})
+
+	if !waitForFile(t, thinkingOut) {
+		t.Fatal("on-thinking action did not run for thinking event")
+	}
+	if got := waitForLines(t, idleOut, 1); got != 1 {
+		t.Errorf("on-idle ran %d times, want 1 (thinking event must not re-fire it)", got)
+	}
+}
+
+// bothActionsManifest is a v2 fixture whose two actions both match
+// status_changed:idle, writing to distinct files.
+var bothActionsManifest = v2Manifest("both", "two actions on the same matcher", `  - id: first
+    entrypoint: bash -c 'echo ran >> first.txt'
+    on:
+      - status_changed:idle
+  - id: second
+    entrypoint: bash -c 'echo ran >> second.txt'
+    on:
+      - status_changed:idle
+`)
+
+func TestPublishFiresAllMatchingActions(t *testing.T) {
+	d, pluginsDir, stateDir := newTestDispatcher(t, config.PluginsConfig{})
+	installTestPlugin(t, pluginsDir, stateDir, "both", bothActionsManifest)
+
+	d.Publish(idleEvent())
+
+	firstOut := filepath.Join(pluginsDir, "both", "first.txt")
+	secondOut := filepath.Join(pluginsDir, "both", "second.txt")
+	if !waitForFile(t, firstOut) {
+		t.Fatal("first action did not run")
+	}
+	if !waitForFile(t, secondOut) {
+		t.Fatal("second action did not run (debounce must be per-action)")
+	}
+
+	// A second publish inside the window must debounce each action
+	// independently: both stay at exactly one run.
+	d.Publish(idleEvent())
+
+	if got := waitForLines(t, firstOut, 1); got != 1 {
+		t.Errorf("first action ran %d times within debounce window, want 1", got)
+	}
+	if got := waitForLines(t, secondOut, 1); got != 1 {
+		t.Errorf("second action ran %d times within debounce window, want 1", got)
+	}
+}
+
+// Debouncing one action must not swallow a different action of the same
+// plugin for the same (session, event) pair.
+func TestPassDebounceIsPerAction(t *testing.T) {
+	d, _, _ := newTestDispatcher(t, config.PluginsConfig{})
+
+	if !d.passDebounce("multi", "first", idleEvent()) {
+		t.Fatal("first action should pass debounce")
+	}
+	if d.passDebounce("multi", "first", idleEvent()) {
+		t.Fatal("first action should be debounced on the second hit")
+	}
+	if !d.passDebounce("multi", "second", idleEvent()) {
+		t.Fatal("second action should pass debounce independently of first")
+	}
+}
+
+// actionDumpManifest exposes JIN_ACTION_ID for on-demand runs: both actions
+// append their received id to out.txt.
+var actionDumpManifest = v2Manifest("actiondump", "dumps action id", `  - id: primary
+    entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> out.txt'
+  - id: secondary
+    entrypoint: bash -c 'echo "$JIN_ACTION_ID" >> out.txt'
+`)
+
+// RunAction with an empty id must run the default action (actions[0]); an
+// explicit id must run exactly that action. Both runs must see their own id
+// in JIN_ACTION_ID.
+func TestRunActionSelectsActionAndInjectsID(t *testing.T) {
+	d, pluginsDir, stateDir := newTestDispatcher(t, config.PluginsConfig{})
+	installTestPlugin(t, pluginsDir, stateDir, "actiondump", actionDumpManifest)
+
+	ev := Event{Name: "action"}
+	if err := d.RunAction("actiondump", "", ev, 0, ActionContext{}); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(pluginsDir, "actiondump", "out.txt")
+	if got := waitForLines(t, out, 1); got != 1 {
+		t.Fatalf("default run: %d lines, want 1", got)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "primary" {
+		t.Errorf("default run JIN_ACTION_ID = %q, want primary (actions[0])", got)
+	}
+
+	if err := d.RunAction("actiondump", "secondary", ev, 0, ActionContext{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForLines(t, out, 2); got != 2 {
+		t.Fatalf("explicit run: %d lines, want 2", got)
+	}
+	data, err = os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "secondary") {
+		t.Errorf("explicit run output = %q, want to contain secondary", string(data))
+	}
+}
+
+func TestRunActionRejectsUnknownAction(t *testing.T) {
+	d, pluginsDir, stateDir := newTestDispatcher(t, config.PluginsConfig{})
+	installTestPlugin(t, pluginsDir, stateDir, "actiondump", actionDumpManifest)
+
+	err := d.RunAction("actiondump", "nope", Event{Name: "action"}, 0, ActionContext{})
+	if err == nil || !strings.Contains(err.Error(), `no action "nope"`) {
+		t.Fatalf("unknown action error = %v, want 'no action \"nope\"'", err)
+	}
+	if !strings.Contains(err.Error(), "primary, secondary") {
+		t.Errorf("error %q should list available actions", err.Error())
 	}
 }
