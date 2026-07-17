@@ -313,6 +313,12 @@ func (c *Client) PanePopup(id, cmd, title, width, height string) error {
 // PaneSplit splits the session's pane per req and returns the new pane's ID —
 // or, for a named slot that already exists, the reused pane's ID. An empty
 // req.Cmd just opens a shell in the new pane.
+//
+// A pre-PR-#107 daemon returns Success:true with no Data payload (the old
+// handler was fire-and-forget and never emitted a pane ID). Treat that as
+// "the split happened but no ID is available" rather than the confusing
+// "unexpected end of JSON input" the raw Unmarshal produces, so a running
+// daemon left over from a previous jin version stays usable.
 func (c *Client) PaneSplit(req PaneSplitRequest) (string, error) {
 	data, _ := json.Marshal(req)
 	resp, err := c.send(Request{Action: "pane-split", Data: data})
@@ -321,6 +327,9 @@ func (c *Client) PaneSplit(req PaneSplitRequest) (string, error) {
 	}
 	if !resp.Success {
 		return "", errors.New(resp.Error)
+	}
+	if len(resp.Data) == 0 {
+		return "", nil
 	}
 	var out PaneSplitResponse
 	if err := json.Unmarshal(resp.Data, &out); err != nil {

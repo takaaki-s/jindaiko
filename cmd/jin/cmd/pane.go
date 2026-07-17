@@ -224,7 +224,13 @@ Example:
 		if jsonOutput {
 			return renderActionResultJSON(os.Stdout, actionResult{Success: true, ID: sessionID, Description: sessionDesc, PaneID: paneID})
 		}
-		fmt.Printf("Split pane %s for session: %s\n", paneID, sessionDesc)
+		if paneID == "" {
+			// Older daemons don't return a pane ID; keep the message readable
+			// instead of "Split pane  for session:" with a double space.
+			fmt.Printf("Split pane for session: %s\n", sessionDesc)
+		} else {
+			fmt.Printf("Split pane %s for session: %s\n", paneID, sessionDesc)
+		}
 		return nil
 	},
 }
