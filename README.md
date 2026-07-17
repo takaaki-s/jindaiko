@@ -709,13 +709,13 @@ across a `schema_version` bump (or, pre-1.0, across a minor jin release).
 ```bash
 # From the plugin registry (see docs/plugin-registry.md)
 jin plugin ls-remote                              # list plugins in the registry
-jin plugin install jind-ai-notifier               # latest_version, SHA-pinned via registry
-jin plugin install jind-ai-notifier -v 0.2.0      # pin a specific version
+jin plugin install jind-ai-notifier               # latest release; `plugin update` follows the plugin
+jin plugin install jind-ai-notifier -v 0.2.0      # pin a specific version; `plugin update` will not move it
 jin plugin install jind-ai-notifier --force       # override an unsatisfied jin compat range
 
 # From a git source (github.com/, gitlab.com/, self-hosted, ssh URLs, ...)
-jin plugin install github.com/owner/repo          # default branch
-jin plugin install github.com/owner/repo@v1.2.0   # pinned to a tag/branch/SHA
+jin plugin install github.com/owner/repo          # default branch; `plugin update` follows highest semver tag
+jin plugin install github.com/owner/repo@v1.2.0   # pinned to a tag/branch/SHA; `plugin update` will not move it
 
 # From a local directory, symlinked in place (development)
 jin plugin install --link ./my-plugin
@@ -737,6 +737,16 @@ touching anything; the approved commit SHA is recorded in
 different commit than the one you saw. A `--link`ed plugin skips this —
 linking a local path is itself the trust decision, and jind-ai never runs
 `build:` for a linked plugin.
+
+**`jin plugin update <name>` resolves the plugin's latest release** for
+an unpinned install: registry names resolve to the registry's declared
+`latest_version`, and raw git-URL installs pick the highest semver tag
+from `git ls-remote --tags` (falling back to the locked ref when the
+remote advertises no semver tags). A pinned install — one that used
+`-v <ver>` on the registry path or `@<ref>` on the git-URL path — is a
+no-op with a message pointing at reinstall as the way to move it. This
+mirrors install: the "give me latest" and "hold this exact ref" intents
+are decided once at install time and honoured by every later update.
 
 ### Language-specific guidance
 

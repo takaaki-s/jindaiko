@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 	"github.com/takaaki-s/jind-ai/pkg/plugin/manifest"
 )
@@ -170,13 +171,27 @@ func ParseSource(arg string) (Source, error) {
 }
 
 // FetchOptions tunes a Fetch or FetchUpdate call. Zero value keeps the
-// historical fail-closed behaviour (compat mismatches abort).
+// historical fail-closed behaviour (compat mismatches abort) and treats the
+// install as "follow the plugin's latest release" for future updates.
 type FetchOptions struct {
 	// AllowIncompatibleJin lets the fetch succeed even when the manifest's
 	// jin range does not match the running binary. The CLI opts in via
 	// --force so the user can install anyway; a mismatched entry is still
 	// surfaced to the caller (via CompatErr) so a warning can be printed.
 	AllowIncompatibleJin bool
+	// Pinned marks the install as version-locked: `jin plugin update` will
+	// refuse to move it off the installed ref. Set this when the user
+	// explicitly asked for a specific version (`-v <ver>` on a registry
+	// install, `@<ref>` on a git-URL install). A zero value means "follow
+	// the plugin's latest release on next update".
+	Pinned bool
+	// UpdateSource replaces the locked source on a FetchUpdate call: the
+	// caller (CLI) resolved the plugin's latest release externally (via the
+	// registry or `git ls-remote --tags`) and hands the resolved
+	// URL/Ref back so FetchUpdate can clone it. Ignored by Fetch.
+	// A nil pointer keeps the historical behaviour of re-cloning the
+	// currently-locked ref, which is what a pinned entry needs.
+	UpdateSource *Source
 }
 
 // InstallPlan is a fetched-but-not-yet-committed install: the clone is staged
@@ -192,6 +207,7 @@ type InstallPlan struct {
 	commitSHA  string
 	prevCommit string // update only: the SHA being replaced
 	isUpdate   bool
+	pinned     bool  // persisted to LockEntry.Pinned on Commit
 	compatErr  error // populated when Fetch was told to allow an incompatible jin range
 }
 
@@ -243,6 +259,7 @@ func Fetch(src Source, pluginsDir, stateDir string, opts FetchOptions) (*Install
 	p := &InstallPlan{
 		src: src, pluginsDir: pluginsDir, stateDir: stateDir,
 		staging: staging, manifest: m, commitSHA: sha,
+		pinned: opts.Pinned,
 	}
 
 	if err := p.applyCompatCheck(opts); err != nil {
@@ -260,11 +277,14 @@ func Fetch(src Source, pluginsDir, stateDir string, opts FetchOptions) (*Install
 	return p, nil
 }
 
-// FetchUpdate re-clones an installed plugin from its locked source so the update
-// can be validated before the current version is touched. Linked plugins have no
-// clone to update and are rejected. The updated manifest must keep the same name
-// so the atomic swap in Commit targets the right directory. Jin compat handling
-// follows the same rules as Fetch (see FetchOptions).
+// FetchUpdate re-clones an installed plugin so the update can be validated
+// before the current version is touched. By default it re-clones the locked
+// source at the locked ref (which is what a pinned entry needs); a caller
+// who wants to move to a different release resolves the new source
+// externally and passes it via opts.UpdateSource. Linked plugins have no
+// clone to update and are rejected. The updated manifest must keep the same
+// name so the atomic swap in Commit targets the right directory. Jin compat
+// handling follows the same rules as Fetch (see FetchOptions).
 func FetchUpdate(name, pluginsDir, stateDir string, opts FetchOptions) (*InstallPlan, error) {
 	lock, err := LoadLock(stateDir)
 	if err != nil {
@@ -278,11 +298,16 @@ func FetchUpdate(name, pluginsDir, stateDir string, opts FetchOptions) (*Install
 		return nil, errors.New("linked plugins are updated in place; re-link instead")
 	}
 
-	parsed, err := ParseSource(entry.Source)
-	if err != nil {
-		return nil, fmt.Errorf("parse locked source %q: %w", entry.Source, err)
+	var src Source
+	if opts.UpdateSource != nil {
+		src = *opts.UpdateSource
+	} else {
+		parsed, err := ParseSource(entry.Source)
+		if err != nil {
+			return nil, fmt.Errorf("parse locked source %q: %w", entry.Source, err)
+		}
+		src = Source{Raw: entry.Source, CloneURL: parsed.CloneURL, Ref: entry.Ref}
 	}
-	src := Source{Raw: entry.Source, CloneURL: parsed.CloneURL, Ref: entry.Ref}
 
 	staging, m, sha, err := fetchToStaging(src, pluginsDir)
 	if err != nil {
@@ -296,6 +321,10 @@ func FetchUpdate(name, pluginsDir, stateDir string, opts FetchOptions) (*Install
 		src: src, pluginsDir: pluginsDir, stateDir: stateDir,
 		staging: staging, manifest: m, commitSHA: sha,
 		prevCommit: entry.Commit, isUpdate: true,
+		// Updates preserve the entry's pin bit — an update never turns
+		// a pinned plugin unpinned (and pinned plugins should not reach
+		// FetchUpdate at all: the CLI guards on entry.Pinned first).
+		pinned: entry.Pinned,
 	}
 	if err := p.applyCompatCheck(opts); err != nil {
 		return nil, err
@@ -333,6 +362,7 @@ func (p *InstallPlan) Commit(buildTimeout time.Duration) error {
 		Ref:         p.src.Ref,
 		Commit:      p.commitSHA,
 		Linked:      false,
+		Pinned:      p.pinned,
 		InstalledAt: time.Now(),
 	}
 	if err := lock.Set(p.manifest.Name, entry); err != nil {
@@ -494,6 +524,43 @@ func gitHeadSHA(repoDir string) (string, error) {
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GitLatestSemverTag lists the tags at cloneURL via `git ls-remote --tags`,
+// keeps the ones that parse as strict semver (optional leading "v"), and
+// returns the highest. Peeled tag refs ("^{}") are skipped — the semver
+// ordering only cares about the tag name, not the SHA it resolves to. An
+// empty return with a nil error means "the remote advertised no
+// semver-shaped tags"; callers decide whether to fall back to the default
+// branch or to fail.
+func GitLatestSemverTag(cloneURL string) (string, error) {
+	out, err := exec.Command("git", "ls-remote", "--tags", cloneURL).Output()
+	if err != nil {
+		return "", fmt.Errorf("git ls-remote --tags %s: %w", cloneURL, err)
+	}
+	var best *semver.Version
+	var bestTag string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		// `<sha>\trefs/tags/<name>` — skip empties and peeled tag lines.
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		ref := fields[1]
+		if !strings.HasPrefix(ref, "refs/tags/") || strings.HasSuffix(ref, "^{}") {
+			continue
+		}
+		tag := strings.TrimPrefix(ref, "refs/tags/")
+		v, err := semver.StrictNewVersion(strings.TrimPrefix(tag, "v"))
+		if err != nil {
+			continue
+		}
+		if best == nil || v.GreaterThan(best) {
+			best = v
+			bestTag = tag
+		}
+	}
+	return bestTag, nil
 }
 
 // gitErr picks the most useful text for a failed git command: git's own

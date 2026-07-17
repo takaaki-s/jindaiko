@@ -17,14 +17,20 @@ const lockFilename = "plugins.lock.yaml"
 
 // LockEntry records how one installed plugin was obtained: its source, the
 // requested ref, the commit that was approved at install time, whether it is a
-// symlink (linked) rather than a clone, and when it was installed. Linked
-// plugins leave Commit empty because their contents can change out from under
-// the lock.
+// symlink (linked) rather than a clone, whether the user pinned it to a
+// specific version at install time, and when it was installed. Linked plugins
+// leave Commit empty because their contents can change out from under the
+// lock. Pinned=true means `plugin update` must not silently move the plugin
+// off the ref the user chose (pass `-v` / `@ref` at install to opt in); a
+// Pinned=false entry is what a bare `plugin install <name>` or
+// `plugin install <url>` writes and follows "the plugin's latest release"
+// under `plugin update`.
 type LockEntry struct {
 	Source      string    `yaml:"source"`
 	Ref         string    `yaml:"ref,omitempty"`
 	Commit      string    `yaml:"commit,omitempty"`
 	Linked      bool      `yaml:"linked,omitempty"`
+	Pinned      bool      `yaml:"pinned,omitempty"`
 	InstalledAt time.Time `yaml:"installed_at"`
 }
 

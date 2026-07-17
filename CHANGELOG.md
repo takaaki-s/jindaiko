@@ -5,6 +5,33 @@ attaches them to the corresponding [GitHub Release](https://github.com/takaaki-s
 This file is the curated overview — highlights per release, not a per-commit
 log.
 
+## 0.9.0
+
+### Features
+
+- **`jin plugin update <name>` now moves an unpinned install to the
+  plugin's latest release** instead of re-cloning the locked commit
+  (which made `update` a silent no-op on registry installs). Registry
+  names resolve to the registry's declared `latest_version`; raw git-URL
+  installs pick the highest semver tag from `git ls-remote --tags`,
+  falling back to the locked ref when the remote advertises no valid
+  tags.
+- **Install-time pin captured in the lock**: a bare `install <name>` or
+  `install <url>` marks the entry as unpinned (`update` will follow
+  latest), while `install <name> -v <ver>` and `install <url>@<ref>`
+  mark it pinned (`update` refuses to move it and points at reinstall
+  as the way to bump). Old lock files without the field default to
+  unpinned, matching the install-time behaviour of a bare install.
+
+### Behaviour change (not a schema break)
+
+- On the first `jin plugin update <name>` after upgrading, unpinned
+  installs may move to a newer release — the pre-0.9.0 `update` was
+  effectively a no-op that always re-cloned the locked SHA, so this is
+  the first time the command actually delivers updates. Users who want
+  the old "lock every install to the ref I first saw" behaviour can
+  reinstall with a `-v` / `@ref` pin.
+
 ## 0.8.0
 
 ### Features

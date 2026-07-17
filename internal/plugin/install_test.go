@@ -763,3 +763,126 @@ func TestFetchUpdate_RejectsLinked(t *testing.T) {
 		t.Fatal("FetchUpdate of a linked plugin: want error, got nil")
 	}
 }
+
+// Pinned:true at install time must round-trip through the lock file so
+// `plugin update` can honour the pin without re-inspecting the CLI args.
+func TestFetch_PinnedFlagRoundTrips(t *testing.T) {
+	repo := initRepo(t, validSource)
+	pluginsDir, stateDir := t.TempDir(), t.TempDir()
+
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{Pinned: true})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if err := plan.Commit(testBuildTimeout); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	lock, _ := LoadLock(stateDir)
+	entry, _ := lock.Get("notifier")
+	if !entry.Pinned {
+		t.Errorf("entry.Pinned = false, want true after Fetch(Pinned: true)")
+	}
+}
+
+// An unpinned install must land as Pinned: false so later `plugin update`
+// takes the "follow the plugin's latest release" branch instead of
+// treating every install as version-locked.
+func TestFetch_DefaultIsUnpinned(t *testing.T) {
+	repo := initRepo(t, validSource)
+	pluginsDir, stateDir := t.TempDir(), t.TempDir()
+
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if err := plan.Commit(testBuildTimeout); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	lock, _ := LoadLock(stateDir)
+	if entry, _ := lock.Get("notifier"); entry.Pinned {
+		t.Errorf("entry.Pinned = true, want false for a bare install")
+	}
+}
+
+// FetchUpdate with an UpdateSource override must re-clone from that
+// source instead of the locked ref — this is how the CLI moves an
+// unpinned plugin onto a new release without teaching the internal
+// package about registries or `git ls-remote`.
+func TestFetchUpdate_UsesUpdateSourceOverride(t *testing.T) {
+	repo := initRepo(t, validSource)
+	pluginsDir, stateDir := t.TempDir(), t.TempDir()
+
+	// First install: freeze the initial SHA in the lock.
+	plan, err := Fetch(fileSource(t, repo, ""), pluginsDir, stateDir, FetchOptions{})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	oldSHA := plan.CommitSHA()
+	if err := plan.Commit(testBuildTimeout); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Second commit tagged v0.9.0 — the "release" the update should reach.
+	writeInto(t, filepath.Join(repo, "v2.txt"), "v2")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "second")
+	runGit(t, repo, "tag", "v0.9.0")
+
+	// Post-tag commit that we do NOT want the update to reach — override
+	// must resolve exactly to v0.9.0.
+	writeInto(t, filepath.Join(repo, "post-tag.txt"), "later")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "third")
+
+	newSrc := fileSource(t, repo, "v0.9.0")
+	up, err := FetchUpdate("notifier", pluginsDir, stateDir, FetchOptions{UpdateSource: &newSrc})
+	if err != nil {
+		t.Fatalf("FetchUpdate: %v", err)
+	}
+	if err := up.Commit(testBuildTimeout); err != nil {
+		t.Fatalf("update Commit: %v", err)
+	}
+	if up.CommitSHA() == oldSHA {
+		t.Errorf("update at v0.9.0 should have moved off oldSHA %q", oldSHA)
+	}
+	if _, err := os.Stat(filepath.Join(pluginsDir, "notifier", "v2.txt")); err != nil {
+		t.Errorf("v0.9.0 contents missing after update: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginsDir, "notifier", "post-tag.txt")); !os.IsNotExist(err) {
+		t.Error("update at v0.9.0 must not include the post-tag file")
+	}
+}
+
+// GitLatestSemverTag skips lightweight/peeled tags and non-semver names,
+// returns the highest valid semver, and yields "" (not an error) when the
+// remote advertises no valid tags.
+func TestGitLatestSemverTag(t *testing.T) {
+	repo := initRepo(t, validSource)
+
+	if tag, err := GitLatestSemverTag(repo); err != nil || tag != "" {
+		t.Errorf("empty repo: tag = %q, err = %v, want \"\", nil", tag, err)
+	}
+
+	runGit(t, repo, "tag", "v0.1.0")
+	writeInto(t, filepath.Join(repo, "a.txt"), "a")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "a")
+	runGit(t, repo, "tag", "v0.9.0")
+	writeInto(t, filepath.Join(repo, "b.txt"), "b")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "b")
+	runGit(t, repo, "tag", "not-a-version")
+	writeInto(t, filepath.Join(repo, "c.txt"), "c")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "c")
+	runGit(t, repo, "tag", "v0.10.0") // must beat v0.9.0 numerically, not lexically
+
+	tag, err := GitLatestSemverTag(repo)
+	if err != nil {
+		t.Fatalf("GitLatestSemverTag: %v", err)
+	}
+	if tag != "v0.10.0" {
+		t.Errorf("tag = %q, want v0.10.0 (highest semver, ignoring the non-semver name)", tag)
+	}
+}

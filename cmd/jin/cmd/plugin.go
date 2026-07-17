@@ -224,7 +224,11 @@ func runPluginInstallBySource(cmd *cobra.Command, arg string) error {
 	}
 	// --force is scoped to the registry install path in 04_install.md, so
 	// the git-URL path keeps the historical fail-closed compat behaviour.
-	plan, err := plugin.Fetch(src, paths.Plugins(), getStateDir(), plugin.FetchOptions{})
+	// `@ref` on the CLI = the user explicitly picked a version, so `plugin
+	// update` must not silently move them off it later.
+	plan, err := plugin.Fetch(src, paths.Plugins(), getStateDir(), plugin.FetchOptions{
+		Pinned: src.Ref != "",
+	})
 	if err != nil {
 		return err
 	}
@@ -283,8 +287,13 @@ func runPluginInstallByName(cmd *cobra.Command, name string) error {
 	// when the manifest's jin range does not match this build. Whether to
 	// proceed after the screen is a CLI-side decision — with --force we go
 	// on and commit, without it we surface the error the user just saw.
+	// `-v <ver>` on the CLI = the user pinned; a bare `install <name>`
+	// stays on the "follow latest" track under `plugin update`.
 	plan, err := plugin.Fetch(resolution.Source(), paths.Plugins(), getStateDir(),
-		plugin.FetchOptions{AllowIncompatibleJin: true})
+		plugin.FetchOptions{
+			AllowIncompatibleJin: true,
+			Pinned:               versionPin != "",
+		})
 	if err != nil {
 		return err
 	}
@@ -322,7 +331,37 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	out := cmd.OutOrStdout()
 
-	plan, err := plugin.FetchUpdate(name, paths.Plugins(), getStateDir(), plugin.FetchOptions{})
+	// Guard before we touch git: linked and pinned entries are handled here,
+	// not deep in FetchUpdate, so the user sees a clean early return instead
+	// of a wasted clone.
+	lock, err := plugin.LoadLock(getStateDir())
+	if err != nil {
+		return err
+	}
+	entry, ok := lock.Get(name)
+	if !ok {
+		return fmt.Errorf("plugin %q is not installed", name)
+	}
+	if entry.Linked {
+		return errors.New("linked plugins are updated in place; re-link instead")
+	}
+	if entry.Pinned {
+		fmt.Fprintf(out, "%s is pinned to %s (installed as %s). To move it, reinstall with a different version pin.\n",
+			name, shortSHA(entry.Commit), entry.Source)
+		return nil
+	}
+
+	// Not pinned: resolve the plugin's latest release. Consult the registry
+	// first when the entry parses as `<registry-name>@<sha>` shape (bare
+	// install); fall back to `git ls-remote --tags` for arbitrary git URLs.
+	updateSrc, err := resolveUpdateSource(name, entry, cmd)
+	if err != nil {
+		return err
+	}
+
+	plan, err := plugin.FetchUpdate(name, paths.Plugins(), getStateDir(), plugin.FetchOptions{
+		UpdateSource: updateSrc,
+	})
 	if err != nil {
 		return err
 	}
@@ -332,12 +371,6 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "%s is already up to date\n", name)
 		return nil
 	}
-
-	lock, err := plugin.LoadLock(getStateDir())
-	if err != nil {
-		return err
-	}
-	entry, _ := lock.Get(name) // present: FetchUpdate already verified the plugin is installed
 
 	m := plan.Manifest()
 	printPluginPlan(out, m, entry.Source, plan.CommitSHA())
@@ -360,6 +393,63 @@ func runPluginUpdate(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(out, "Updated %s: %s -> %s\n", name, shortSHA(plan.PrevCommitSHA()), shortSHA(plan.CommitSHA()))
 	return nil
+}
+
+// resolveUpdateSource decides which ref `plugin update` should re-clone for
+// an unpinned entry. The registry is consulted first — a bare `install
+// <registry-name>` locked the plugin under a `<owner/name>@<sha>` shape and
+// the registry is the source of truth for that plugin's latest release. If
+// the plugin is not in the registry (a direct git-URL install), fall back
+// to the highest semver tag advertised by `git ls-remote --tags`. When
+// neither route surfaces a candidate, return a nil *Source, which asks
+// FetchUpdate to reuse the locked ref — the "no newer release to move to"
+// case, indistinguishable at the source from a legitimately-current entry.
+func resolveUpdateSource(name string, entry plugin.LockEntry, cmd *cobra.Command) (*plugin.Source, error) {
+	parsed, err := plugin.ParseSource(entry.Source)
+	if err != nil {
+		return nil, fmt.Errorf("parse locked source %q: %w", entry.Source, err)
+	}
+
+	// 1) Registry lookup by plugin name — a match wins because the registry
+	// carries the plugin author's declared "latest release" for us; --refresh
+	// bypasses the cache-freshness check when the user wants the newest read.
+	registryURL, _ := cmd.Flags().GetString("registry")
+	refresh, _ := cmd.Flags().GetBool("refresh")
+	doc, _, docErr := loadRegistryDocument(registryURL, refresh)
+	if docErr == nil {
+		if resolution, err := plugin.ResolveRemote(name, "", doc); err == nil {
+			src := resolution.Source()
+			return &src, nil
+		}
+	}
+
+	// 2) `git ls-remote --tags` on the locked clone URL — for plugins that
+	// were installed from a raw git URL and are not in the registry.
+	tag, err := plugin.GitLatestSemverTag(parsed.CloneURL)
+	if err != nil {
+		return nil, fmt.Errorf("resolve latest tag for %s: %w", parsed.CloneURL, err)
+	}
+	if tag == "" {
+		// No semver tags advertised — the historical behaviour (re-clone
+		// the locked ref) is the least-surprising thing to do.
+		return nil, nil
+	}
+	newSrc := plugin.Source{
+		Raw:      trimAtRef(entry.Source) + "@" + tag,
+		CloneURL: parsed.CloneURL,
+		Ref:      tag,
+	}
+	return &newSrc, nil
+}
+
+// trimAtRef returns s with any trailing `@<ref>` removed. Used when composing
+// a new lock Source string from a resolved tag: entry.Source already carries
+// the previous @<sha>, and we want to swap it for the new tag.
+func trimAtRef(s string) string {
+	if i := strings.LastIndex(s, "@"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func runPluginRemove(cmd *cobra.Command, args []string) error {

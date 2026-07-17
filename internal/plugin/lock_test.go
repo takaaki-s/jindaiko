@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,6 +123,51 @@ func TestLock_Persistence(t *testing.T) {
 	}
 	if _, ok := lf.Plugins["notifier"]; !ok {
 		t.Errorf("on-disk lock missing plugin %q, got %v", "notifier", lf.Plugins)
+	}
+}
+
+// LockEntry.Pinned must survive a round-trip through the YAML file so
+// `plugin update`, which reads the lock in a separate process, honours the
+// pin the CLI recorded at install time. The field must also be omitempty on
+// disk so a legacy lock (no `pinned:` key) parses as false without a schema
+// bump.
+func TestLock_PinnedRoundTripsAndDefaultsFalse(t *testing.T) {
+	dir := t.TempDir()
+
+	first, err := LoadLock(dir)
+	if err != nil {
+		t.Fatalf("LoadLock: %v", err)
+	}
+	if err := first.Set("pinned-one", LockEntry{Source: "github.com/owner/pinned", Commit: "sha1", Pinned: true, InstalledAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("Set pinned: %v", err)
+	}
+	if err := first.Set("free-one", LockEntry{Source: "github.com/owner/free", Commit: "sha2", InstalledAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("Set unpinned: %v", err)
+	}
+
+	second, err := LoadLock(dir)
+	if err != nil {
+		t.Fatalf("LoadLock#2: %v", err)
+	}
+	if entry, _ := second.Get("pinned-one"); !entry.Pinned {
+		t.Errorf("pinned-one.Pinned = false after round-trip, want true")
+	}
+	if entry, _ := second.Get("free-one"); entry.Pinned {
+		t.Errorf("free-one.Pinned = true after round-trip, want false")
+	}
+
+	// omitempty: the unpinned entry must not write `pinned: false` to disk,
+	// so a legacy lock (no `pinned:` at all) keeps working under the new
+	// struct without a migration.
+	b, err := os.ReadFile(filepath.Join(dir, lockFilename))
+	if err != nil {
+		t.Fatalf("read lock file: %v", err)
+	}
+	if strings.Contains(string(b), "pinned: false") {
+		t.Errorf("on-disk lock leaks `pinned: false` for the unpinned entry — omitempty broken:\n%s", string(b))
+	}
+	if !strings.Contains(string(b), "pinned: true") {
+		t.Errorf("on-disk lock missing `pinned: true` for the pinned entry:\n%s", string(b))
 	}
 }
 

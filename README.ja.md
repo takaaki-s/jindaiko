@@ -626,13 +626,13 @@ jin pane send-keys "$JIN_SESSION_ID" <keys>
 ```bash
 # レジストリから (docs/plugin-registry.md 参照)
 jin plugin ls-remote                              # レジストリのプラグイン一覧
-jin plugin install jind-ai-notifier               # latest_version、レジストリ経由で SHA ピン
-jin plugin install jind-ai-notifier -v 0.2.0      # 特定バージョンを指定
+jin plugin install jind-ai-notifier               # latest release、以降 `plugin update` が追従
+jin plugin install jind-ai-notifier -v 0.2.0      # バージョンピン、以降 `plugin update` は据え置き
 jin plugin install jind-ai-notifier --force       # jin 互換範囲外でも強制インストール
 
 # git ソースから (github.com/、gitlab.com/、self-hosted、ssh URL ...)
-jin plugin install github.com/owner/repo          # default branch
-jin plugin install github.com/owner/repo@v1.2.0   # tag / branch / SHA でピン
+jin plugin install github.com/owner/repo          # default branch、以降 `plugin update` は最大 semver tag に追従
+jin plugin install github.com/owner/repo@v1.2.0   # tag / branch / SHA でピン、以降 `plugin update` は据え置き
 
 # ローカルディレクトリから（開発時、symlink）
 jin plugin install --link ./my-plugin
@@ -647,6 +647,8 @@ jin plugin validate --github-actions              # ::error / ::warning annotati
 ```
 
 git からの install/update では、何かに触れる前にマニフェスト（`name`、`version`、`on`、`entrypoint`、`build`）と解決したコミット SHA を表示し、確認を求めます（`--yes` でスキップ可）。承認されたコミット SHA は `plugins.lock.yaml` に記録されるため、以降の `install`/`update` が確認時と異なるコミットへ黙って進むことはありません。`--link` したプラグインはこの確認をスキップします — ローカルパスをリンクすること自体が信頼の意思表示であり、jind-ai はリンクされたプラグインに対してビルドを実行しません。
+
+**`jin plugin update <name>` は unpin なインストールのみ latest release を再解決します**: registry 経由でインストールした plugin は registry の `latest_version` を、raw git URL でインストールした plugin は `git ls-remote --tags` で最大 semver tag を選択します（semver tag が無い場合は lock ref にフォールバック）。 `-v <ver>` (registry) や `@<ref>` (git URL) でピンして install した plugin は `plugin update` では動きません（据え置き旨のメッセージが出て終了、動かしたければ再 install してください）。install 時の「latest 追従 vs 据え置き」意図が lock に刻まれ、以降の update がそれを守ります。
 
 ### 言語別ガイド
 
