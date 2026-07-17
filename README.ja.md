@@ -282,19 +282,29 @@ keybindings:
   # アタッチ中
   detach: ["ctrl+]"]  # デフォルト: ctrl+]
                        # サポートキー: ctrl+^, ctrl+], ctrl+\, ctrl+g
-  # outer tmux (jin-mgr) — プラグイン単位のアクショントリガー（左右両ペイン）
-  # デフォルト無し。プラグイン単位でユーザーがオプトインする。
+  # outer tmux (jin-mgr) — プラグイン action 単位のトリガー（左右両ペイン）
+  # デフォルト無し。プラグイン x action 単位でユーザーがオプトインする。
   # tmux `run-shell -b` (バックグラウンド、ペインに出力を出さない) 経由で
-  # `jin plugin run <name>` を発火するため、popup を開くかどうかはプラグイン
-  # 側の責務（`jin pane popup --here` モデル準拠）。未インストールのプラグイン
-  # は silent skip（log 1 行）。core outer-tmux バインドとのキー衝突は warning
-  # のみ、tmux 後勝ちに従う。
+  # `jin plugin run <name> <action>` を発火するため、popup を開くかどうかは
+  # action 側の責務（`jin pane popup --here` モデル準拠）。未インストールの
+  # プラグインは silent skip（log 1 行）。core outer-tmux バインドとのキー
+  # 衝突は warning のみ、tmux 後勝ちに従う。
   # outer-tmux 系キーは tmux 記法 (`M-n`, `C-f`) と "+" 記法 (`alt+n`,
   # `ctrl+f`) の両方を受け付け、読み込み時に tmux 記法へ正規化される。
+  # ※ 0.7.x の `plugins.<name>.keys` 形式は 0.8.0 で無効化される（起動時
+  # に WARN が 1 回出て binding が drop される）。下記の
+  # `plugins.<name>.actions.<id>.keys` 形式へ手動で書き直すこと。
   plugins:
-    # notifier:         { keys: ["M-n"] }        # 1 打鍵で通知一覧
-    # worktree-cleanup: { keys: ["M-w", "M-c"] } # 複数キー可
-    # journal:          { keys: ["ctrl+f"] }     # "+" 記法も可
+    # notifier:
+    #   actions:
+    #     default: { keys: ["M-n"] }              # 1 打鍵で default action
+    #     send-dm: { keys: ["M-d", "C-M-d"] }     # 複数キー / 別 action
+    # worktree-cleanup:
+    #   actions:
+    #     default: { keys: ["M-w"] }
+    # journal:
+    #   actions:
+    #     default: { keys: ["ctrl+f"] }           # "+" 記法も可
 
 # ポップアップサイズ (percent、1-100 の int)。省略した項目はデフォルト値
 # (create/session_filter/action = 70-80) が使われます。全項目と経路は
@@ -497,46 +507,62 @@ jind-ai では、セッションのステータス変化に反応して、ある
 
 ### 2 通りの実行方式
 
-- **Event listener（イベントリスナー）** — マニフェストの `on:` マッチャー経由で `status_changed` を購読します。通知、ロギング、CI トリガーなど、非対話的な用途に向いています。注意: イベントはステータスが実際に変化した時のみ発火します。ステータス遷移を伴わない通知（既に idle の状態での再停止など）は dispatch されません。
-- **Action（アクション）** — `jin plugin run <name> [--session <selector>]` で明示的に起動します。ポップアップベースの diff レビュー UI のような、対話的なワークフローに向いています。`on: []` を指定すると action 専用のプラグインになります。`--session` を省略すると **グローバル action** になり、セッション由来の環境変数はすべて空になります。action 実行時は (global・session 指定を問わず) 呼び出し元の CLI が tmux クライアント内にいた場合、`JIN_CALLER_TMUX_SOCKET` / `JIN_CALLER_TMUX_PANE` が起動元を示します。
+- **Event listener（イベントリスナー）** — マニフェストの各 action がその `on:` マッチャー経由で `status_changed` を購読します。通知、ロギング、CI トリガーなど、非対話的な用途に向いています。注意: イベントはステータスが実際に変化した時のみ発火します。ステータス遷移を伴わない通知（既に idle の状態での再停止など）は dispatch されません。プラグインが複数の action を宣言している場合、それぞれ独立に match / debounce されるため、同一イベントで同じプラグイン内の複数 action が同時に fan-out することがあります。
+- **Action（アクション）** — `jin plugin run <name> [action] [--session <selector>]` で明示的に起動します。ポップアップベースの diff レビュー UI のような、対話的なワークフローに向いています。`[action]` を省略するとプラグインの default action（`actions[0]`）が走り、action ID を渡すとその action を選択します。ある action の `on: []` を指定するとその action は action 専用になります。`--session` を省略すると **グローバル action** になり、セッション由来の環境変数はすべて空になります。action 実行時は (global・session 指定を問わず) 呼び出し元の CLI が tmux クライアント内にいた場合、`JIN_CALLER_TMUX_SOCKET` / `JIN_CALLER_TMUX_PANE` が起動元を示します。
 
-どちらのエントリーポイントも同じ `run:` コマンドを同じ環境で実行します。違いはトリガーだけです。
+どちらのエントリーポイントも同じ action の `entrypoint` を同じ環境で実行します。違いはトリガーだけです。
 
 ### マニフェスト（`jind-ai-plugin.yaml`）
 
 このファイルをプラグインディレクトリのルートに配置します。ランタイム（ディスパッチャー）と publish 時（レジストリクローラー）が同じマニフェストを読みます。単一ファイル、単一の真実です。
 
 ```yaml
-schema_version: 1
+schema_version: 2
 name: notifier
-version: 0.1.0
+version: 0.2.0
 description: Desktop notifications for jin sessions
 license: MIT
 homepage: https://github.com/foo/notifier
-jin: ">=0.7.0"
+jin: ">=0.8.0"
 install:
   source:
     build:
       - go build -o bin/notifier ./cmd/notifier
     entrypoint: ./bin/notifier
-on: ["status_changed:idle", "status_changed:permission"]
-timeout: 30s
+actions:
+  - id: default                                      # actions[0] が暗黙の default
+    entrypoint: ./bin/notifier notify
+    on: ["status_changed:idle", "status_changed:permission"]
+    label: "Desktop notification"
+    timeout: 30s
+  - id: send-dm                                      # `jin plugin run notifier send-dm`
+    entrypoint: ./bin/notifier send-dm
+    on: []                                           # action 専用（イベント購読なし）
+    label: "Send DM to teammate"
+    popup: { width: 60, height: 30 }
 ```
+
+既存の v1 マニフェスト（`schema_version: 1` + top-level `entrypoint` / `on` / `timeout` / `popup`）はそのまま動きます。parse 時に単一 action 形式へ normalize されるため、プラグイン作者側の対応は不要です。新規は v2 で書いてください。
 
 | フィールド | 必須 | 説明 |
 |-----------|------|------|
-| `schema_version` | あり | マニフェスト世代。現行は `1`。破壊的変更時のみ bump |
+| `schema_version` | あり | マニフェスト世代。`1` または `2`。v1 は parse 時に単一 action の v2 相当へ自動 normalize |
 | `name` | あり | `[a-z][a-z0-9-]{1,63}`。レジストリ内で unique。jind-ai がインストールするディレクトリ名と一致 |
 | `version` | あり | プラグイン自身の semver（`X.Y.Z`。pre-release / build metadata 可） |
 | `description` | あり | `jin plugin ls-remote` の検索結果に表示される一行説明 |
 | `license` / `homepage` | なし | 任意メタデータ。レジストリエントリに載る |
-| `jin` | あり | jin バイナリに対する semver 制約（`">=0.7.0"`、`"^0.7"`、`">=0.7 <0.9"`）。install 時と毎 dispatch 時にチェック |
+| `jin` | あり | jin バイナリに対する semver 制約（`">=0.8.0"`、`"^0.8"`、`">=0.8 <0.10"`）。install 時と毎 dispatch 時にチェック |
 | `install.source.build` | なし | ビルドコマンド配列（各要素が独立の `bash -c`。要素をまたぐパイプは不可） — [言語別ガイド](#言語別ガイド) を参照。直接実行可能な entrypoint を同梱するプラグイン（shell script、リポジトリに commit した prebuilt バイナリ等）では省略可 |
-| `install.source.entrypoint` | 条件付き | ディスパッチャーが毎イベント実行するパス（プラグインディレクトリ相対）。`install.source` 使用時は必須 |
+| `install.source.entrypoint` | 条件付き | 個々の action が entrypoint を宣言しなかった時に使われるデフォルト entrypoint。`install.source` 使用時は必須 |
 | `install.release_asset.pattern` | 条件付き | `install.source` の代替。最新 GitHub Release から prebuilt asset をダウンロード。プレースホルダ: `{os}` / `{arch}` |
-| `on` | なし | `status_changed` または `status_changed:<status>` マッチャーのリスト。空または省略時は action 専用 |
-| `timeout` | なし | 期間文字列（`"30s"`、`"5m"`）。デフォルト `30s` |
-| `popup.width` / `popup.height` | なし | `jin pane popup --here` のサイズヒント（1–100、%） |
+| `actions[]` | v2 のみ | プラグインが公開する action のリスト。`actions[0]` が暗黙の default。各要素が `id` / `entrypoint` / `on` / `label` / `timeout` / `popup` を持つ（以下の行を参照） |
+| `actions[].id` | あり | `[a-z][a-z0-9-]{0,63}`。プラグイン内で unique。パレット / keybindings / `jin plugin run` すべてが ID で action を参照するため、明示 ID を強く推奨 |
+| `actions[].entrypoint` | 条件付き | この action の実行パス（プラグインディレクトリ相対）。`install.source.entrypoint` でカバーされる場合は省略可 |
+| `actions[].on` | なし | この action の `status_changed` マッチャー。v1 の top-level `on` と同じ構文。空または省略時は action 専用。match / debounce は action 単位で独立 |
+| `actions[].label` | なし | パレット / help popup に表示される人間可読ラベル。空の場合パレットは `<plugin>:<action-id>` を表示（default action の ID が `default` のときは plugin 名のみ） |
+| `actions[].timeout` | なし | この action 個別の `timeout` 上書き。デフォルト `30s` |
+| `actions[].popup.width` / `.height` | なし | `jin pane popup --here` の action 単位のサイズヒント（1–100、%） |
+| `on` / `timeout` / `popup`（top-level） | v1 のみ | v1 レガシーフィールド。v2 では validate エラーになるため `actions[]` 側に書く |
 
 `install.source` と `install.release_asset` は排他です。
 
@@ -549,6 +575,7 @@ timeout: 30s
 | 変数 | 説明 |
 |------|------|
 | `JIN_EVENT` | `status_changed` または `action` |
+| `JIN_ACTION_ID` | この実行を発火させたマニフェスト action の ID（v1 マニフェストや v2 default action の合成時は `default`）。共通 entrypoint を書く場合、argv 分岐の代わりにこの env で action を識別できる |
 | `JIN_SESSION_ID` | セッション ID |
 | `JIN_STATUS` | 現在のステータス |
 | `JIN_PREV_STATUS` | 直前のステータス（`action` 実行時は空） |
