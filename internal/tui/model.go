@@ -510,6 +510,7 @@ func (m *Model) switchToSession(sessionID string) {
 			)
 		}
 		_ = m.tmuxClient.RespawnPane(m.displayPaneID, placeholderCmd)
+		_ = m.tmuxClient.ClearHistory(m.displayPaneID)
 		m.currentSessionID = sessionID
 		_ = m.tmuxClient.SetEnvironment(tmux.SessionName, "JIN_CURRENT_SESSION", sessionID)
 		m.pushDisplayedDescription(sess.Description)
@@ -543,6 +544,7 @@ func (m *Model) switchToSession(sessionID string) {
 	// used in session/manager.go when launching CC processes.
 	attachCmd := fmt.Sprintf("env -u TMUX tmux -L %s attach -t %s", tmux.SocketName, sess.TmuxWindowName)
 	_ = m.tmuxClient.RespawnPane(m.displayPaneID, attachCmd)
+	_ = m.tmuxClient.ClearHistory(m.displayPaneID)
 	m.displayLocalAttach = true
 
 	m.currentSessionID = sessionID
@@ -610,6 +612,7 @@ func (m *Model) respawnPlaceholder() {
 		m.displayLocalAttach = false
 	}
 	_ = m.tmuxClient.RespawnPane(m.displayPaneID, tmux.PlaceholderCmd)
+	_ = m.tmuxClient.ClearHistory(m.displayPaneID)
 }
 
 // isSessionAlive returns true if the session status indicates an active process.

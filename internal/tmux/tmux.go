@@ -352,6 +352,14 @@ func (c *Client) RespawnPane(target, shellCmd string) error {
 	return c.runSilent(args...)
 }
 
+// ClearHistory wipes both scrollback and the visible screen of the target pane
+// (requires tmux 3.2+ for the -H flag). Callers use this after RespawnPane on
+// panes with remain-on-exit to drop leftover "[detached]" / "[exited]" markers
+// from prior processes.
+func (c *Client) ClearHistory(target string) error {
+	return c.runSilent("clear-history", "-H", "-t", target)
+}
+
 // --- Pane management ---
 
 // SplitOptions configures a SplitPane call, mirroring tmux split-window's
