@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1537,3 +1539,58 @@ func TestOpenPopup_NoConfigMgr_NoOp(t *testing.T) {
 	m := Model{deletingIDs: map[string]bool{}}
 	m.openPopup("create", " New Session ")
 }
+
+// TestModel_ConfigReloadRebuildsKeys covers the end-to-end hot-reload path:
+// write config.yaml → watcher observes → Manager.Reload succeeds → the
+// TUI's Update handler for configReloadMsg picks the reloaded config up
+// and swaps m.keys to the new binding table. Uses the real watcher rather
+// than a mock so a regression in fsnotify wiring or debounce behavior also
+// surfaces here.
+func TestModel_ConfigReloadRebuildsKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("keybindings:\n  new: [\"n\"]\n"), 0644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	mgr, err := config.NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	watcher, err := config.NewWatcher(mgr, 40*time.Millisecond)
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	t.Cleanup(func() { _ = watcher.Close() })
+
+	m := Model{
+		configMgr:     mgr,
+		configWatcher: watcher,
+		keys:          NewKeyMap(mgr.GetKeybindings()),
+		deletingIDs:   map[string]bool{},
+	}
+	if got := m.keys.New.Keys(); !reflect.DeepEqual(got, []string{"n"}) {
+		t.Fatalf("initial New keys = %v, want [n]", got)
+	}
+
+	// Rewrite the config, wait for the watcher's reload event, then push
+	// the corresponding message through Update the same way tea.Program
+	// would deliver it in production.
+	if err := os.WriteFile(path, []byte("keybindings:\n  new: [\"N\"]\n"), 0644); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+	select {
+	case <-watcher.Events():
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not fire within 2s")
+	}
+
+	updated, _ := m.Update(configReloadMsg{})
+	m2, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if got := m2.keys.New.Keys(); !reflect.DeepEqual(got, []string{"N"}) {
+		t.Fatalf("reloaded New keys = %v, want [N]", got)
+	}
+}
+

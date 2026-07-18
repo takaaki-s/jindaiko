@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"slices"
@@ -144,6 +145,12 @@ type Model struct {
 	// Config manager (used for remote session attach)
 	configMgr *config.Manager
 
+	// Watches config.yaml and reloads configMgr in place; nil when the
+	// filesystem does not support fsnotify or the watcher failed to start.
+	// The TUI keeps running with startup-time keys in that case, matching
+	// the "hot reload is best-effort" contract in README.
+	configWatcher *config.Watcher
+
 	// Viewport scrolling. Line offset of the topmost visible row in the
 	// scrollable card area (0 = top). Adjusted by cursor movement and by
 	// PageUp/PageDown/Home/End; clamped whenever the underlying content
@@ -211,12 +218,26 @@ func NewModel(client *daemon.Client) Model {
 	}
 	keys := NewKeyMap(keybindings)
 
+	// Best-effort hot reload: fsnotify failures (unsupported FS, ulimit,
+	// etc.) are logged and the TUI continues without live reload. The user
+	// keeps the startup-time bindings until they restart `jin ui`.
+	var watcher *config.Watcher
+	if configMgr != nil {
+		w, err := config.NewWatcher(configMgr, config.DefaultWatchDebounce)
+		if err != nil {
+			log.Printf("config hot reload disabled: %v (restart jin ui after editing config.yaml)", err)
+		} else {
+			watcher = w
+		}
+	}
+
 	return Model{
-		client:      client,
-		keys:        keys,
-		focused:     true,
-		configMgr:   configMgr,
-		deletingIDs: make(map[string]bool),
+		client:        client,
+		keys:          keys,
+		focused:       true,
+		configMgr:     configMgr,
+		configWatcher: watcher,
+		deletingIDs:   make(map[string]bool),
 	}
 }
 
@@ -386,6 +407,11 @@ type envTickMsg time.Time
 // sessionTickMsg fires on sessionTickInterval to refetch the session list.
 type sessionTickMsg time.Time
 
+// configReloadMsg fires when the config watcher observes a successful reload.
+// The Manager has already been reloaded when this arrives; the handler's job
+// is to rebuild any derived in-memory state (currently just m.keys).
+type configReloadMsg struct{}
+
 type deleteErrMsg struct {
 	sessionID string
 	err       error
@@ -427,6 +453,19 @@ func sessionTickCmd() tea.Cmd {
 	return tea.Tick(sessionTickInterval, func(t time.Time) tea.Msg {
 		return sessionTickMsg(t)
 	})
+}
+
+// waitForConfigReloadCmd parks a Cmd on the watcher's events channel.
+// Re-armed after every configReloadMsg so reloads keep flowing until the
+// watcher's Close closes the channel, at which point the receive returns
+// !ok and the Cmd chain ends quietly.
+func waitForConfigReloadCmd(events <-chan struct{}) tea.Cmd {
+	return func() tea.Msg {
+		if _, ok := <-events; !ok {
+			return nil
+		}
+		return configReloadMsg{}
+	}
 }
 
 // resizeSettledMsg is sent after a delay to allow WindowSizeMsg to arrive
@@ -873,11 +912,15 @@ func (m Model) handlePluginRun(name, actionID string) (tea.Model, tea.Cmd) {
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.fetchSessions,
 		envTickCmd(),
 		sessionTickCmd(),
-	)
+	}
+	if m.configWatcher != nil {
+		cmds = append(cmds, waitForConfigReloadCmd(m.configWatcher.Events()))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages
@@ -1339,6 +1382,14 @@ func (m Model) updateListMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionTickMsg:
 		return m, tea.Batch(m.fetchSessions, sessionTickCmd())
+
+	case configReloadMsg:
+		// Outer-tmux keys (toggle_pane / action_panel / plugin actions)
+		// stay pinned to their startup values — swapping bind-keys mid-run
+		// would leave orphaned mappings on the outer server. Documented
+		// in README under "Hot reload".
+		m.keys = NewKeyMap(m.configMgr.GetKeybindings())
+		return m, waitForConfigReloadCmd(m.configWatcher.Events())
 	}
 
 	return m, nil

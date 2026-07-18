@@ -426,6 +426,25 @@ Worktree creation itself is **offline** — the new branch is cut from your loca
 | `Enter` | Create session |
 | `Esc` | Cancel |
 
+### Keybinding hot reload
+
+Edits to `keybindings.*` in `config.yaml` are picked up by the running TUI
+without a restart. The file is watched via `fsnotify`; a save triggers a
+debounced reload (~250ms) and rebuilds the in-TUI binding table. Malformed
+YAML is ignored so a mid-edit save can't wedge the running session, and
+filesystems without `fsnotify` support fall back to the pre-hot-reload
+behavior (log line at startup; edit + restart).
+
+The following bindings **still require a `jin ui` restart** — they are wired
+into the outer tmux (`jin-mgr`) at startup and swapping them mid-run would
+leave orphaned `bind-key` entries:
+
+- `keybindings.toggle_pane`
+- `keybindings.action_panel`
+- `keybindings.search` (session filter popup)
+- `keybindings.detach`
+- `keybindings.plugins.<name>.actions.<id>.keys`
+
 While attached, press `Ctrl+]` (default) to detach and return to the TUI.
 You can change this in `config.yaml` under `keybindings.detach`.
 
