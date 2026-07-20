@@ -42,7 +42,7 @@ keybindings:
 
 # Adapter used when 'jin session new' omits --agent.
 # Leave commented to fall back to "claude". Uncomment and change to
-# override (available kinds: "claude", "codex").
+# override (available kinds: "claude", "codex", "opencode").
 # default_agent: claude
 
 # Popup size overrides (percent-based, 1-100).

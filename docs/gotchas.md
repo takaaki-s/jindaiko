@@ -108,6 +108,110 @@ Common pitfalls and caveats that agents tend to fall into.
   `<environment_context>` pseudo-user injection. See
   `internal/agent/codex/rollout.go`.
 
+## opencode adapter
+
+- **`OPENCODE_CONFIG_DIR` is additive, not a replacement.** opencode's
+  `ConfigPaths.directories()` returns
+  `unique([~/.config/opencode, …project .opencode dirs, $OPENCODE_CONFIG_DIR])`,
+  so pointing it at jind-ai state does **not** hide the user's own agents,
+  commands or plugins. Setting it does suppress opencode's "seed an empty
+  `~/.config/opencode/opencode.json`" behaviour, which is a bonus rather
+  than a problem. Verified against opencode 1.17.18.
+
+- **opencode treats the config dir as its own.** On start it writes a
+  `.gitignore` into `<StateDir>/opencode/` and installs
+  `@opencode-ai/plugin` into a `node_modules/` beside it. That is expected
+  — it does the same to `~/.config/opencode` — and is exactly why the
+  directory must live under jind-ai state rather than anywhere the user
+  owns.
+
+- **Bun does not need to be on `PATH`.** The opencode binary bundles its
+  own Bun runtime, so the file-based plugin loads and runs even with bun
+  entirely absent from `PATH` (verified: all three status events still
+  fired). An external bun only matters for npm-specified plugins, which
+  jind-ai does not use.
+
+- **`session.status` fires once per step.** A single trivial turn
+  publishes ~9 `session.status{type:"busy"}` events. The plugin suppresses
+  consecutive duplicates of the same canonical event, so one turn yields
+  one `UserPromptSubmit`. Removing that suppression multiplies daemon IPC
+  for no gain.
+
+- **Going idle publishes two events.** `SessionStatus.set()` publishes
+  `session.status{type:"idle"}` *and* `session.idle`. Only `session.idle`
+  is mapped to `Stop`; mapping both would double-report every turn.
+
+- **`AgentSessionID` is unknown until `session.created`.** opencode has no
+  flag that assigns a session id at startup (`--session` only continues an
+  existing one). jind-ai spawns fresh, and the plugin's `SessionStart`
+  carries the real id back through the usual re-key path. The resume
+  branch keys off the **`ses_` prefix** rather than `AgentSessionStarted`,
+  because `startSessionTmux` sets that flag before the process is even
+  spawned — without the prefix test a pre-minted UUID would be passed to
+  `--session`. For genuinely stale ids, `opencode --session <unknown>`
+  exits 1 with `Session not found` in about a second, well inside the 10 s
+  quick-fail auto-recovery window.
+
+- **Every export in `plugin/jin.ts` must be a function.** The file has no
+  default export, so opencode falls back to `getLegacyPlugins()`, which
+  walks `Object.values(mod)` and throws `Plugin export is not a function`
+  on the first export that is neither a function nor an object exposing
+  `.server` (`packages/opencode/src/plugin/index.ts`). Adding one
+  `export const VERSION = "1"` takes the entire plugin down, and opencode
+  swallows a load failure as a warning — so the symptom is status silently
+  never updating. The name `server` is conventional, not required: only
+  the default-export path (npm-packaged plugins) validates names.
+
+- **Subagents create child sessions, and their events must be dropped.**
+  opencode's task tool calls `sessions.create({ parentID: … })`
+  (`packages/opencode/src/tool/task.ts`), and the child publishes
+  `session.created` / `session.status` / `session.idle` on the same bus as
+  the parent. Forwarding them is actively harmful: `HandleHookEvent`
+  re-keys `Session.AgentSessionID` on *any* hook whose `session_id`
+  differs, so a child's `SessionStart` repoints the jin session at the
+  subagent and breaks resume, and a child's idle reports the turn finished
+  while the parent is still working. The plugin therefore reports on an
+  **allow-list** of root sessions, never on "everything except known
+  children" — see the next entry for why the deny-list shape is unsound.
+  The allow-list is seeded from `JIN_OPENCODE_ROOT_SESSION` (set by
+  `SpawnCommand` only when resuming) and extended by any `session.created`
+  without a `parentID`, which covers a fresh spawn and `/new` mid-session.
+
+- **Unknown session ids are resolved by asking opencode, not by guessing.**
+  **Three** paths reach a session with no `session.created`: resuming with
+  `--session`, switching sessions from the TUI (`/sessions`, and its
+  `/resume` / `/continue` aliases, or `<leader>l`), and continuing a
+  subagent through the task tool's `task_id`. An id arriving that way can
+  be a root or a subagent, and both guesses are wrong in one of those
+  cases — assuming "root" hands Manager a subagent id to re-key onto,
+  assuming "child" silently freezes status after every session switch — so
+  the plugin calls `client.session.get({ path: { id } })` once per unknown
+  id and caches the answer. Lookup failures report nothing (fail-closed)
+  and are deliberately not cached, so the next event retries rather than
+  marking a real root permanently unreportable.
+
+  Because opencode dispatches the hook as `void hook.event?.(...)`, handlers
+  overlap; the plugin caches the in-flight promise, not just the result, so
+  one turn's ~9 `session.status` events share a single lookup.
+
+- **An opencode modal swallows every keystroke.** Some time after launch
+  opencode raises an "Update Available — A new release vX.Y.Z is available"
+  dialog that captures all keyboard input. While it is up, neither `tmux
+  send-keys` nor `jin session send` can put a character in the prompt box;
+  `Escape` dismisses it and input works again immediately. `jin session
+  send` behaves correctly here — it retries, never sees the text land, and
+  returns an error **without pressing Enter**, so a half-formed prompt is
+  never committed. If a send fails with "the TUI may not have been ready to
+  receive input", capture the pane before assuming the verify heuristic is
+  at fault.
+
+- **The plugin is a pure observer.** It subscribes via the `event` hook,
+  not the `permission.ask` hook. Note that `permission.ask` (a `Hooks`
+  interface key, which can rewrite the user's allow/deny decision) and
+  `permission.asked` (a bus event type) are different things that both
+  exist — the upstream docs list them in a way that invites conflating
+  them. Status reporting must never sit on the permission decision path.
+
 ## Agent picker (TUI)
 
 - **Picker initial selection is snapshot at create-popup launch, not on

@@ -18,8 +18,9 @@ import (
 // forces the mistake to be caught in CI.
 func TestRegisterInit_RegistersKnownKinds(t *testing.T) {
 	want := map[string]bool{
-		"claude": false,
-		"codex":  false,
+		"claude":   false,
+		"codex":    false,
+		"opencode": false,
 	}
 	for _, k := range agent.Kinds() {
 		if _, ok := want[k]; ok {
@@ -42,5 +43,16 @@ func TestRegisterInit_LookupCodex(t *testing.T) {
 	}
 	if a.Kind() != "codex" {
 		t.Errorf("Kind() = %q, want %q", a.Kind(), "codex")
+	}
+}
+
+func TestRegisterInit_LookupOpencode(t *testing.T) {
+	// Same guardrail as Codex above, for the opencode adapter.
+	a, err := agent.Lookup("opencode")
+	if err != nil {
+		t.Fatalf("Lookup(opencode): %v", err)
+	}
+	if a.Kind() != "opencode" {
+		t.Errorf("Kind() = %q, want %q", a.Kind(), "opencode")
 	}
 }

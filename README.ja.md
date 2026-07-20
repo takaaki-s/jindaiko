@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 |---|---|---|
 | `claude` (デフォルト) | [Claude Code](https://claude.com/product/claude-code) 2.x | first-class サポート。`--session-id` / `--resume` と CC のネイティブ hook で状態追跡。 |
 | `codex` | [OpenAI Codex CLI](https://github.com/openai/codex) 0.144+ | spawn ごとに `-c hooks.X=[...]` で hook を注入。初回のみ `/hooks` ダイアログでトラスト承認が必要 (詳細: [docs/gotchas.md](docs/gotchas.md#codex-adapter))。Codex には `--session-id` 相当がないため、session UUID は `SessionStart` hook で受け取って daemon 側に書き戻す。 |
+| `opencode` | [opencode](https://github.com/sst/opencode) 1.17+ | 状態通知は `jin` バイナリに埋め込んだ TypeScript plugin が担当する。plugin は jind-ai の state 配下に展開し、`OPENCODE_CONFIG_DIR` で opencode に読ませる。この env は検索パスへの**加算**なので `~/.config/opencode` は汚さない (詳細: [docs/gotchas.md](docs/gotchas.md#opencode-adapter))。外部の bun インストールは不要。opencode にも `--session-id` 相当がないため、resume 用 ID は plugin の `SessionStart` で受け取る。 |
 
 セッションごとに adapter を選ぶ:
 

@@ -142,7 +142,8 @@ reprobe). Adapters whose native events do not match these names must
 normalise before calling `jin hook` — see
 `internal/agent/codex/status.go` and 02_design.md §2.2 for the exact
 Codex mapping (native events already match Claude Code by name), and
-future OpenCode integration for a plugin-side normaliser.
+`internal/agent/opencode/plugin/jin.ts` for a plugin-side normaliser
+(opencode's bus vocabulary shares no names with the canonical set).
 
 The Claude Code adapter's mapping is documented in
 `internal/agent/claude/status.go`; typical entries are:
@@ -156,6 +157,20 @@ The Codex adapter's mapping mirrors the same shape:
 - `UserPromptSubmit` / `PreToolUse` / `PostToolUse` → StatusThinking
 - `PermissionRequest` → StatusPermission + permission notification
 - `Stop` → StatusIdle + task-complete notification
+
+The opencode adapter consumes the same canonical names, but they are
+produced by the bundled plugin rather than by the agent. The plugin
+subscribes to opencode's `event` bus hook and translates:
+
+- `session.created` → `SessionStart` (carries the real `ses_…` id)
+- `session.status{type != idle}` → `UserPromptSubmit`
+- `session.idle` → `Stop`
+- `permission.asked` / `permission.replied` → `PermissionRequest` / `UserPromptSubmit`
+- `session.error` → `StopFailure`
+
+Consecutive duplicates are suppressed plugin-side: opencode publishes
+`session.status{busy}` once per step (~9 times for a trivial turn), and
+collapsing them keeps one turn to one status report.
 
 ## Plugin Event Flow
 
@@ -196,7 +211,8 @@ actions plugins use as their CLI-facing API.
 
 ## Agent Adapters
 
-Every session records an `AgentKind` (`"claude"` and `"codex"` today). The
+Every session records an `AgentKind` (`"claude"`, `"codex"` and
+`"opencode"` today). The
 Manager fetches the concrete adapter through the `session.AgentResolver`
 interface:
 
@@ -211,6 +227,10 @@ internal/agent/codex/   Codex CLI adapter: SpawnCommand appends `--enable hooks
                          + -c 'hooks.X=[...]'` per invocation (Setup writes no
                          files), Description (Layer C-transcript enhancer over
                          $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*-<UUID>.jsonl)
+internal/agent/opencode/ opencode adapter: Setup materialises an embedded
+                         TypeScript plugin at <StateDir>/opencode/plugin/jin.ts
+                         and SpawnCommand points opencode at it via
+                         OPENCODE_CONFIG_DIR. No Description enhancer.
 internal/agent/textutil.go  Cross-adapter helper — currently `SmartTruncate`
                          shared by claude and codex description enhancers.
 ```
@@ -221,7 +241,10 @@ touching `~/.codex/hooks.json` or `~/.codex/config.toml`. This keeps
 uninstalls automatic (no residue) and guarantees the user's own hooks are
 never accidentally clobbered by a stale merge. The Claude Code adapter's
 generated `hooks-settings.json` lives under jind-ai's own state directory
-for the same reason.
+for the same reason. The opencode adapter follows it too: its plugin goes
+under jind-ai state and is reached through `OPENCODE_CONFIG_DIR`, which
+opencode *appends* to its config search path — the user's
+`~/.config/opencode` and any project `.opencode` keep loading untouched.
 
 ### Adapter kind resolution
 
@@ -276,7 +299,8 @@ session/           → config, tmux, transcript, plugin (Dispatcher seam only)
 agent/             → session (borrows Agent + supporting types via aliases)
 agent/claude/      → agent, session, transcript, debug   (CC-specific adapter)
 agent/codex/       → agent, session                       (Codex-specific adapter)
-agent/register/    → agent, agent/claude, agent/codex     (init-time Register)
+agent/opencode/    → agent, session, debug                (opencode-specific adapter)
+agent/register/    → agent, agent/claude, agent/codex, agent/opencode  (init-time Register)
                       │
 plugin/            → config (PluginsConfig), debug   (no import of tmux/ or session/)
                       │

@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
 |---|---|---|
 | `claude` (default) | [Claude Code](https://claude.com/product/claude-code) 2.x | First-class support. Uses `--session-id` / `--resume` and Claude Code's native hook system for state tracking. |
 | `codex` | [OpenAI Codex CLI](https://github.com/openai/codex) 0.144+ | Hooks are injected per-invocation via `-c hooks.X=[...]`; grant trust once through the `/hooks` dialog on first launch (see [docs/gotchas.md](docs/gotchas.md#codex-adapter)). Session name / resume UUID are learned from Codex's `SessionStart` hook payload (no `--session-id` equivalent upstream yet). |
+| `opencode` | [opencode](https://github.com/sst/opencode) 1.17+ | Status is reported by a TypeScript plugin embedded in the `jin` binary and materialised under jind-ai state; opencode is pointed at it via `OPENCODE_CONFIG_DIR`, which is additive and leaves `~/.config/opencode` untouched (see [docs/gotchas.md](docs/gotchas.md#opencode-adapter)). No external bun install is required. The resume id is learned from the plugin's `SessionStart` (no `--session-id` equivalent upstream). |
 
 Select a non-default adapter per session:
 

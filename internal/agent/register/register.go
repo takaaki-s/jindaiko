@@ -12,9 +12,11 @@ import (
 	"github.com/takaaki-s/jind-ai/internal/agent"
 	"github.com/takaaki-s/jind-ai/internal/agent/claude"
 	"github.com/takaaki-s/jind-ai/internal/agent/codex"
+	"github.com/takaaki-s/jind-ai/internal/agent/opencode"
 )
 
 func init() {
 	agent.Register(claude.New())
 	agent.Register(codex.New())
+	agent.Register(opencode.New())
 }
