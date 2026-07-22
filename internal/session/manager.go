@@ -49,6 +49,7 @@ type Manager struct {
 	mu             sync.RWMutex
 	paneSlotMu     sync.Mutex // serializes named-slot pane operations (find-then-split is check-then-act; see PaneSplit/PaneClose)
 	stateDir       string
+	hookExecPath   string // jin-binary path baked into agent hook wiring; defaulted to os.Executable() in NewManager, upgraded to a stable copy by EstablishHookBinary
 	tmuxSocketName string // "" ⇒ tmux.SocketName; tests set an isolated name so ensureTmuxClient does not touch the shared "jin" server
 }
 
@@ -268,12 +269,22 @@ func NewManager(sessionsDir, stateDir string, configMgr *config.Manager) (*Manag
 		return nil, err
 	}
 
+	// Default the hook exec path to the live binary; EstablishHookBinary
+	// upgrades it to a stable copy at daemon startup. Resolving it here — not
+	// in buildAgentShellCmd — keeps that builder pure (no environment probing)
+	// and gives every code path a single unconditional field to read.
+	execPath, execErr := os.Executable()
+	if execErr != nil {
+		debugLog("[AGENT] Warning: failed to get executable path: %v", execErr)
+	}
+
 	m := &Manager{
-		sessions:  make(map[string]*Session),
-		store:     store,
-		configMgr: configMgr,
-		gitClient: git.NewClient(),
-		stateDir:  stateDir,
+		sessions:     make(map[string]*Session),
+		store:        store,
+		configMgr:    configMgr,
+		gitClient:    git.NewClient(),
+		stateDir:     stateDir,
+		hookExecPath: execPath,
 	}
 
 	// Load existing sessions
@@ -1212,13 +1223,13 @@ func (m *Manager) buildAgentShellCmd(snap spawnSnapshot) (string, error) {
 		return "", fmt.Errorf("resolve agent %q: %w", snap.AgentKind, err)
 	}
 
-	execPath, execErr := os.Executable()
-	if execErr != nil {
-		debugLog("[AGENT] Warning: failed to get executable path: %v", execErr)
-	}
+	// hookExecPath is resolved once in NewManager and upgraded to the stable
+	// startup copy by EstablishHookBinary. Passing it to every adapter's Setup
+	// is what makes the path baked into hook wiring survive the launch binary
+	// moving or being deleted — see EstablishHookBinary.
 	if err := ag.Setup(SetupContext{
 		StateDir: m.stateDir,
-		ExecPath: execPath,
+		ExecPath: m.hookExecPath,
 		WorkDir:  snap.ExpandedWorkDir,
 	}); err != nil {
 		debugLog("[AGENT] Setup returned error: %v", err)

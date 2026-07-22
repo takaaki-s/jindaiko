@@ -39,7 +39,12 @@ func EnsureHooksSettingsFile(stateDir, execPath string) (string, error) {
 	entry := hooksEntry{
 		Type:    "command",
 		Command: execPath + " hook",
-		Timeout: 5,
+		// Claude Code kills the hook child at this many seconds, so this is the
+		// real ceiling on what a wedged daemon costs a Claude session. Keep it
+		// in step with the two other layers that bound the same exchange: the
+		// client-side read deadline (daemon.hookRequestTimeout, 10s) and the
+		// Codex per-hook budget (codex.hookTimeoutMillis, 10000ms).
+		Timeout: 10,
 	}
 	settings := hooksSettings{
 		Hooks: map[string][]hooksMatcher{
