@@ -63,13 +63,18 @@ warning keeps its weight where it matters. Any new action that mutates state
 inherits this property by default; make it idempotent, or expect callers to
 check state after a timeout.
 
-`stop` is the one action that does not point at `jin daemon restart` when the
-exchange blows a deadline, for the obvious reason: restart stops through
-`Client.Stop()` itself, so it would answer a stop that timed out with the stop
-that just failed. A daemon deaf to the request needs a signal instead, and
-`Stop()` says so. Only that path is rewritten, and only once the shutdown poll
-has run out: a stop failing any other way — including a dial that times out
-before the daemon is reached — still returns the error as it came.
+`stop` is the one action that does not point at `jin daemon restart` when it
+fails, for the obvious reason: restart stops through `Client.Stop()` itself,
+so it would answer a stop that failed with the same stop. A daemon deaf to the
+request needs a signal instead, and `Stop()` says so — but only once its
+shutdown poll has run out. The predicate for "stop failed" lives entirely in
+that poll's result, not in how the send attempt went: if the daemon is still
+accepting connections once the poll gives up, `Stop()` reports the pkill
+remedy regardless of whether the send blew a deadline, timed out dialing (an
+error `sendWithTimeout` never wraps in `os.ErrDeadlineExceeded`, so a
+type-based check would miss it), or even succeeded outright. A send that
+fails but the poll finds the daemon gone anyway is still success — the poll,
+not the send, is what `Stop()` trusts.
 
 ## Message Format
 

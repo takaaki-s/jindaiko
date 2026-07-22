@@ -370,6 +370,73 @@ func TestClientStop_TimeoutDoesNotSuggestRestart(t *testing.T) {
 	}
 }
 
+// TestClientStop_StillRunningIsAnErrorEvenWithoutASendError guards the bug
+// this predicate exists to fix: a daemon that answered the stop request just
+// fine (sendErr == nil) but never actually goes away must not be reported as
+// a successful stop. The old code returned sendErr verbatim once the poll
+// ran out, which was nil here — a silent false positive.
+func TestClientStop_StillRunningIsAnErrorEvenWithoutASendError(t *testing.T) {
+	// fakeServer replies once and keeps listening — a daemon that accepted
+	// the stop but is still up, the same shape closingServer's closeAfter
+	// exists to rule out.
+	sock, _ := fakeServer(t, Response{ProtocolVersion: ProtocolVersion, Success: true})
+
+	err := NewClient(sock).stop(2, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an error when the daemon accepted the stop but never went away, got nil")
+	}
+	if !strings.Contains(err.Error(), "pkill") {
+		t.Errorf("error = %q, want a remedy that does not go through the socket", err.Error())
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("errors.Is(err, os.ErrDeadlineExceeded) = true for %v, want false (the send succeeded)", err)
+	}
+}
+
+// timeoutNetError satisfies net.Error with Timeout() == true, standing in for
+// what net.DialTimeout returns when a dial itself times out.
+type timeoutNetError struct{}
+
+func (timeoutNetError) Error() string   { return "dial timeout" }
+func (timeoutNetError) Timeout() bool   { return true }
+func (timeoutNetError) Temporary() bool { return true }
+
+// TestClientStop_DialTimeoutOnSendGetsPkillRemedyToo guards the sibling path
+// noted alongside F010: sendWithTimeout's dial-timeout error is never wrapped
+// in os.ErrDeadlineExceeded (see its own comment), so a predicate keyed off
+// errors.Is(sendErr, os.ErrDeadlineExceeded) lets it slip through unrewritten
+// — including its own "try: jin daemon restart" wording, aimed at a user who
+// just ran that command. Keying the predicate off the poll result instead
+// covers this case automatically, with no dial-specific check.
+func TestClientStop_DialTimeoutOnSendGetsPkillRemedyToo(t *testing.T) {
+	// Still accepting connections throughout: only the first dial (the send)
+	// times out, standing in for a backlog that clears by the time the
+	// IsRunning polls dial again — the real-world shape this guards.
+	sock, _ := fakeServer(t, Response{ProtocolVersion: ProtocolVersion, Success: true})
+
+	original := dialDaemon
+	first := true
+	dialDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		if first {
+			first = false
+			return nil, timeoutNetError{}
+		}
+		return original(network, address, timeout)
+	}
+	t.Cleanup(func() { dialDaemon = original })
+
+	err := NewClient(sock).stop(2, time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an error when the daemon never confirms the stop, got nil")
+	}
+	if strings.Contains(err.Error(), "jin daemon restart") {
+		t.Errorf("error = %q, want it not to suggest the command that routes back here", err.Error())
+	}
+	if !strings.Contains(err.Error(), "pkill") {
+		t.Errorf("error = %q, want a remedy that does not go through the socket", err.Error())
+	}
+}
+
 // TestClientStop_PassesItsConstantsToThePoll covers what the seam moved out of
 // reach. Every other stop test drives stop() directly and so says nothing about
 // the one line that supplies its arguments — drop that to zero attempts and the

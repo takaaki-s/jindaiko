@@ -456,27 +456,35 @@ func (c *Client) stop(attempts int, interval time.Duration) error {
 		}
 		time.Sleep(interval)
 	}
-	// Past the poll the daemon is still accepting, and the remedy the rest of
-	// this package points at is no help: `jin daemon restart` stops through
-	// this very function, so naming it here would answer a failed stop with
-	// the same stop. Send the user outside the socket instead — a daemon that
-	// ignored the request needs a signal, not another request.
+	// Past the poll the daemon is still accepting connections — that alone is
+	// grounds enough for the remedy below, regardless of what sendErr was (a
+	// blown deadline, a dial timeout that sendWithTimeout never wraps in
+	// os.ErrDeadlineExceeded, or even nil because the request went through
+	// fine and the daemon simply hasn't exited yet). The predicate lives here
+	// now, not in sendErr's type, so every "still running" outcome gets the
+	// same honest answer and the dial-timeout path is covered without a
+	// second special case.
+	//
+	// `jin daemon restart` stops through this very function, so naming it
+	// here would answer a failed stop with the same stop. Send the user
+	// outside the socket instead — a daemon that ignored the request needs a
+	// signal, not another request. pkill is offered as an example rather
+	// than the instruction: the pattern also matches a daemon started on
+	// another --socket, which the user may not want to take down.
+	//
+	// The two callers named above want opposite things once the kill is
+	// done — restart is left without the daemon it was going to start
+	// again, while stop got what it asked for — so the start half is
+	// offered conditionally. Telling every reader to start one back up
+	// would be this same message's mistake aimed at the other caller.
+	msg := fmt.Sprintf(
+		"daemon is still accepting connections %s after the stop request — kill it manually (e.g. pkill -f 'jin daemon'); if you were restarting, start the new one with: jin daemon start",
+		time.Duration(attempts)*interval,
+	)
 	if errors.Is(sendErr, os.ErrDeadlineExceeded) {
-		// pkill is offered as an example rather than the instruction: the
-		// pattern also matches a daemon started on another --socket, which the
-		// user may not want to take down.
-		//
-		// The two callers named above want opposite things once the kill is
-		// done — restart is left without the daemon it was going to start
-		// again, while stop got what it asked for — so the start half is
-		// offered conditionally. Telling every reader to start one back up
-		// would be this same message's mistake aimed at the other caller.
-		return fmt.Errorf(
-			"daemon did not respond to stop within %s and is still accepting connections — kill it manually (e.g. pkill -f 'jin daemon'); if you were restarting, start the new one with: jin daemon start (%w)",
-			stopRequestTimeout, os.ErrDeadlineExceeded,
-		)
+		return fmt.Errorf("%s (%w)", msg, os.ErrDeadlineExceeded)
 	}
-	return sendErr
+	return errors.New(msg)
 }
 
 // SendHook sends a Claude Code hook event to the daemon
