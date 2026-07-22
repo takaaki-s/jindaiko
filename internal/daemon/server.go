@@ -89,6 +89,13 @@ func NewServer(socketPath, sessionsDir, configDir, stateDir string) (*Server, er
 		return nil, err
 	}
 
+	// Copy this daemon's binary to a stable path and route agent hook wiring
+	// through it, so the path baked into a session's hooks survives the launch
+	// binary moving or being deleted (e.g. jin run from a worktree that is
+	// later removed). Runs once, here, so the copy stays version-locked to the
+	// running daemon for its lifetime.
+	mgr.EstablishHookBinary()
+
 	// Wire the agent resolver so startSessionTmux / HandleHookEvent can
 	// dispatch to the adapter that owns each session's kind. Layer C
 	// description enhancers now live behind Agent.Description() — no
