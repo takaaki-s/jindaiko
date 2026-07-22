@@ -130,7 +130,7 @@ func (m *Manager) RecoverTmuxSessions() {
 	// transiently rolled back on disk; memory stays authoritative and the
 	// next Save reconverges (same trade-off as TryUpgradeDescription).
 	for i := range saves {
-		_ = m.store.Save(&saves[i])
+		_ = m.store.Save(saves[i])
 	}
 	for _, s := range monitors {
 		go m.captureOutputTmux(s)
@@ -711,7 +711,7 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 	// the non-nil retErr also triggers the worktree rollback defer above. The
 	// brief window where List/Get can see the unpersisted session is accepted
 	// — Save only fails when the disk is broken.
-	if err := m.store.Save(&saved); err != nil {
+	if err := m.store.Save(saved); err != nil {
 		m.mu.Lock()
 		delete(m.sessions, id)
 		m.mu.Unlock()
@@ -1069,7 +1069,7 @@ func (m *Manager) SetStatusWithError(id string, status Status, errMsg string) {
 	// the live pointer is safe (see TryUpgradeDescription).
 	saved := *session
 	m.mu.Unlock()
-	_ = m.store.Save(&saved)
+	_ = m.store.Save(saved)
 }
 
 // workDirConflictLocked returns the session already claiming workDir, or nil.
@@ -1108,7 +1108,7 @@ func (m *Manager) SetWorkDir(id string, workDir string) error {
 	// Persist a copy outside the lock (see SetStatusWithError).
 	saved := *session
 	m.mu.Unlock()
-	_ = m.store.Save(&saved)
+	_ = m.store.Save(saved)
 	return nil
 }
 
@@ -1167,7 +1167,7 @@ func (m *Manager) SetDescription(id string, desc string) error {
 	// Persist a copy outside the lock (see SetStatusWithError).
 	saved := *session
 	m.mu.Unlock()
-	return m.store.Save(&saved)
+	return m.store.Save(saved)
 }
 
 // TryUpgradeDescription asks the given enhancer for a Layer C description and
@@ -1230,7 +1230,7 @@ func (m *Manager) TryUpgradeDescription(id string, enhancer DescriptionEnhancer)
 	// concurrent mutators. The copy can persist a Status that a concurrent Save
 	// has already superseded; that is accepted, since memory stays
 	// authoritative and the next Save reconverges.
-	_ = m.store.Save(&saved)
+	_ = m.store.Save(saved)
 }
 
 // snapshotForUpgrade returns an independent copy of the session to hand to an
@@ -1519,7 +1519,12 @@ func (m *Manager) startSessionTmux(session *Session) error {
 			session.Status = StatusRunning
 			session.LastOutputTime = time.Now()
 			session.StartedAt = time.Now()
-			_ = m.store.Save(session)
+			// Saved under the still-held lock rather than via snapshotAndUnlock:
+			// the whole function runs under StartBackground's lock (see the
+			// comment above), so there is no unlock/relock window for a
+			// concurrent mutator to race with. *session is just the dereference
+			// Save's by-value signature requires.
+			_ = m.store.Save(*session)
 			debugLog("[TMUX] Session %s CC revived via RespawnPane in inner session", session.Description)
 			go m.captureOutputTmux(session)
 			return nil
@@ -1560,8 +1565,9 @@ func (m *Manager) startSessionTmux(session *Session) error {
 	session.LastOutputTime = time.Now()
 	session.StartedAt = time.Now()
 
-	// Persist inner session name
-	_ = m.store.Save(session)
+	// Persist inner session name. Saved under the still-held lock, same
+	// reasoning as the RespawnPane branch above.
+	_ = m.store.Save(*session)
 
 	// Start status detection via capture-pane polling
 	go m.captureOutputTmux(session)
@@ -1622,6 +1628,17 @@ func applyCWDLocked(s *Session, cwd string, persistable bool) (workDirChanged bo
 	return false
 }
 
+// snapshotAndUnlock takes a value copy of session and releases m.mu, so the
+// copy — not the live pointer — is what a caller passes to Store.Save. Save
+// marshals every field; handing it session after unlocking would let the
+// marshal race with a concurrent mutator. Caller must hold m.mu on entry and
+// must not read or write through session again until re-locking.
+func (m *Manager) snapshotAndUnlock(session *Session) Session {
+	saved := *session
+	m.mu.Unlock()
+	return saved
+}
+
 // captureOutputTmux polls a session's tmux pane every 10 seconds: it detects
 // pane death (retrying a quick resume failure once), tracks the agent's
 // working directory and git branch, and falls back to "idle" when no hook
@@ -1676,8 +1693,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 				// AgentSessionID / AgentSessionStarted, racing writes from
 				// HandleHookEvent.
 				retrySnap := snapshotForSpawn(session, session.WorkDir, expandTilde(session.WorkDir))
-				m.mu.Unlock()
-				_ = m.store.Save(session)
+				_ = m.store.Save(m.snapshotAndUnlock(session))
 
 				shellCmd, buildErr := m.buildAgentShellCmd(retrySnap)
 				if buildErr != nil {
@@ -1689,8 +1705,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 					}
 					session.Status = StatusStopped
 					session.LastActiveAt = time.Now()
-					m.mu.Unlock()
-					_ = m.store.Save(session)
+					_ = m.store.Save(m.snapshotAndUnlock(session))
 					return
 				}
 				if err := m.tmuxClient.RespawnPane(target, shellCmd); err == nil {
@@ -1699,8 +1714,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 					session.AgentSessionStarted = true
 					session.StartedAt = time.Now()
 					session.LastOutputTime = time.Now()
-					m.mu.Unlock()
-					_ = m.store.Save(session)
+					_ = m.store.Save(m.snapshotAndUnlock(session))
 					debugLog("[TMUX] Session %s restarted with fresh agent session (id: %s)", session.Description, newSessionID)
 					continue
 				}
@@ -1716,8 +1730,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 			session.LastActiveAt = time.Now()
 			// Keep TmuxWindowName: window survives (remain-on-exit), only CC pane is dead.
 			// RespawnPane can revive CC while preserving user panes in the same window.
-			m.mu.Unlock()
-			_ = m.store.Save(session)
+			_ = m.store.Save(m.snapshotAndUnlock(session))
 			debugLog("[TMUX] Session %s pane died, marked as stopped (window preserved)", sessionName)
 			return
 		}
@@ -1731,12 +1744,16 @@ func (m *Manager) captureOutputTmux(session *Session) {
 				persistable := isPersistableWorkDir(currentPath)
 				m.mu.Lock()
 				workDirChanged := applyCWDLocked(session, currentPath, persistable)
-				m.mu.Unlock()
+				saved := m.snapshotAndUnlock(session)
 				if workDirChanged {
-					_ = m.store.Save(session)
+					_ = m.store.Save(saved)
 					debugLog("[CWD] Session %s WorkDir updated to %s", sessionName, currentPath)
 				}
 
+				// updateGitBranch only touches CurrentBranch / IsGitRepo /
+				// IsWorktree, all json:"-" — it never affects what the Save
+				// above persisted, so running it after Save (rather than
+				// before taking the copy) is safe.
 				m.updateGitBranch(session, currentPath, lastTrackedPath)
 				lastTrackedPath = currentPath
 			}
@@ -1760,15 +1777,37 @@ func (m *Manager) captureOutputTmux(session *Session) {
 		const hookIdleTimeout = 30 * time.Second
 		if fbStatus == StatusRunning && !fbStartedAt.IsZero() && time.Since(fbLastOutput) > hookIdleTimeout {
 			m.mu.Lock()
-			if _, exists := m.sessions[session.ID]; exists && session.Status == StatusRunning {
-				session.Status = StatusIdle
-				session.LastOutputTime = time.Now()
-				debugLog("[POLL] Session %s: running -> idle (no hook received for %s, fallback)", session.Description, hookIdleTimeout)
-			}
+			saved, changed := m.markIdleFallbackLocked(session.ID)
 			m.mu.Unlock()
-			_ = m.store.Save(session)
+			// Only save when this goroutine actually made the transition: the
+			// guard above can miss (session deleted, or another goroutine
+			// already moved Status off Running) between the RLock snapshot and
+			// this Lock. Saving unconditionally would resurrect a just-deleted
+			// session's file.
+			if changed {
+				_ = m.store.Save(saved)
+				debugLog("[POLL] Session %s: running -> idle (no hook received for %s, fallback)", saved.Description, hookIdleTimeout)
+			}
 		}
 	}
+}
+
+// markIdleFallbackLocked applies captureOutputTmux's idle-fallback transition
+// (Running with no hook for hookIdleTimeout -> Idle) if the session still
+// qualifies, and returns a copy to persist plus whether the transition
+// happened. Re-checks existence and Status against live state rather than
+// trusting the caller's RLock snapshot, since a session can be deleted or
+// moved off Running between that snapshot and this call — applying the
+// transition (and saving) unconditionally would resurrect a just-deleted
+// session's file. Caller must hold m.mu.
+func (m *Manager) markIdleFallbackLocked(id string) (Session, bool) {
+	session, exists := m.sessions[id]
+	if !exists || session.Status != StatusRunning {
+		return Session{}, false
+	}
+	session.Status = StatusIdle
+	session.LastOutputTime = time.Now()
+	return *session, true
 }
 
 // FindByAgentSessionID finds a session by its adapter-side session ID
@@ -1879,9 +1918,9 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 	// Take the early return before assigning anything from upd — mirrors the
 	// pre-refactor SessionEnd branch that also short-circuited here.
 	if updOK && upd.Status == StatusStopped && oldStatus == StatusStopped {
-		m.mu.Unlock()
+		saved := m.snapshotAndUnlock(session)
 		if cwdChanged {
-			_ = m.store.Save(session)
+			_ = m.store.Save(saved)
 			debugLog("[HOOK] Session %s: CWD updated to %s (SessionEnd, already stopped)", sessionName, cwd)
 		}
 		return
@@ -1909,14 +1948,14 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 		session.LastOutputTime = time.Now()
 	}
 
-	// Snapshot everything the post-unlock code needs. Reading session.* after
-	// Unlock would race with concurrent mutators, so the plugin event is built
-	// from these copies only.
-	newStatus := session.Status
-	workDir := session.WorkDir
-	tmuxPaneID := session.TmuxPaneID
+	// saved is the single point-in-time snapshot the post-unlock code reads
+	// from — both for Store.Save and for the fields the plugin event below
+	// needs (reading session.* after Unlock would race with concurrent
+	// mutators). updateGitBranch below only touches
+	// CurrentBranch/IsGitRepo/IsWorktree (all json:"-"), so saved not
+	// reflecting its result doesn't affect what gets persisted.
 	pluginDisp := m.pluginDisp
-	m.mu.Unlock()
+	saved := m.snapshotAndUnlock(session)
 
 	// CwdChanged: immediately check git branch outside the lock
 	if eventName == "CwdChanged" && cwd != "" {
@@ -1924,25 +1963,25 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 	}
 
 	// Persist status/CWD/session-started changes
-	if oldStatus != newStatus || cwdChanged || sessionStarted {
-		_ = m.store.Save(session)
-		if oldStatus != newStatus {
-			debugLog("[HOOK] Session %s: %s -> %s (hook: %s)", sessionName, oldStatus, newStatus, eventName)
+	if oldStatus != saved.Status || cwdChanged || sessionStarted {
+		_ = m.store.Save(saved)
+		if oldStatus != saved.Status {
+			debugLog("[HOOK] Session %s: %s -> %s (hook: %s)", sessionName, oldStatus, saved.Status, eventName)
 		}
 		if cwdChanged {
 			debugLog("[HOOK] Session %s: CWD updated to %s", sessionName, cwd)
 		}
 	}
 
-	if pluginDisp != nil && updOK && oldStatus != newStatus {
+	if pluginDisp != nil && updOK && oldStatus != saved.Status {
 		pluginDisp.Publish(plugin.Event{
 			Name:       manifest.EventStatusChanged,
 			SessionID:  sessionID,
-			Status:     string(newStatus),
+			Status:     string(saved.Status),
 			PrevStatus: string(oldStatus),
 			AgentKind:  kind,
-			WorkDir:    workDir,
-			TmuxPaneID: tmuxPaneID,
+			WorkDir:    saved.WorkDir,
+			TmuxPaneID: saved.TmuxPaneID,
 			NotifyKind: string(upd.Notify),
 		})
 	}
@@ -2022,9 +2061,8 @@ func (m *Manager) Kill(id string) error {
 		session.LastActiveAt = time.Now()
 	}
 
-	m.mu.Unlock()
 	// Persist LastActiveAt
-	_ = m.store.Save(session)
+	_ = m.store.Save(m.snapshotAndUnlock(session))
 
 	return nil
 }

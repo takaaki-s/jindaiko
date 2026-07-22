@@ -62,7 +62,7 @@ func TestStore_SaveAndLoad_RoundTrip(t *testing.T) {
 		CurrentBranch:  "main",         // json:"-"
 	}
 
-	if err := store.Save(session); err != nil {
+	if err := store.Save(*session); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestStore_LoadAll_Multiple(t *testing.T) {
 
 	for _, id := range []string{"a", "b", "c"} {
 		s := &Session{ID: id, Description: "session-" + id, Status: StatusStopped}
-		if err := store.Save(s); err != nil {
+		if err := store.Save(*s); err != nil {
 			t.Fatalf("Save(%s): %v", id, err)
 		}
 	}
@@ -143,7 +143,7 @@ func TestStore_LoadAll_SkipsInvalidFiles(t *testing.T) {
 
 	// Valid session
 	s := &Session{ID: "valid", Description: "valid-session", Status: StatusStopped}
-	if err := store.Save(s); err != nil {
+	if err := store.Save(*s); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestStore_Delete_Existing(t *testing.T) {
 	}
 
 	s := &Session{ID: "delete-me", Status: StatusStopped}
-	if err := store.Save(s); err != nil {
+	if err := store.Save(*s); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestStore_RuntimeFieldsNotPersisted(t *testing.T) {
 		LastOutputTime: time.Now(),
 		StartedAt:      time.Now(),
 	}
-	if err := store.Save(s); err != nil {
+	if err := store.Save(*s); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -248,7 +248,7 @@ func TestStore_RuntimeFieldsNotPersisted(t *testing.T) {
 // leaves exactly the record behind, with no temp file to reclaim.
 func TestStore_Save_LeavesNoTempFile(t *testing.T) {
 	store, dir := newTestStore(t)
-	if err := store.Save(&Session{ID: "abc", Description: "x"}); err != nil {
+	if err := store.Save(Session{ID: "abc", Description: "x"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -270,7 +270,7 @@ func TestStore_Save_LeavesNoTempFile(t *testing.T) {
 // must not be readable by other users on a shared host.
 func TestStore_Save_NewFileNotWorldReadable(t *testing.T) {
 	store, dir := newTestStore(t)
-	if err := store.Save(&Session{ID: "abc"}); err != nil {
+	if err := store.Save(Session{ID: "abc"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -289,7 +289,7 @@ func TestStore_Save_NewFileNotWorldReadable(t *testing.T) {
 func TestStore_Save_PreservesExistingMode(t *testing.T) {
 	store, dir := newTestStore(t)
 	sess := &Session{ID: "abc"}
-	if err := store.Save(sess); err != nil {
+	if err := store.Save(*sess); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -299,7 +299,7 @@ func TestStore_Save_PreservesExistingMode(t *testing.T) {
 	}
 
 	sess.Description = "updated"
-	if err := store.Save(sess); err != nil {
+	if err := store.Save(*sess); err != nil {
 		t.Fatalf("re-Save: %v", err)
 	}
 
@@ -327,7 +327,7 @@ func TestStore_Save_ConcurrentWritesStayParseable(t *testing.T) {
 			defer wg.Done()
 			desc := strings.Repeat("d", 1+i*500)
 			for j := 0; j < 20; j++ {
-				if err := store.Save(&Session{ID: "abc", Description: desc}); err != nil {
+				if err := store.Save(Session{ID: "abc", Description: desc}); err != nil {
 					t.Errorf("Save: %v", err)
 					return
 				}
@@ -367,7 +367,7 @@ func TestStore_Save_ConcurrentWritesStayParseable(t *testing.T) {
 // something ending in .json would make LoadAll pick up half-written records.
 func TestStore_LoadAll_IgnoresTempFiles(t *testing.T) {
 	store, dir := newTestStore(t)
-	if err := store.Save(&Session{ID: "abc"}); err != nil {
+	if err := store.Save(Session{ID: "abc"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	// A temp file left behind mid-write, containing truncated JSON.

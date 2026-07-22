@@ -64,13 +64,16 @@ func (s *Store) cleanupTempFiles() {
 // the file and the parent directory synced, which costs roughly an order of
 // magnitude more per save than the whole write does today.
 //
-// Note that Save marshals every field of session, so a caller reading a live
-// session must either hold the manager lock or pass a copy. Most callers
-// currently pass the live pointer after unlocking; TryUpgradeDescription is
-// the one that passes a copy.
-func (s *Store) Save(session *Session) error {
+// Save takes session by value: it marshals every field, so a caller reading a
+// live *Session outside a lock would race with concurrent mutators. Taking
+// the parameter by value forces that copy to happen at the call site. A
+// caller that unlocks before calling Save must take the copy first — see
+// Manager.snapshotAndUnlock and its callers for the pattern. A caller that
+// holds its lock for Save's whole duration (e.g. startSessionTmux, which runs
+// under StartBackground's lock) has no such window and may just dereference.
+func (s *Store) Save(session Session) error {
 	path := filepath.Join(s.dataDir, session.ID+".json")
-	data, err := json.MarshalIndent(session, "", "  ")
+	data, err := json.MarshalIndent(&session, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -126,7 +129,7 @@ func (s *Store) Load(id string) (*Session, error) {
 	}
 
 	if changed {
-		if err := s.Save(&session); err != nil {
+		if err := s.Save(session); err != nil {
 			return nil, err
 		}
 	}

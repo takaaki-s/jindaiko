@@ -1237,7 +1237,7 @@ func TestManager_RecoverTmuxSessions_AfterReload(t *testing.T) {
 	sess.TmuxWindowName = innerName
 	sess.TmuxPaneID = "%16"
 	sess.Status = StatusIdle
-	if err := mgr1.store.Save(sess); err != nil {
+	if err := mgr1.store.Save(*sess); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
 
@@ -1464,6 +1464,102 @@ func TestManager_ConcurrentRecoveryAndMutators(t *testing.T) {
 	if got.Status != StatusRunning {
 		t.Errorf("mid-probe-started session Status = %q, want %q (stale markStopped must be discarded)", got.Status, StatusRunning)
 	}
+}
+
+// TestManager_ConcurrentHookEventsAndKill runs HandleHookEvent and Kill
+// against the same session concurrently with -race. No assertions beyond "no
+// race, no panic": the interleavings themselves are the test. This is the
+// regression coverage for the Store.Save-by-value migration — HandleHookEvent
+// and Kill used to hand Store.Save a live *Session after unlocking, which
+// raced against each other's field writes.
+func TestManager_ConcurrentHookEventsAndKill(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: t.TempDir(), Description: "concurrent-hook-kill"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			switch n % 4 {
+			case 0:
+				mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "UserPromptSubmit", "", "", "")
+			case 1:
+				mgr.HandleHookEvent(sess.AgentSessionID, sess.ID, "Stop", "", "", "")
+			case 2:
+				_ = mgr.SetDescription(sess.ID, fmt.Sprintf("desc-%d", n))
+			case 3:
+				_ = mgr.Kill(sess.ID)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestManager_MarkIdleFallbackLocked exercises the guard captureOutputTmux's
+// idle fallback relies on to avoid resurrecting a session that was deleted or
+// moved off Running between its RLock snapshot and the Lock this helper runs
+// under.
+func TestManager_MarkIdleFallbackLocked(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+	sess, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: t.TempDir(), Description: "idle-fallback"})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	t.Run("running session transitions to idle", func(t *testing.T) {
+		mgr.mu.Lock()
+		sess.Status = StatusRunning
+		mgr.mu.Unlock()
+
+		mgr.mu.Lock()
+		saved, changed := mgr.markIdleFallbackLocked(sess.ID)
+		mgr.mu.Unlock()
+
+		if !changed {
+			t.Fatal("changed = false, want true for a Running session")
+		}
+		if saved.Status != StatusIdle {
+			t.Errorf("saved.Status = %q, want %q", saved.Status, StatusIdle)
+		}
+		if got, ok := mgr.Get(sess.ID); !ok || got.Status != StatusIdle {
+			t.Errorf("live session Status = %v (ok=%v), want %q", got, ok, StatusIdle)
+		}
+	})
+
+	t.Run("non-running session is left alone", func(t *testing.T) {
+		mgr.mu.Lock()
+		sess.Status = StatusThinking
+		mgr.mu.Unlock()
+
+		mgr.mu.Lock()
+		_, changed := mgr.markIdleFallbackLocked(sess.ID)
+		mgr.mu.Unlock()
+
+		if changed {
+			t.Fatal("changed = true, want false for a non-Running session")
+		}
+		if got, ok := mgr.Get(sess.ID); !ok || got.Status != StatusThinking {
+			t.Errorf("live session Status = %v (ok=%v), want untouched %q", got, ok, StatusThinking)
+		}
+	})
+
+	t.Run("deleted session is left alone", func(t *testing.T) {
+		if err := mgr.Delete(sess.ID, false, false); err != nil {
+			t.Fatalf("delete failed: %v", err)
+		}
+
+		mgr.mu.Lock()
+		_, changed := mgr.markIdleFallbackLocked(sess.ID)
+		mgr.mu.Unlock()
+
+		if changed {
+			t.Fatal("changed = true, want false for a deleted session (would resurrect its file)")
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
