@@ -6,7 +6,7 @@ A CLI tool for running and managing multiple agent sessions simultaneously
 (Claude Code is the first-class citizen; other agents plug in via
 `internal/agent/<kind>/`).
 
-https://github.com/user-attachments/assets/62e9d64a-aa7d-42f8-8edf-03f724fe0ee4
+https://github.com/user-attachments/assets/68778af9-07eb-412e-8b11-0e6ec916010b
 
 ## Supported agents
 
