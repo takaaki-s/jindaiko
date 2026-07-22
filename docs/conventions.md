@@ -36,7 +36,9 @@ If a new package needs debug logging, duplicate the same pattern.
 ## Concurrency
 
 - `sync.RWMutex` field name is `mu`
-- Lock ordering: session.Manager.mu is the central lock
+- Lock ordering: session.Manager.mu is the central lock; auxiliary locks
+  (`tmuxInitMu`, `paneSlotMu`) are always acquired BEFORE `mu` and never
+  while holding it
 - Perform I/O operations (Store.Save, transcript reads) outside the lock
   - Example: `List()` takes a snapshot under RLock, then reads transcripts after releasing the lock
 

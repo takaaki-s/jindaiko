@@ -115,17 +115,12 @@ func (m *Manager) SetAgentResolver(ar AgentResolver) {
 // apply. applyRecovery re-validates each session against live state, so a
 // session that was deleted, killed, or started while the probes ran keeps its
 // live state (see the guards there).
-//
-// m.tmuxClient is read without m.mu here and in the probe phase: call this
-// only from the goroutine that installed the client (daemon startup before
-// the IPC listener, or the ensureTmuxClient winner).
 func (m *Manager) RecoverTmuxSessions() {
-	if m.tmuxClient == nil {
+	snaps, tc := m.snapshotForRecovery()
+	if tc == nil {
 		return
 	}
-
-	probes := m.snapshotForRecovery()
-	decisions := m.decideRecovery(probes)
+	decisions := m.decideRecovery(snaps, tc)
 	saves, monitors := m.applyRecovery(decisions)
 
 	// Save copies rather than the live sessions: Store.Save marshals every
@@ -139,16 +134,6 @@ func (m *Manager) RecoverTmuxSessions() {
 	for _, s := range monitors {
 		go m.captureOutputTmux(s)
 	}
-}
-
-// recoverProbe carries one session's state from the snapshot phase to the
-// unlocked probe phase of RecoverTmuxSessions.
-type recoverProbe struct {
-	// snap is an independent copy; safe for the same reason as
-	// snapshotForUpgrade (no Session field aliases mutable state).
-	snap Session
-	// fromDisk is the consumed PersistedStatus (see snapshotForRecovery).
-	fromDisk Status
 }
 
 // recoverOutcome is what the probe phase concluded about one session.
@@ -170,8 +155,7 @@ const (
 
 // recoverDecision is the apply-phase instruction produced for one session.
 type recoverDecision struct {
-	id          string
-	description string // for debug logs only
+	id string
 	// windowName is TmuxWindowName at snapshot time; apply re-validates it,
 	// so a Kill or restart during the probe window invalidates the decision.
 	windowName string
@@ -182,42 +166,49 @@ type recoverDecision struct {
 }
 
 // snapshotForRecovery copies every session under the lock so the probe phase
-// can run I/O against the copies. It also consumes PersistedStatus (the
-// status read from disk at load time) so a later recovery pass cannot
-// resurrect a stale value — consumed at pass start, as before, whether or not
-// the apply phase ends up writing anything.
-func (m *Manager) snapshotForRecovery() []recoverProbe {
+// can run I/O against the copies (safe: no Session field aliases mutable
+// state — same reasoning as snapshotForUpgrade). Each copy retains the
+// on-disk PersistedStatus while the live field is consumed (cleared) at pass
+// start, as before, so a later recovery pass cannot resurrect a stale value.
+//
+// The tmux client is captured under the same lock and returned for the probe
+// phase, so recovery never reads m.tmuxClient unsynchronized. tc is nil when
+// no client is installed; nothing is snapshotted or consumed then, and the
+// caller skips the pass entirely.
+func (m *Manager) snapshotForRecovery() (snaps []Session, tc tmux.Runner) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	probes := make([]recoverProbe, 0, len(m.sessions))
-	for _, session := range m.sessions {
-		fromDisk := session.PersistedStatus
-		session.PersistedStatus = ""
-		probes = append(probes, recoverProbe{snap: *session, fromDisk: fromDisk})
+	if m.tmuxClient == nil {
+		return nil, nil
 	}
-	return probes
+	snaps = make([]Session, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		snap := *session
+		session.PersistedStatus = "" // consumed; the copy keeps it
+		snaps = append(snaps, snap)
+	}
+	return snaps, m.tmuxClient
 }
 
 // decideRecovery runs the tmux probes and the adapter verdict for each
 // snapshot. No lock is held: HasSession/IsPaneDead exec tmux, and the verdict
 // may scan the agent's transcript end to end.
-func (m *Manager) decideRecovery(probes []recoverProbe) []recoverDecision {
-	decisions := make([]recoverDecision, 0, len(probes))
-	for i := range probes {
-		snap := &probes[i].snap
+func (m *Manager) decideRecovery(snaps []Session, tc tmux.Runner) []recoverDecision {
+	decisions := make([]recoverDecision, 0, len(snaps))
+	for i := range snaps {
+		snap := &snaps[i]
 		d := recoverDecision{
-			id:          snap.ID,
-			description: snap.Description,
-			windowName:  snap.TmuxWindowName,
-			fromDisk:    probes[i].fromDisk,
+			id:         snap.ID,
+			windowName: snap.TmuxWindowName,
+			fromDisk:   snap.PersistedStatus,
 		}
 		switch {
 		case snap.TmuxWindowName == "":
 			d.outcome = recoverMarkStopped
-		case !m.tmuxClient.HasSession(snap.TmuxWindowName):
+		case !tc.HasSession(snap.TmuxWindowName):
 			d.outcome = recoverWindowGone
-		case m.tmuxClient.IsPaneDead(snap.TmuxPaneID):
+		case tc.IsPaneDead(snap.TmuxPaneID):
 			d.outcome = recoverPaneDead
 		default:
 			d.outcome = recoverResume
@@ -228,7 +219,7 @@ func (m *Manager) decideRecovery(probes []recoverProbe) []recoverDecision {
 			// verdict keeps the fallback decision applyRecovery computes.
 			// The persisted_status hint is the snapshot-time estimate —
 			// apply recomputes the authoritative one from live state.
-			persisted := resumeStatusSource(snap.Status, probes[i].fromDisk)
+			persisted := resumeStatusSource(snap.Status, snap.PersistedStatus)
 			d.verdict, d.verdictOK = m.recoverStatusVerdict(snap, persisted)
 		}
 		decisions = append(decisions, d)
@@ -278,41 +269,43 @@ func (m *Manager) applyRecovery(decisions []recoverDecision) (saves []Session, m
 			if live.Status != StatusStopped && live.Status != StatusCreating {
 				live.Status = StatusStopped
 				saves = append(saves, *live)
-				debugLog("[RECOVER] Session %s has active status but no tmux session, marked stopped", d.description)
+				debugLog("[RECOVER] Session %s has active status but no tmux session, marked stopped", live.Description)
 			}
 		case recoverWindowGone:
 			live.TmuxWindowName = ""
 			live.Status = StatusStopped
 			saves = append(saves, *live)
-			debugLog("[RECOVER] Session %s inner tmux session gone, marked stopped", d.description)
+			debugLog("[RECOVER] Session %s inner tmux session gone, marked stopped", live.Description)
 		case recoverPaneDead:
 			live.Status = StatusStopped
 			saves = append(saves, *live)
-			debugLog("[RECOVER] Session %s tmux pane dead, kept TmuxWindowName (session preserved)", d.description)
+			debugLog("[RECOVER] Session %s tmux pane dead, kept TmuxWindowName (session preserved)", live.Description)
 		case recoverResume:
-			// The hook-driven status persisted before the restart
-			// (idle/thinking/permission) is the best estimate of the
-			// session's real state; only detail-less states fall back to
-			// Running. Recomputed from live status so a hook that fired
-			// during the probe window still wins over the on-disk value.
-			switch persisted := resumeStatusSource(live.Status, d.fromDisk); persisted {
-			case StatusIdle, StatusThinking, StatusPermission:
-				live.Status = persisted
-			default:
-				live.Status = StatusRunning
-			}
-			// Only Status is applied — see the "recover" contract on
-			// StatusSignal. The verdict was derived at probe time, so it
-			// can override a status a hook set during the probe window;
-			// accepted, since both read the same agent-side data and the
-			// next hook reconverges.
 			if d.verdictOK {
+				// The adapter's verdict wins; only Status is applied — see
+				// the "recover" contract on StatusSignal. It was derived at
+				// probe time, so it can override a status a hook set during
+				// the probe window; accepted, since both read the same
+				// agent-side data and the next hook reconverges.
 				live.Status = d.verdict.Status
+			} else {
+				// Fallback: the hook-driven status persisted before the
+				// restart (idle/thinking/permission) is the best estimate
+				// of the session's real state; only detail-less states fall
+				// back to Running. Recomputed from live status so a hook
+				// that fired during the probe window still wins over the
+				// on-disk value.
+				switch persisted := resumeStatusSource(live.Status, d.fromDisk); persisted {
+				case StatusIdle, StatusThinking, StatusPermission:
+					live.Status = persisted
+				default:
+					live.Status = StatusRunning
+				}
 			}
 			live.LastOutputTime = time.Now()
 			saves = append(saves, *live)
 			monitors = append(monitors, live)
-			debugLog("[RECOVER] Session %s has live inner tmux session, resuming monitoring (status: %s)", d.description, live.Status)
+			debugLog("[RECOVER] Session %s has live inner tmux session, resuming monitoring (status: %s)", live.Description, live.Status)
 		}
 	}
 	return saves, monitors
@@ -688,17 +681,12 @@ func (m *Manager) CreateWithOptions(opts CreateOptions) (result *Session, warnin
 
 	m.mu.Lock()
 
-	// Check for duplicate directories
-	// Skip sessions whose CurrentWorkDir is inside a worktree — they have
-	// "moved away" from their persisted WorkDir and should not block new
-	// sessions for that directory. (IsClaudeWorktreePath is a pure string
-	// check.) The check and the map insert must share one critical section,
-	// or two concurrent creates for the same WorkDir could both pass.
-	for _, s := range m.sessions {
-		if s.WorkDir == opts.WorkDir && !git.IsClaudeWorktreePath(s.CurrentWorkDir) {
-			m.mu.Unlock()
-			return nil, "", fmt.Errorf("session already exists for directory: %s (session: %s)", opts.WorkDir, s.Description)
-		}
+	// Duplicate-directory check. It must share one critical section with the
+	// map insert below, or two concurrent creates for the same WorkDir could
+	// both pass.
+	if s := m.workDirConflictLocked(opts.WorkDir, ""); s != nil {
+		m.mu.Unlock()
+		return nil, "", fmt.Errorf("session already exists for directory: %s (session: %s)", opts.WorkDir, s.Description)
 	}
 
 	// Copy for the unlocked Save below, taken while we still hold the only
@@ -1073,19 +1061,30 @@ func (m *Manager) SetStatusWithError(id string, status Status, errMsg string) {
 	_ = m.store.Save(&saved)
 }
 
+// workDirConflictLocked returns the session already claiming workDir, or nil.
+// Sessions whose CurrentWorkDir is inside a Claude worktree have "moved away"
+// from their persisted WorkDir and do not block it; excludeID exempts the
+// session being edited ("" excludes nothing). Pure string checks, so safe to
+// run under the lock. Caller must hold m.mu.
+func (m *Manager) workDirConflictLocked(workDir, excludeID string) *Session {
+	for _, s := range m.sessions {
+		if s.ID != excludeID && s.WorkDir == workDir && !git.IsClaudeWorktreePath(s.CurrentWorkDir) {
+			return s
+		}
+	}
+	return nil
+}
+
 // SetWorkDir updates the work directory of a session
 // Returns error if the workDir is already in use by another session
 func (m *Manager) SetWorkDir(id string, workDir string) error {
 	m.mu.Lock()
 
-	// Duplicate check (prevents conflicts in async mode).
-	// IsClaudeWorktreePath is a pure string check, so no I/O under the lock.
+	// Duplicate check (prevents conflicts in async mode)
 	if workDir != "" {
-		for _, s := range m.sessions {
-			if s.ID != id && s.WorkDir == workDir && !git.IsClaudeWorktreePath(s.CurrentWorkDir) {
-				m.mu.Unlock()
-				return fmt.Errorf("WorkDir already in use by session %s", s.Description)
-			}
+		if s := m.workDirConflictLocked(workDir, id); s != nil {
+			m.mu.Unlock()
+			return fmt.Errorf("WorkDir already in use by session %s", s.Description)
 		}
 	}
 
@@ -1587,8 +1586,6 @@ func (m *Manager) updateGitBranch(session *Session, currentPath, lastTrackedPath
 	}
 }
 
-// captureOutputTmux polls tmux for process death detection and CWD/branch tracking.
-// Status detection is handled by Claude Code hooks (see HandleHookEvent).
 // isPersistableWorkDir reports whether path can become a session's persisted
 // WorkDir: a git repo/worktree root (project root, not a subdirectory like
 // .claude/workdir/) outside Claude Code's own worktree area.
@@ -1598,6 +1595,20 @@ func (m *Manager) updateGitBranch(session *Session, currentPath, lastTrackedPath
 // state and stays under the lock; only the filesystem half lives here.
 func isPersistableWorkDir(path string) bool {
 	return path != "" && git.IsGitRoot(path) && !git.IsClaudeWorktreePath(path)
+}
+
+// applyCWDLocked records the agent's observed cwd on the session and promotes
+// it to the persisted WorkDir when the caller determined the path is
+// persistable (evaluate isPersistableWorkDir BEFORE taking the lock — it
+// stats the filesystem). Returns whether WorkDir changed, i.e. whether the
+// caller should persist the session. Caller must hold m.mu.
+func applyCWDLocked(s *Session, cwd string, persistable bool) (workDirChanged bool) {
+	s.CurrentWorkDir = cwd
+	if persistable && s.WorkDir != cwd {
+		s.WorkDir = cwd
+		return true
+	}
+	return false
 }
 
 // captureOutputTmux polls a session's tmux pane every 10 seconds: it detects
@@ -1708,12 +1719,7 @@ func (m *Manager) captureOutputTmux(session *Session) {
 				// before taking the lock.
 				persistable := isPersistableWorkDir(currentPath)
 				m.mu.Lock()
-				session.CurrentWorkDir = currentPath
-				workDirChanged := false
-				if persistable && session.WorkDir != currentPath {
-					session.WorkDir = currentPath
-					workDirChanged = true
-				}
+				workDirChanged := applyCWDLocked(session, currentPath, persistable)
 				m.mu.Unlock()
 				if workDirChanged {
 					_ = m.store.Save(session)
@@ -1843,11 +1849,7 @@ func (m *Manager) HandleHookEvent(agentSessionID, jinSessionID, eventName, notif
 	// (project root or worktree root) to prevent drift to subdirectories.
 	cwdChanged := false
 	if cwd != "" {
-		session.CurrentWorkDir = cwd
-		if cwdPersistable && session.WorkDir != cwd {
-			session.WorkDir = cwd
-			cwdChanged = true
-		}
+		cwdChanged = applyCWDLocked(session, cwd, cwdPersistable)
 	}
 
 	// SessionStart bookkeeping is agent-agnostic: any "first hook" observed
