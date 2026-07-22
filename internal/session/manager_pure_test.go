@@ -150,3 +150,34 @@ func TestWorkDirForShell(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPersistableWorkDir(t *testing.T) {
+	gitRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(gitRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git failed: %v", err)
+	}
+	// A git root inside Claude Code's own worktree area: IsGitRoot alone
+	// would accept it, the worktree exclusion must reject it.
+	claudeWT := filepath.Join(gitRoot, ".claude", "worktrees", "wt1")
+	if err := os.MkdirAll(filepath.Join(claudeWT, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir claude worktree failed: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"empty path", "", false},
+		{"non-git dir", t.TempDir(), false},
+		{"git root", gitRoot, true},
+		{"claude worktree", claudeWT, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPersistableWorkDir(tt.path); got != tt.want {
+				t.Errorf("isPersistableWorkDir(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}

@@ -1308,6 +1308,119 @@ func TestManager_RecoverTmuxSessions_NoTmux(t *testing.T) {
 	}
 }
 
+// TestManager_RecoverTmuxSessions_SkipsSessionStartedByThisDaemon verifies
+// the apply-phase StartedAt guard: a non-zero StartedAt means this daemon
+// process started the session itself, so a recovery decision derived from
+// pre-restart observations must not be applied. The probe here reports the
+// window gone — without the guard, recovery would clear TmuxWindowName and
+// stop the freshly started session.
+func TestManager_RecoverTmuxSessions_SkipsSessionStartedByThisDaemon(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	sess := setupLivePaneSession(t, mgr, mock, "%20", "")
+
+	mgr.mu.Lock()
+	windowName := sess.TmuxWindowName
+	sess.Status = StatusRunning
+	sess.StartedAt = time.Now()
+	mgr.mu.Unlock()
+	mock.sessions[windowName] = false // probe would conclude recoverWindowGone
+
+	mgr.RecoverTmuxSessions()
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.Status != StatusRunning {
+		t.Errorf("Status = %q, want untouched %q", got.Status, StatusRunning)
+	}
+	if got.TmuxWindowName != windowName {
+		t.Errorf("TmuxWindowName = %q, want untouched %q", got.TmuxWindowName, windowName)
+	}
+}
+
+// TestManager_RecoverTmuxSessions_KillDuringProbe verifies the apply-phase
+// TmuxWindowName re-validation: a session killed while the unlocked probes
+// run must not be resurrected by the stale "pane alive" observation.
+func TestManager_RecoverTmuxSessions_KillDuringProbe(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	sess := setupLivePaneSession(t, mgr, mock, "%21", StatusThinking)
+
+	mock.onHasSession = func(string) {
+		mock.onHasSession = nil // fire once
+		if err := mgr.Kill(sess.ID); err != nil {
+			t.Errorf("Kill failed: %v", err)
+		}
+	}
+
+	mgr.RecoverTmuxSessions()
+
+	got, ok := mgr.Get(sess.ID)
+	if !ok {
+		t.Fatal("Get returned ok=false")
+	}
+	if got.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q (killed mid-probe)", got.Status, StatusStopped)
+	}
+	if got.TmuxWindowName != "" {
+		t.Errorf("TmuxWindowName = %q, want cleared", got.TmuxWindowName)
+	}
+}
+
+// TestManager_CreateWithOptions_SaveFailure_NotRegistered verifies the
+// compensating delete: when the store write fails, the session must not stay
+// registered, preserving the invariant that a returned session is both
+// registered and persisted.
+func TestManager_CreateWithOptions_SaveFailure_NotRegistered(t *testing.T) {
+	mgr, _, _ := newTestManager(t)
+
+	// Store.Save creates its temp file inside the data dir; removing the
+	// write bit forces the failure.
+	if err := os.Chmod(mgr.store.dataDir, 0o500); err != nil {
+		t.Fatalf("chmod failed: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mgr.store.dataDir, 0o700) })
+
+	_, _, err := mgr.CreateWithOptions(CreateOptions{WorkDir: "/tmp/save-fail"})
+	if err == nil {
+		t.Fatal("expected error when store dir is unwritable")
+	}
+	if n := len(mgr.List()); n != 0 {
+		t.Errorf("got %d registered sessions after failed save, want 0", n)
+	}
+}
+
+// TestManager_ConcurrentRecoveryAndMutators runs recovery against concurrent
+// mutators under -race. No assertions beyond "no race, no panic": the
+// interleavings themselves are the test. Only the recovery goroutine touches
+// the tmux mock (the mock is not synchronized).
+func TestManager_ConcurrentRecoveryAndMutators(t *testing.T) {
+	mgr, mock, _ := newTestManager(t)
+	sess := setupLivePaneSession(t, mgr, mock, "%30", StatusIdle)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mgr.RecoverTmuxSessions()
+	}()
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			switch n % 3 {
+			case 0:
+				mgr.SetStatusWithError(sess.ID, StatusThinking, "")
+			case 1:
+				_ = mgr.SetDescription(sess.ID, fmt.Sprintf("desc-%d", n))
+			case 2:
+				_ = mgr.SetWorkDir(sess.ID, "")
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
 // ---------------------------------------------------------------------------
 // FindByAgentSessionID tests
 // ---------------------------------------------------------------------------
