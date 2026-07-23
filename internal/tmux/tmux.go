@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -127,10 +128,24 @@ func NewClientWithSocketPath(socketPath string) (*Client, error) {
 	return &Client{tmuxPath: path, socketPath: socketPath}, nil
 }
 
-// NewClient creates a new tmux client using the default SocketName.
+// NewClient creates a new tmux client using the default socket name resolved
+// by DefaultSocketName (JIN_TMUX_SOCKET → SocketName).
 // Returns error if tmux is not found.
 func NewClient() (*Client, error) {
-	return NewClientWithSocket(SocketName)
+	return NewClientWithSocket(DefaultSocketName())
+}
+
+// DefaultSocketName returns the socket name NewClient targets. When the
+// JIN_TMUX_SOCKET environment variable is a non-empty value it wins, otherwise
+// the built-in SocketName ("jin") is returned. Exposed so callers that build a
+// Client through other paths (e.g. the session Manager's lazy fallback in
+// ensureTmuxClient) apply the exact same resolution as NewClient — used by the
+// e2e suite to redirect every implicit tmux access to a per-run socket.
+func DefaultSocketName() string {
+	if v := os.Getenv("JIN_TMUX_SOCKET"); v != "" {
+		return v
+	}
+	return SocketName
 }
 
 // NewMgrClient creates a tmux client for the outer layout manager socket.

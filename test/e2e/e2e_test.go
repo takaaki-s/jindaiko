@@ -3,10 +3,14 @@
 package e2e
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -29,9 +33,38 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// isolateTmuxSocket points every implicit tmux.NewClient() call and the
+// Manager's lazy ensureTmuxClient at a per-test socket via JIN_TMUX_SOCKET,
+// then registers a t.Cleanup that kills the resulting server and removes the
+// socket file. Prevents e2e cleanup from touching the shared "-L jin" server
+// the user (or another daemon) may be attached to.
+func isolateTmuxSocket(t *testing.T) string {
+	t.Helper()
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	name := "jin-test-" + hex.EncodeToString(b[:])
+	t.Setenv("JIN_TMUX_SOCKET", name)
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-L", name, "kill-server").Run()
+		// tmux 3.x does not unlink its socket file on kill-server; drop it
+		// ourselves so stale sockets do not accumulate under
+		// $TMUX_TMPDIR/tmux-$UID/ across many test runs.
+		tmpdir := os.Getenv("TMUX_TMPDIR")
+		if tmpdir == "" {
+			tmpdir = "/tmp"
+		}
+		_ = os.Remove(filepath.Join(tmpdir, fmt.Sprintf("tmux-%d", os.Getuid()), name))
+	})
+	return name
+}
+
 // setupE2E creates a daemon server with a real session manager and returns a client.
 func setupE2E(t *testing.T) *daemon.Client {
 	t.Helper()
+
+	isolateTmuxSocket(t)
 
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "e2e.sock")
