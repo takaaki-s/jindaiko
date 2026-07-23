@@ -2447,6 +2447,17 @@ func (m *Manager) PreCheckDelete(id string, removeWorktree, forceRemoveWorktree 
 		return req, nil
 	}
 
+	// Directory already gone (manual `rm -rf`, prior partial delete):
+	// skip the worktree + dirty probes and let DeleteFinalize's
+	// removeGitWorktree short-circuit on its own os.IsNotExist branch. The
+	// old sync Delete relied on that idempotency to succeed here; a
+	// synchronous ErrNotWorktree from IsGitWorktreeDir would be a
+	// regression against callers that reasonably expect delete-with-missing
+	// -worktree to still drop the session.
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		return req, nil
+	}
+
 	if !git.IsGitWorktreeDir(workDir) {
 		return DeleteRequest{}, ErrNotWorktree
 	}

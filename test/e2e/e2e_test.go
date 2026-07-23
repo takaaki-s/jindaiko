@@ -134,9 +134,9 @@ func TestE2E_SessionLifecycle(t *testing.T) {
 	if info.Description != "e2e-test" {
 		t.Errorf("Description: got %q, want %q", info.Description, "e2e-test")
 	}
-	if info.Status != session.StatusStopped {
-		t.Errorf("Status: got %q, want %q", info.Status, session.StatusStopped)
-	}
+	// New returns StatusCreating immediately; ProvisionAsync transitions to
+	// StatusStopped when Start=false.
+	waitForStatus(t, client, info.ID, session.StatusStopped, 5*time.Second)
 
 	// List
 	sessions, err := client.List()
@@ -147,18 +147,11 @@ func TestE2E_SessionLifecycle(t *testing.T) {
 		t.Fatalf("expected 1 session, got %d", len(sessions))
 	}
 
-	// Delete
+	// Delete returns before DeleteFinalize completes; wait for the record.
 	if err := client.Delete(info.ID, false, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-
-	sessions, err = client.List()
-	if err != nil {
-		t.Fatalf("List after delete: %v", err)
-	}
-	if len(sessions) != 0 {
-		t.Errorf("expected 0 sessions after delete, got %d", len(sessions))
-	}
+	waitForSessionGone(t, client, info.ID, 5*time.Second)
 }
 
 func TestE2E_HookEventFlow(t *testing.T) {

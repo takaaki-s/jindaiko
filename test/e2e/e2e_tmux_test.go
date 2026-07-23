@@ -92,6 +92,31 @@ func waitForStatus(t *testing.T, client *daemon.Client, sessionID string, want s
 	t.Fatalf("timed out: session %s not found in list", sessionID)
 }
 
+// waitForSessionGone polls client.List until the session no longer appears or times out.
+// Needed because Delete now returns before the async DeleteFinalize goroutine finishes.
+func waitForSessionGone(t *testing.T, client *daemon.Client, sessionID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		sessions, err := client.List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		found := false
+		for _, s := range sessions {
+			if s.ID == sessionID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for session %s to disappear from list", sessionID)
+}
+
 // --- tests ---
 
 func TestE2E_TmuxSessionCreation(t *testing.T) {
@@ -249,10 +274,12 @@ func TestE2E_SessionDataPersistence(t *testing.T) {
 		t.Errorf("persisted work_dir = %v, want %q", persisted["work_dir"], workDir)
 	}
 
-	// Delete should remove the file
+	// Delete returns before DeleteFinalize removes the file; wait for the
+	// record to disappear from List before asserting the file is gone.
 	if err := client.Delete(info.ID, false, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
+	waitForSessionGone(t, client, info.ID, 5*time.Second)
 	if _, err := os.Stat(jsonPath); err == nil {
 		t.Error("session JSON file should be removed after Delete")
 	}
@@ -477,19 +504,12 @@ func TestE2E_DeleteWithWorktreeCleanup(t *testing.T) {
 		t.Fatalf("NewWithOptions: %v", err)
 	}
 
-	// Delete with worktree removal
+	// Delete returns before DeleteFinalize removes the worktree; wait for
+	// the record to disappear before asserting the directory is gone.
 	if err := client.Delete(info.ID, true, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-
-	// Session should be gone
-	sessions, err := client.List()
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(sessions) != 0 {
-		t.Errorf("expected 0 sessions, got %d", len(sessions))
-	}
+	waitForSessionGone(t, client, info.ID, 5*time.Second)
 
 	// Worktree directory should be removed
 	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
@@ -570,19 +590,12 @@ func TestE2E_DeleteWorktreeDirty(t *testing.T) {
 		t.Error("worktree directory should still exist after dirty rejection")
 	}
 
-	// Force delete
+	// Force delete returns before DeleteFinalize completes; wait for the
+	// record to disappear before asserting the worktree is gone.
 	if err := client.Delete(info.ID, true, true); err != nil {
 		t.Fatalf("force Delete: %v", err)
 	}
-
-	// Session should be gone
-	sessions, err = client.List()
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(sessions) != 0 {
-		t.Errorf("expected 0 sessions after force delete, got %d", len(sessions))
-	}
+	waitForSessionGone(t, client, info.ID, 5*time.Second)
 
 	// Worktree should be removed
 	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
@@ -611,13 +624,5 @@ func TestE2E_DeleteWorktreeAlreadyRemoved(t *testing.T) {
 	if err := client.Delete(info.ID, true, false); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-
-	// Session should be gone
-	sessions, err := client.List()
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(sessions) != 0 {
-		t.Errorf("expected 0 sessions, got %d", len(sessions))
-	}
+	waitForSessionGone(t, client, info.ID, 5*time.Second)
 }
