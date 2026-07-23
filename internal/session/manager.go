@@ -353,9 +353,12 @@ func (m *Manager) recoverStatusVerdict(session *Session, persisted Status) (Stat
 //
 // Lock order: tmuxInitMu → m.mu. Nothing takes them in reverse.
 //
-// Uses tmux.SocketName ("jin") in production; tests override via
-// SetTmuxSocketName so an auto-init on the shared socket doesn't leak a
-// server the next daemon start would inherit env from.
+// Uses tmux.DefaultSocketName() in production — JIN_TMUX_SOCKET wins over the
+// built-in "jin" so the e2e suite can redirect implicit tmux access; tests can
+// also override at the Manager level via SetTmuxSocketName, which takes
+// precedence over the env resolution when set. Either way, the auto-init must
+// not leak a server on the shared socket that the next daemon start would
+// inherit env from.
 func (m *Manager) ensureTmuxClient() {
 	m.tmuxInitMu.Lock()
 	defer m.tmuxInitMu.Unlock()
@@ -368,7 +371,7 @@ func (m *Manager) ensureTmuxClient() {
 		return
 	}
 	if socketName == "" {
-		socketName = tmux.SocketName
+		socketName = tmux.DefaultSocketName()
 	}
 	// Probes the PATH for the tmux binary — I/O, so outside m.mu.
 	tc, err := tmux.NewClientWithSocket(socketName)

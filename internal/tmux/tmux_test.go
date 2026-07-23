@@ -159,6 +159,23 @@ func TestBaseArgs(t *testing.T) {
 	})
 }
 
+func TestDefaultSocketName(t *testing.T) {
+	// An empty env var is treated as unset by DefaultSocketName, matching
+	// what os.Getenv returns for an actually-unset variable.
+	t.Run("empty falls back to SocketName", func(t *testing.T) {
+		t.Setenv("JIN_TMUX_SOCKET", "")
+		if got := DefaultSocketName(); got != SocketName {
+			t.Errorf("DefaultSocketName() with env empty = %q, want %q", got, SocketName)
+		}
+	})
+	t.Run("env value wins", func(t *testing.T) {
+		t.Setenv("JIN_TMUX_SOCKET", "jin-test-abcd1234")
+		if got := DefaultSocketName(); got != "jin-test-abcd1234" {
+			t.Errorf("DefaultSocketName() with env set = %q, want %q", got, "jin-test-abcd1234")
+		}
+	})
+}
+
 func TestNewClientWithSocket_NoTmux(t *testing.T) {
 	origPath := os.Getenv("PATH")
 	t.Cleanup(func() {

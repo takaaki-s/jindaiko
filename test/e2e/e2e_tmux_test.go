@@ -26,6 +26,8 @@ import (
 func setupE2EWithDataDir(t *testing.T, sessionsDir, configDir string) (*daemon.Client, *daemon.Server) {
 	t.Helper()
 
+	isolateTmuxSocket(t)
+
 	socketPath := filepath.Join(t.TempDir(), "e2e-tmux.sock")
 
 	server, err := daemon.NewServer(socketPath, sessionsDir, configDir, configDir)
@@ -64,10 +66,17 @@ func hasTmuxSession(name string) bool {
 	return tc.HasSession(name)
 }
 
-// cleanupTmuxSessions kills all sessions on the jin tmux socket.
+// cleanupTmuxSessions kills all sessions on the per-test tmux socket named in
+// JIN_TMUX_SOCKET by isolateTmuxSocket. The setup helper is the sole source of
+// truth for the socket name, so this must NEVER fall back to tmux.SocketName —
+// doing so would kill the shared "-L jin" server the user is attached to.
 func cleanupTmuxSessions(t *testing.T) {
 	t.Helper()
-	_ = exec.Command("tmux", "-L", tmux.SocketName, "kill-server").Run()
+	name := os.Getenv("JIN_TMUX_SOCKET")
+	if name == "" {
+		t.Fatalf("cleanupTmuxSessions: JIN_TMUX_SOCKET is unset — call setupE2E/setupE2EWithDataDir before cleanup")
+	}
+	_ = exec.Command("tmux", "-L", name, "kill-server").Run()
 }
 
 // waitForStatus polls client.List until the session reaches the expected status or times out.
