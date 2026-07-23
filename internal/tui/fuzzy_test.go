@@ -10,7 +10,7 @@ import (
 
 // TestFuzzyFilter_EmptyQuery_ReturnsAllInOrder locks in the "empty query =
 // pass-through" contract. sahilm/fuzzy.Find returns zero results for an
-// empty pattern, so both palette and session filter rely on FuzzyFilter to
+// empty pattern, so both palette and switch-session picker rely on FuzzyFilter to
 // short-circuit and preserve the caller-provided order.
 func TestFuzzyFilter_EmptyQuery_ReturnsAllInOrder(t *testing.T) {
 	targets := []string{"alpha", "beta", "gamma"}
@@ -141,7 +141,7 @@ func TestRenderMatchedLine_FragmentedHits(t *testing.T) {
 }
 
 // TestFuzzyMatch_ShapeIsStable pins down the returned struct fields so
-// downstream callers (palette / session filter) can rely on the shape.
+// downstream callers (palette / switch-session picker) can rely on the shape.
 func TestFuzzyMatch_ShapeIsStable(t *testing.T) {
 	m := FuzzyMatch{Index: 3, MatchedIndexes: []int{0, 2, 4}}
 	if m.Index != 3 || !reflect.DeepEqual(m.MatchedIndexes, []int{0, 2, 4}) {

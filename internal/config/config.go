@@ -757,7 +757,7 @@ func (m *Manager) GetPluginKeybindings() map[string]map[string][]string {
 }
 
 // GetSessionFilterKeys returns the tmux bind-key strings for the outer-tmux
-// session filter popup trigger. Same nil ↔ empty-slice semantics as
+// switch-session popup trigger. Same nil ↔ empty-slice semantics as
 // GetActionPanelKeys. Sourced from the keybindings.search field (repurposed
 // from the removed inline substring filter into the popup launcher).
 func (m *Manager) GetSessionFilterKeys() []string {

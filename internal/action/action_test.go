@@ -15,7 +15,7 @@ func TestCoreActions_LabelStable(t *testing.T) {
 		IDRefresh:       "refresh list",
 		IDVscode:        "open in vscode",
 		IDHelp:          "shortcuts help",
-		IDSessionFilter: "session filter",
+		IDSessionFilter: "switch session",
 		IDTogglePane:    "toggle sidebar",
 	}
 

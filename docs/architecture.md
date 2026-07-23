@@ -30,7 +30,7 @@ User
                                                    claude / claude --resume
 ```
 
-## Session Filter Popup
+## Switch Session Popup
 
 Fuzzy session picker, launched as a tmux popup — same shape as the action
 palette (`jin action-popup`, see `cmd/jin/cmd/tui.go`'s
@@ -62,7 +62,7 @@ or persisted state — `daemon.Client.List()` is the same call the parent
 TUI's own polling already uses. `JIN_FOCUS_SESSION` shares the
 `focusSessionID → switchToSession` consume path already used by
 `JIN_CREATED_SESSION` / `JIN_NOTIFY_SESSION` (`internal/tui/model.go`); see
-[tui-guide.md](tui-guide.md#session-filter-popup) for keybindings and the
+[tui-guide.md](tui-guide.md#switch-session-popup) for keybindings and the
 matched-field list.
 
 ## Popup Size Resolution

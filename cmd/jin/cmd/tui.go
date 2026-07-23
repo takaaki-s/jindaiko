@@ -97,7 +97,7 @@ func applyActionPanelBinding(tc actionPanelBinder, configMgr *config.Manager, se
 }
 
 // applySessionFilterBinding wires the outer tmux root bindings that launch
-// the session filter popup. Idempotent: re-issuing bind-key overwrites the
+// the switch-session popup. Idempotent: re-issuing bind-key overwrites the
 // prior mapping. No-op when configMgr is nil, selfBin is empty, or the
 // user set Search to an explicit empty slice.
 func applySessionFilterBinding(tc actionPanelBinder, configMgr *config.Manager, selfBin string) {
@@ -114,7 +114,7 @@ func applySessionFilterBinding(tc actionPanelBinder, configMgr *config.Manager, 
 			"display-popup",
 			"-w", width,
 			"-h", height,
-			"-T", " Session Filter ",
+			"-T", " Switch Session ",
 			"-E", popupCmd,
 		)
 	}

@@ -38,7 +38,7 @@ jin ui --agent codex   # transient default; ends when TUI exits
 - **TUI**: Interactive terminal UI for listing, monitoring, and operating sessions
 - **Attach/Detach**: Quickly switch between sessions (`Ctrl+]` to detach)
 - **Real-time status tracking**: Live display of working directory, branch, and latest message
-- **Session filter & Paging**: `/` opens a fuzzy-search popup over session name, directory, branch, fleet, and agent kind
+- **Switch session & Paging**: `/` opens a fuzzy-search popup over session name, directory, branch, fleet, and agent kind
 - **Plugins**: Run your own shell-executable plugins on session status changes or on demand — for example, desktop notifications via `jin plugin install jind-ai-notifier` (registry name; git URLs and local `--link` paths are also supported)
 
 ## Installation
@@ -301,7 +301,7 @@ keybindings:
   kill: ["x"]
   delete: ["d"]
   refresh: ["r"]
-  search: ["M-f"]         # opens the session filter popup (fuzzy search).
+  search: ["M-f"]         # opens the switch-session picker (fuzzy search).
                           # Default M-f (Alt+f). Must be modifier-prefixed —
                           # a bare letter is consumed by the display pane and
                           # never reaches the outer tmux binding.
@@ -349,9 +349,11 @@ keybindings:
 # Optional: popup sizes (percent, int 1-100). Every entry is optional;
 # omitted popups keep their default (create/session_filter/action = 70-80).
 # See docs/tui-guide.md#popup-sizes for the full table and delivery paths.
+# Note: the `session_filter` key sizes the switch-session picker (see the
+# "Outer tmux — switch session" section above) — kept for backward compat.
 popups:
   create:         { width: 80, height: 80 }
-  session_filter: { width: 70, height: 70 }
+  session_filter: { width: 70, height: 70 }  # switch-session picker
   help:           { width: 60, height: 60 }
   action:         { width: 70, height: 70 }
   plugin_default: { width: 70, height: 70 }
@@ -416,7 +418,7 @@ Worktree creation itself is **offline** — the new branch is cut from your loca
 | `↓/j` | Move down |
 | `←/h` | Previous page |
 | `→/l` | Next page |
-| `M-f` | Open session filter (fuzzy popup) — see [Outer tmux — session filter](#outer-tmux--session-filter) |
+| `M-f` | Open switch-session picker (fuzzy popup) — see [Outer tmux — switch session](#outer-tmux--switch-session) |
 | `Enter` | Attach to session |
 | `n` | Create new session |
 | `x` | Kill session |
@@ -467,10 +469,10 @@ Keys must include a modifier (`M-`/`C-`) — a bare letter would be consumed as
 normal input by the agent in the right pane instead of reaching the outer
 tmux binding.
 
-### Outer tmux — session filter
+### Outer tmux — switch session
 
-`M-f` (Alt+f, default) opens the session filter, a fuzzy-search popup for
-jumping straight to a session: type a few characters and press `Enter` to
+`M-f` (Alt+f, default) opens the switch-session picker, a fuzzy-search popup
+for jumping straight to a session: type a few characters and press `Enter` to
 attach immediately. It's bound the same way as the action palette above — at
 the outer tmux (`jin-mgr`) root key table, so it fires from either pane.
 Matched fields are session description, working directory, current working
@@ -482,7 +484,7 @@ score). `Esc` closes the popup without changing anything; `↑`/`↓` or
 The default changed from `/` to `M-f` because a bare-letter binding at the
 outer tmux root also swallows `/` typed in the display pane, breaking agent
 slash-commands (Claude Code `/help`, less/vim `/search`, etc.). The action
-palette entry ("session filter") also invokes this popup, so you can reach
+palette entry ("switch session") also invokes this popup, so you can reach
 it without a shortcut at all.
 
 Override or disable the trigger the same way as `action_panel`:

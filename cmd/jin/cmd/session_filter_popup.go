@@ -19,7 +19,7 @@ type envWriter interface {
 
 var sessionFilterPopupCmd = &cobra.Command{
 	Use:    "session-filter-popup",
-	Short:  "Internal: session filter picker for tmux popup",
+	Short:  "Internal: switch-session picker for tmux popup",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if tc, err := tmux.NewMgrClient(); err == nil {

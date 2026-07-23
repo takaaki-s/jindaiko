@@ -3,7 +3,7 @@
 ## Architecture
 
 BubbleTea (Elm Architecture) based TUI.
-The main screen (session list) is handled by `model.go`, while the create form, help, and session filter are launched as independent processes via tmux popup.
+The main screen (session list) is handled by `model.go`, while the create form, help, and switch-session picker are launched as independent processes via tmux popup.
 
 ```
 internal/tui/
@@ -11,7 +11,7 @@ internal/tui/
 ├─ createform.go          ... Session create form (for popup, ~540 lines)
 ├─ dirpicker.go           ... Directory picker (used within createform, ~730 lines)
 ├─ helpview.go            ... Help view (for popup, ~100 lines)
-├─ session_filter_model.go ... Session filter picker (for popup, sahilm/fuzzy)
+├─ session_filter_model.go ... Switch-session picker (for popup, sahilm/fuzzy)
 └─ styles.go              ... lipgloss style definitions (Tokyo Night color scheme)
 
 cmd/jin/cmd/
@@ -62,7 +62,7 @@ func (m Model) View() string {
 
 - **Create form**: `CreateFormModel` in `createform.go` (WorkDir → Agent → Fleet → Worktree; Agent step is skipped when only one adapter is registered)
 - **Help**: `HelpModel` in `helpview.go` (keybind list)
-- **Session filter**: `SessionFilterModel` in `session_filter_model.go` (fuzzy session picker, see [Session Filter Popup](#session-filter-popup) below)
+- **Switch session**: `SessionFilterModel` in `session_filter_model.go` (fuzzy session picker, see [Switch Session Popup](#switch-session-popup) below)
 
 After popup completion, core popups return results to the parent TUI via environment variables (`JIN_CREATED_SESSION`, `JIN_FOCUS_SESSION`). `JIN_NOTIFY_SESSION` is set by `jin session focus` — invoked from external plugins such as `jind-ai-notifier` — and consumed via the same env-tick polling path. The parent TUI detects them during tickMsg polling.
 
@@ -88,7 +88,7 @@ Default values are defined in `config.DefaultKeybindings()`.
 Users can customize them in the `keybindings` section of `~/.config/jind-ai/config.yaml` (or wherever `$XDG_CONFIG_HOME/jind-ai/config.yaml` resolves to).
 `action_panel` (default `M-p`) and `search` (default `M-f`) are two more
 outer-tmux root bindings, same shape as `toggle_pane` below — see
-[Action Palette](#action-palette) and [Session Filter Popup](#session-filter-popup).
+[Action Palette](#action-palette) and [Switch Session Popup](#switch-session-popup).
 
 ### Outer tmux — sidebar toggle
 
@@ -118,10 +118,10 @@ intentional.
 
 The action palette is a searchable popup that unifies every action a user
 might want to trigger from the TUI: the 8 built-in actions (new / kill /
-delete / refresh / vscode / help / session filter / toggle sidebar) plus
+delete / refresh / vscode / help / switch session / toggle sidebar) plus
 any `plugin:*` action from installed plugins, all in one
 fuzzy-searchable list (via [sahilm/fuzzy](https://github.com/sahilm/fuzzy),
-same engine as the session filter popup — matched runes are underlined in
+same engine as the switch-session picker — matched runes are underlined in
 the label column). Like `toggle_pane`, it's bound at the outer tmux
 (`jin-mgr`) root key table, so it can be launched from either the session
 list (left) or an attached agent (right) pane.
@@ -139,16 +139,16 @@ keybindings:
   # action_panel: []       # disable entirely (no bind-key issued)
 ```
 
-## Session Filter Popup
+## Switch Session Popup
 
-The session filter is a fuzzy-search popup for jumping straight to a
+The switch-session picker is a fuzzy-search popup for jumping straight to a
 session: press `M-f` (default, configurable via `keybindings.search`), type
 a few characters, and hit `Enter` to attach. It replaced the old inline
 substring filter that used to live directly in the session list — like
 `action_panel`, it's bound at the outer tmux (`jin-mgr`) root key table, so
 `M-f` opens the popup from either the session list (left) or an attached
 agent (right) pane, not just from the list itself. It is also reachable via
-the action palette (`M-p` → "session filter"), so a shortcut isn't required.
+the action palette (`M-p` → "switch session"), so a shortcut isn't required.
 
 The default changed from `/` to `M-f` (Alt+f) because a bare-letter binding
 at the outer tmux root also captures `/` typed in the display pane, breaking
@@ -291,7 +291,7 @@ Defaults:
 | Popup name       | Width | Height | Trigger                    |
 |------------------|-------|--------|----------------------------|
 | `create`         | 80    | 80     | `keybindings.new`          |
-| `session_filter` | 70    | 70     | `keybindings.search`       |
+| `session_filter` | 70    | 70     | `keybindings.search`       | <!-- switch-session picker; key name kept for backward compat -->
 | `help`           | 60    | 60     | `keybindings.help`         |
 | `action`         | 70    | 70     | `keybindings.action_panel` |
 | `plugin_default` | 70    | 70     | Plugin `jin pane popup --here` fallback |

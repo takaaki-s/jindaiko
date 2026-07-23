@@ -286,14 +286,14 @@ func TestPalette_FuzzyMatchedIndexesPopulated(t *testing.T) {
 // TestPalette_DescriptionMatchFiltersToLabelHighlights guards the
 // "haystack includes description, highlights only span label runes"
 // invariant. Description contributes to matching (so palette can find
-// "Fuzzy-filter and switch to a session" via 'fuzzy') but description-
+// "Fuzzy-search sessions and switch to one" via 'fuzzy') but description-
 // region hit indices must not leak into the label column highlights.
 func TestPalette_DescriptionMatchFiltersToLabelHighlights(t *testing.T) {
 	core := []action.Action{
 		{
 			ID:          "core:custom",
 			Kind:        action.KindCore,
-			Label:       "session filter",
+			Label:       "switch session",
 			Description: "fuzzy-search sessions",
 			Shortcut:    "M-f",
 		},

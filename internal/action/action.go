@@ -100,7 +100,7 @@ func CoreActions(kb KeyBindings) []Action {
 		{ID: IDRefresh, Kind: KindCore, Label: "refresh list", Shortcut: first(kb.Refresh)},
 		{ID: IDVscode, Kind: KindCore, Label: "open in vscode", Shortcut: first(kb.Vscode), NeedsSession: true},
 		{ID: IDHelp, Kind: KindCore, Label: "shortcuts help", Shortcut: first(kb.Help)},
-		{ID: IDSessionFilter, Kind: KindCore, Label: "session filter", Description: "Fuzzy-filter and switch to a session", Shortcut: first(kb.Search)},
+		{ID: IDSessionFilter, Kind: KindCore, Label: "switch session", Description: "Fuzzy-search sessions and switch to one", Shortcut: first(kb.Search)},
 		{ID: IDTogglePane, Kind: KindCore, Label: "toggle sidebar", Shortcut: first(kb.TogglePane)},
 	}
 }

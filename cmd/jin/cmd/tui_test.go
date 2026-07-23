@@ -475,7 +475,7 @@ func TestApplySessionFilterBinding_BindsAllKeys(t *testing.T) {
 	yaml := "keybindings:\n  search: [\"/\"]\n"
 	applySessionFilterBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
 	want := [][]string{
-		{"/", "display-popup", "-w", "70%", "-h", "70%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
+		{"/", "display-popup", "-w", "70%", "-h", "70%", "-T", " Switch Session ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
@@ -487,7 +487,7 @@ func TestApplySessionFilterBinding_UsesConfigSize(t *testing.T) {
 	yaml := "keybindings:\n  search: [\"/\"]\npopups:\n  session_filter: { width: 90, height: 90 }\n"
 	applySessionFilterBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
 	want := [][]string{
-		{"/", "display-popup", "-w", "90%", "-h", "90%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
+		{"/", "display-popup", "-w", "90%", "-h", "90%", "-T", " Switch Session ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)
@@ -515,7 +515,7 @@ func TestApplySessionFilterBinding_EmptyKeySkip(t *testing.T) {
 	yaml := "keybindings:\n  search: [\"\", \"ctrl+p\"]\n"
 	applySessionFilterBinding(fb, mgrWithYAML(t, yaml), "/usr/local/bin/jin")
 	want := [][]string{
-		{"C-p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Session Filter ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
+		{"C-p", "display-popup", "-w", "70%", "-h", "70%", "-T", " Switch Session ", "-E", "'/usr/local/bin/jin' session-filter-popup"},
 	}
 	if !reflect.DeepEqual(fb.calls, want) {
 		t.Errorf("BindKey calls mismatch\n got: %v\nwant: %v", fb.calls, want)

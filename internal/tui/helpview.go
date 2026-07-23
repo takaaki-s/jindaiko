@@ -29,7 +29,7 @@ type HelpModel struct {
 }
 
 // NewHelpModel creates a new HelpModel with the given KeyMap and outer-tmux
-// binding hints (detach, action panel, session filter popup). pluginHints
+// binding hints (detach, action panel, switch-session popup). pluginHints
 // lists per-plugin shortcuts; pass nil / empty when no plugin bindings are
 // configured — the Plugins section is then omitted entirely.
 func NewHelpModel(keys KeyMap, detachKeyHint, actionPanelKeyHint, sessionFilterKeyHint string, pluginHints []PluginBindingHint) HelpModel {
@@ -95,7 +95,7 @@ func (m HelpModel) View() string {
 		writeShortcut(&b, keyStyle, descStyle, m.actionPanelKeyHint, "open action palette")
 	}
 	if m.sessionFilterKeyHint != "" {
-		writeShortcut(&b, keyStyle, descStyle, m.sessionFilterKeyHint, "session filter (fuzzy)")
+		writeShortcut(&b, keyStyle, descStyle, m.sessionFilterKeyHint, "switch session (fuzzy)")
 	}
 	b.WriteString("\n")
 

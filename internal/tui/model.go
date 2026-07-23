@@ -890,12 +890,12 @@ func (m Model) handleVscode() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSessionFilter opens the session filter popup — the same popup
+// handleSessionFilter opens the switch-session popup — the same popup
 // bound at the outer-tmux root key table via keybindings.search. Wired
 // here so the action palette can launch it without depending on the
 // tmux root binding being set (or on the user's default key).
 func (m Model) handleSessionFilter() (tea.Model, tea.Cmd) {
-	m.openPopup(config.PopupSessionFilter, " Session Filter ")
+	m.openPopup(config.PopupSessionFilter, " Switch Session ")
 	return m, nil
 }
 

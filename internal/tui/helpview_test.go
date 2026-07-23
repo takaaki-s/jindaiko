@@ -124,13 +124,13 @@ func TestHelpModel_SessionFilterLine(t *testing.T) {
 	keys := NewKeyMap(cfg)
 
 	withHint := NewHelpModel(keys, "Ctrl+]", "M-p", "/", nil)
-	if !strings.Contains(withHint.View(), "session filter") {
-		t.Error("View() with sessionFilterKeyHint set should contain \"session filter\"")
+	if !strings.Contains(withHint.View(), "switch session") {
+		t.Error("View() with sessionFilterKeyHint set should contain \"switch session\"")
 	}
 
 	withoutHint := NewHelpModel(keys, "Ctrl+]", "M-p", "", nil)
-	if strings.Contains(withoutHint.View(), "session filter") {
-		t.Error("View() with empty sessionFilterKeyHint should not contain \"session filter\"")
+	if strings.Contains(withoutHint.View(), "switch session") {
+		t.Error("View() with empty sessionFilterKeyHint should not contain \"switch session\"")
 	}
 }
 

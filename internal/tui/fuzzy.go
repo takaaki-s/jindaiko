@@ -19,8 +19,8 @@ type FuzzyMatch struct {
 // FuzzyFilter runs sahilm/fuzzy.Find over targets and returns index +
 // matched-rune positions per hit. An empty query short-circuits to all
 // targets in their original order (MatchedIndexes nil) — this preserves
-// the "no filter typed" ordering that palette and session filter both
-// expect, which sahilm/fuzzy would otherwise report as zero results.
+// the "no filter typed" ordering that palette and switch-session picker
+// both expect, which sahilm/fuzzy would otherwise report as zero results.
 func FuzzyFilter(query string, targets []string) []FuzzyMatch {
 	q := strings.TrimSpace(query)
 	if q == "" {
@@ -65,7 +65,7 @@ func RenderMatchedLine(target []rune, matched []int, maxWidth int, style lipglos
 		return ""
 	}
 	// Truncate rune-wise. maxWidth here is a display width but callers
-	// (palette label column, session filter row) pass mostly-ASCII targets;
+	// (palette label column, switch-session row) pass mostly-ASCII targets;
 	// for the popup a rune-count fallback is close enough and keeps the
 	// highlight index math simple. If East-Asian descriptions become
 	// common we can revisit.

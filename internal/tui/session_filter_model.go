@@ -11,8 +11,13 @@ import (
 )
 
 // SessionFilterModel is the tmux-popup Bubble Tea model that renders the
-// session filter picker: fuzzy-filtered session list, with the selected ID
+// switch-session picker: fuzzy-filtered session list, with the selected ID
 // exported via Selected() for the caller to write to JIN_FOCUS_SESSION.
+//
+// The "SessionFilter" name is kept for backward compatibility with the
+// `popups.session_filter` config key and the `session-filter-popup` cobra
+// subcommand — see the user-facing name "switch session" in README and
+// helpview for what this popup is called in the UI.
 type SessionFilterModel struct {
 	// Source data
 	sessions []session.Info
@@ -200,7 +205,7 @@ func (m SessionFilterModel) View() string {
 	matchStyle := lipgloss.NewStyle().Underline(true).Foreground(primaryColor)
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Session Filter"))
+	b.WriteString(titleStyle.Render("Switch Session"))
 	b.WriteString("\n\n")
 
 	if len(m.sessions) == 0 {

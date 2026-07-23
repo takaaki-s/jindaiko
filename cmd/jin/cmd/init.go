@@ -22,7 +22,7 @@ keybindings:
   kill: ["x"]
   delete: ["d"]
   refresh: ["r"]
-  # search: keys that open the session filter popup (fuzzy search).
+  # search: keys that open the switch-session picker (fuzzy search).
   # Default is M-f (Alt+f); must be modifier-prefixed to avoid stealing
   # input from the display pane. Use ["/"] to restore the old bare-slash
   # binding (breaks agent slash-commands / vim-like search in the display pane).
