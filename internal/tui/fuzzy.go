@@ -124,3 +124,79 @@ func RenderMatchedLine(target []rune, matched []int, maxWidth int, style lipglos
 	}
 	return b.String()
 }
+
+// RenderMatchedSegment is a companion to RenderMatchedLine for callers that
+// paint per-piece with a base style (e.g. the switch-session card, whose
+// dir/branch/kind columns each get a different color). matched carries the
+// caller's haystack-wide match indexes; matchOffset is where this segment
+// starts in that haystack. Only indexes in [matchOffset, matchOffset+len(target))
+// participate, rebased to segment-local rune positions on the fly — no
+// allocation per segment (compare the removed localMatched helper).
+//
+// Plain runs render under base; hit runs render under base.Underline(true) so
+// the fuzzy hint composes with the segment color instead of clashing with a
+// fixed highlight foreground. Truncation math mirrors RenderMatchedLine.
+func RenderMatchedSegment(target []rune, matched []int, matchOffset, maxWidth int, base lipgloss.Style) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	visible := target
+	truncated := false
+	if len(visible) > maxWidth {
+		if maxWidth > 3 {
+			visible = visible[:maxWidth-3]
+			truncated = true
+		} else {
+			visible = visible[:maxWidth]
+		}
+	}
+	// Advance j to the first haystack index that could land inside this
+	// segment (matched is sorted). matchEnd caps the window on the other side.
+	matchEnd := matchOffset + len(visible)
+	j := 0
+	for j < len(matched) && matched[j] < matchOffset {
+		j++
+	}
+	// Fast path when no hits touch this segment.
+	if j >= len(matched) || matched[j] >= matchEnd {
+		if truncated {
+			return base.Render(string(visible) + "...")
+		}
+		return base.Render(string(visible))
+	}
+	hlStyle := base.Underline(true)
+
+	var b strings.Builder
+	i := 0 // rune cursor within `visible`
+	for i < len(visible) {
+		// Skip hits before i (should be rare; only if callers pass mis-sorted).
+		for j < len(matched) && matched[j]-matchOffset < i {
+			j++
+		}
+		if j < len(matched) && matched[j]-matchOffset == i && matched[j] < matchEnd {
+			runStart := i
+			for j < len(matched) && matched[j] < matchEnd && matched[j]-matchOffset == i && i < len(visible) {
+				i++
+				j++
+			}
+			b.WriteString(hlStyle.Render(string(visible[runStart:i])))
+			continue
+		}
+		plainStart := i
+		next := len(visible)
+		if j < len(matched) && matched[j] < matchEnd {
+			if local := matched[j] - matchOffset; local < next {
+				next = local
+			}
+		}
+		if next > len(visible) {
+			next = len(visible)
+		}
+		i = next
+		b.WriteString(base.Render(string(visible[plainStart:i])))
+	}
+	if truncated {
+		b.WriteString(base.Render("..."))
+	}
+	return b.String()
+}

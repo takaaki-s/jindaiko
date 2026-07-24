@@ -148,3 +148,113 @@ func TestFuzzyMatch_ShapeIsStable(t *testing.T) {
 		t.Fatalf("FuzzyMatch shape drifted: %+v", m)
 	}
 }
+
+// TestRenderMatchedLine_IncludesHighlightEscape locks in that populated
+// matchedIndexes produce an ANSI-styled string. Combined with the
+// tui package's init() setting termenv.TrueColor, this reliably observes
+// lipgloss's SGR output. Without it, a regression could silently drop
+// fuzzy highlights (target renders as plain text) with no test signal.
+func TestRenderMatchedLine_IncludesHighlightEscape(t *testing.T) {
+	style := lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("42"))
+	got := RenderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, false)
+
+	if !strings.Contains(got, "\x1b[") {
+		t.Errorf("RenderMatchedLine output has no ANSI escape (fuzzy highlight missing): %q", got)
+	}
+}
+
+// TestRenderMatchedLine_SelectedSkipsHighlight regresses the "no fuzzy
+// underline on the selected row" invariant: the palette caller wraps the
+// selected row in a cursor background, so an underline foreground on top
+// would clash. RenderMatchedLine must therefore return plain text when
+// selected=true.
+func TestRenderMatchedLine_SelectedSkipsHighlight(t *testing.T) {
+	style := lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("42"))
+	got := RenderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, true)
+
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("RenderMatchedLine(selected=true) produced ANSI escape: %q", got)
+	}
+	if got != "feat/oauth" {
+		t.Errorf("RenderMatchedLine(selected=true) = %q, want plain %q", got, "feat/oauth")
+	}
+}
+
+// TestRenderMatchedSegment_NoMatches_AppliesBaseStyle covers the fast path
+// (no hits in the window): the whole segment must render under `base`, so
+// callers can rely on per-piece color even without highlights.
+func TestRenderMatchedSegment_NoMatches_AppliesBaseStyle(t *testing.T) {
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	got := RenderMatchedSegment([]rune("plain"), nil, 0, 20, base)
+	if !strings.Contains(got, "\x1b[") {
+		t.Errorf("no ANSI escape emitted for base-styled plain segment: %q", got)
+	}
+	if !strings.Contains(got, "plain") {
+		t.Errorf("segment text missing from output: %q", got)
+	}
+}
+
+// TestRenderMatchedSegment_HighlightsWithinWindow verifies the matchOffset
+// filter: only haystack indexes falling inside [matchOffset, matchOffset+
+// len(target)) participate, rebased to segment-local positions.
+func TestRenderMatchedSegment_HighlightsWithinWindow(t *testing.T) {
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	// Say the haystack is "ab cd ef" and matched indexes are {0,3,6}. The
+	// "cd" segment starts at haystack offset 3, length 2 → local hit at
+	// position 0 only.
+	got := RenderMatchedSegment([]rune("cd"), []int{0, 3, 6}, 3, 20, base)
+	if !strings.Contains(got, "\x1b[") {
+		t.Errorf("expected an ANSI escape for the in-window hit: %q", got)
+	}
+	if !strings.ContainsRune(got, 'c') || !strings.ContainsRune(got, 'd') {
+		t.Errorf("segment characters missing: %q", got)
+	}
+}
+
+// TestRenderMatchedSegment_OutOfWindowHitsIgnored ensures that hits with a
+// non-empty matched slice but none inside the segment window fall through
+// to the fast (no-highlight) path — same visual as the no-match case.
+func TestRenderMatchedSegment_OutOfWindowHitsIgnored(t *testing.T) {
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	fast := RenderMatchedSegment([]rune("cd"), nil, 3, 20, base)
+	skipped := RenderMatchedSegment([]rune("cd"), []int{0, 6}, 3, 20, base)
+	if fast != skipped {
+		t.Errorf("out-of-window hits altered output:\n plain path = %q\n hits path  = %q", fast, skipped)
+	}
+}
+
+// TestRenderMatchedSegment_TruncatesWithEllipsis mirrors RenderMatchedLine's
+// truncation contract: overflow past maxWidth gets a "..." tail, still under
+// the base style.
+func TestRenderMatchedSegment_TruncatesWithEllipsis(t *testing.T) {
+	base := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	got := RenderMatchedSegment([]rune("abcdefghij"), nil, 0, 6, base)
+	if !strings.HasSuffix(stripANSI(got), "...") {
+		t.Errorf("expected trailing ellipsis, got %q", got)
+	}
+}
+
+// stripANSI removes CSI escape sequences so string assertions can inspect
+// only the visible characters. Kept local because it is only useful in
+// tests that mix content and styling.
+func stripANSI(s string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			// Skip until the terminator byte (final byte in CSI is @..~).
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}

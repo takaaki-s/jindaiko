@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/takaaki-s/jind-ai/internal/session"
 )
 
@@ -29,10 +27,13 @@ func typeQuery(t *testing.T, m SessionFilterModel, s string) SessionFilterModel 
 	return m
 }
 
-func matchIDs(rows []filterRow) []string {
-	out := make([]string, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r.sess.ID)
+// matchIDs returns the session IDs of every currently-visible match, in
+// order. matches is a []int index-array into rows, so this hop chases both
+// indirections rather than exposing them to every test site.
+func matchIDs(m SessionFilterModel) []string {
+	out := make([]string, 0, len(m.matches))
+	for _, idx := range m.matches {
+		out = append(out, m.rows[idx].sess.ID)
 	}
 	return out
 }
@@ -46,7 +47,7 @@ func TestNewSessionFilterModel_EmptyQuery(t *testing.T) {
 	if m.cursor != 0 {
 		t.Errorf("cursor = %d, want 0", m.cursor)
 	}
-	ids := matchIDs(m.matches)
+	ids := matchIDs(m)
 	wantIDs := []string{"s1", "s2", "s3"}
 	for i, id := range wantIDs {
 		if ids[i] != id {
@@ -65,8 +66,8 @@ func TestApplyFilter_FuzzyRanksBySahilm(t *testing.T) {
 	// The Description "feat/oauth-provider" is an exact contiguous prefix
 	// match, which sahilm/fuzzy ranks above "authentication-provider" where
 	// f-e-a-t only appears as a spread-out subsequence (or not at all).
-	if got := m.matches[0].sess.ID; got != "s1" {
-		ids := matchIDs(m.matches)
+	if got := m.rows[m.matches[0]].sess.ID; got != "s1" {
+		ids := matchIDs(m)
 		t.Errorf("top match = %q (order=%v), want s1 (feat/oauth-provider)", got, ids)
 	}
 }
@@ -75,7 +76,7 @@ func TestApplyFilter_EmptyQueryPreservesOrder(t *testing.T) {
 	sessions := sampleSessions()
 	m := NewSessionFilterModel(sessions)
 
-	ids := matchIDs(m.matches)
+	ids := matchIDs(m)
 	for i, s := range sessions {
 		if ids[i] != s.ID {
 			t.Errorf("empty-query order at [%d] = %q, want %q (matches must mirror daemon order)", i, ids[i], s.ID)
@@ -143,7 +144,12 @@ func TestUpdate_UpDownNav(t *testing.T) {
 	}
 }
 
-func TestBuildTarget_IncludesAllFields(t *testing.T) {
+// TestBuildRowSegments_IncludesExpectedFields locks in the field → segment
+// mapping the view layer relies on. CurrentWorkDir wins over WorkDir when
+// both are set (see buildRowSegments doc), Default-named fleets are dropped
+// to avoid cluttering the picker, and every other populated field lands in
+// its own kind.
+func TestBuildRowSegments_IncludesExpectedFields(t *testing.T) {
 	s := session.Info{
 		Description:    "desc-marker",
 		WorkDir:        "/wd-marker",
@@ -152,25 +158,68 @@ func TestBuildTarget_IncludesAllFields(t *testing.T) {
 		Fleet:          "fleet-marker",
 		AgentKind:      "agent-marker",
 	}
-	got := buildTarget(s)
-	for _, want := range []string{
-		"desc-marker",
-		"/wd-marker",
-		"/cwd-marker",
-		"branch-marker",
-		"fleet-marker",
-		"agent-marker",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("buildTarget missing %q: %q", want, got)
+	segs := buildRowSegments(s, "")
+	wantByKind := map[segmentKind]string{
+		segName:   "desc-marker",
+		segDir:    "/cwd-marker",
+		segBranch: "branch-marker",
+		segFleet:  "fleet-marker",
+		segKind:   "agent-marker",
+	}
+	if got, want := len(segs), len(wantByKind); got != want {
+		t.Fatalf("buildRowSegments len = %d, want %d (segs=%+v)", got, want, segs)
+	}
+	for _, seg := range segs {
+		want, ok := wantByKind[seg.kind]
+		if !ok {
+			t.Errorf("unexpected segment kind %d text=%q", seg.kind, seg.text)
+			continue
+		}
+		if seg.text != want {
+			t.Errorf("segment kind %d text = %q, want %q", seg.kind, seg.text, want)
+		}
+	}
+	for _, seg := range segs {
+		if seg.kind == segDir && seg.text == "/wd-marker" {
+			t.Errorf("WorkDir leaked into segDir even though CurrentWorkDir was set: %+v", seg)
 		}
 	}
 }
 
-// TestApplyFilter_PopulatesMatchedIndexes regresses the "MatchedIndexes must
-// reach the UI layer" contract (02_design §8.2): RenderMatchedLine relies on
-// filterRow.matchedIndexes to highlight fuzzy hits, so applyFilter must copy
-// sahilm/fuzzy's Match.MatchedIndexes into every row.
+// TestBuildRowSegments_DropsDefaultFleet documents that a Fleet equal to
+// session.DefaultFleet is treated as "no interesting fleet" and omitted
+// from the card so common rows stay tidy.
+func TestBuildRowSegments_DropsDefaultFleet(t *testing.T) {
+	s := session.Info{Description: "x", Fleet: session.DefaultFleet}
+	for _, seg := range buildRowSegments(s, "") {
+		if seg.kind == segFleet {
+			t.Errorf("segFleet survived for default fleet: %+v", seg)
+		}
+	}
+}
+
+// TestBuildRowSegments_ShortensHome collapses the caller's home prefix in
+// segDir so absolute paths render as "~/rest/of/path" instead of a
+// hard-to-scan absolute path.
+func TestBuildRowSegments_ShortensHome(t *testing.T) {
+	s := session.Info{Description: "x", CurrentWorkDir: "/home/u/dev/foo"}
+	segs := buildRowSegments(s, "/home/u")
+	var dir string
+	for _, seg := range segs {
+		if seg.kind == segDir {
+			dir = seg.text
+		}
+	}
+	if dir != "~/dev/foo" {
+		t.Errorf("segDir = %q, want %q", dir, "~/dev/foo")
+	}
+}
+
+// TestApplyFilter_PopulatesMatchedIndexes regresses the "MatchedIndexes
+// must reach the UI layer" contract: RenderMatchedSegment relies on
+// filterRow.matchedIndexes (haystack-wide) to redistribute highlights to
+// the right column, so applyFilter must copy sahilm/fuzzy's Match.
+// MatchedIndexes onto every matched row.
 func TestApplyFilter_PopulatesMatchedIndexes(t *testing.T) {
 	m := NewSessionFilterModel(sampleSessions())
 	m = typeQuery(t, m, "feat")
@@ -178,75 +227,95 @@ func TestApplyFilter_PopulatesMatchedIndexes(t *testing.T) {
 	if len(m.matches) == 0 {
 		t.Fatalf("expected at least one match for 'feat', got zero")
 	}
-	top := m.matches[0]
+	topIdx := m.matches[0]
+	top := m.rows[topIdx]
 	if top.matchedIndexes == nil {
 		t.Fatalf("top match matchedIndexes = nil, want populated")
 	}
 	if got, want := len(top.matchedIndexes), len("feat"); got != want {
 		t.Errorf("len(matchedIndexes) = %d, want %d (one index per query rune)", got, want)
 	}
-	targetRunes := []rune(top.target)
+	haystackRunes := []rune(m.haystacks[topIdx])
 	for _, idx := range top.matchedIndexes {
-		if idx < 0 || idx >= len(targetRunes) {
-			t.Errorf("matchedIndexes contains out-of-range index %d (target rune count %d)", idx, len(targetRunes))
+		if idx < 0 || idx >= len(haystackRunes) {
+			t.Errorf("matchedIndexes contains out-of-range index %d (haystack rune count %d)", idx, len(haystackRunes))
 		}
 	}
 }
 
 // TestApplyFilter_EmptyQuery_NoMatchedIndexes documents the empty-query
-// contract: with no query, all sessions pass through with matchedIndexes ==
-// nil so RenderMatchedLine takes its fast (no-highlight) path.
+// contract: with no query, every visible row passes through with
+// matchedIndexes == nil so RenderMatchedSegment takes its fast
+// (no-highlight) path.
 func TestApplyFilter_EmptyQuery_NoMatchedIndexes(t *testing.T) {
 	m := NewSessionFilterModel(sampleSessions())
-	for i, row := range m.matches {
+	for _, idx := range m.matches {
+		row := m.rows[idx]
 		if row.matchedIndexes != nil {
-			t.Errorf("matches[%d].matchedIndexes = %v, want nil for empty query", i, row.matchedIndexes)
+			t.Errorf("row %q matchedIndexes = %v, want nil for empty query", row.sess.ID, row.matchedIndexes)
 		}
 	}
 }
 
-// TestRenderMatchedLine_IncludesHighlightEscape locks in that populated
-// matchedIndexes produce an ANSI-styled string. Combined with the
-// tui package's init() setting termenv.TrueColor, this reliably observes
-// lipgloss's SGR output. Without it, a regression could silently drop
-// fuzzy highlights (target renders as plain text) with no test signal.
-func TestRenderMatchedLine_IncludesHighlightEscape(t *testing.T) {
-	style := lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("42"))
-	got := RenderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, false)
-
-	if !strings.Contains(got, "\x1b[") {
-		t.Errorf("RenderMatchedLine output has no ANSI escape (fuzzy highlight missing): %q", got)
-	}
-}
-
-// TestRenderMatchedLine_SelectedSkipsHighlight regresses the "no fuzzy
-// underline on the selected row" invariant (want-4 rationale): the caller
-// wraps the selected row in cursorStyle, and the underline foreground would
-// clash with cursorStyle's background. RenderMatchedLine must therefore
-// return plain text when selected=true.
-func TestRenderMatchedLine_SelectedSkipsHighlight(t *testing.T) {
-	style := lipgloss.NewStyle().Underline(true).Foreground(lipgloss.Color("42"))
-	got := RenderMatchedLine([]rune("feat/oauth"), []int{0, 1, 2, 3}, 20, style, true)
-
-	if strings.Contains(got, "\x1b[") {
-		t.Errorf("RenderMatchedLine(selected=true) produced ANSI escape: %q", got)
-	}
-	if got != "feat/oauth" {
-		t.Errorf("RenderMatchedLine(selected=true) = %q, want plain %q", got, "feat/oauth")
-	}
-}
-
-func TestBuildTarget_MissingFields(t *testing.T) {
+// TestBuildRowSegments_MissingFields documents that empty fields are
+// simply omitted — no empty slots — so joinSegmentsHaystack produces a
+// tight haystack (no run of trailing/interstitial spaces that would
+// dilute fuzzy scoring) and the view only draws the segments it has.
+func TestBuildRowSegments_MissingFields(t *testing.T) {
 	s := session.Info{Description: "only-desc"}
-
-	got := buildTarget(s)
-	if !strings.Contains(got, "only-desc") {
-		t.Errorf("buildTarget dropped populated field: %q", got)
+	segs := buildRowSegments(s, "")
+	if len(segs) != 1 {
+		t.Fatalf("segs len = %d, want 1 (only Description populated): %+v", len(segs), segs)
 	}
-	// 6 fields joined by " " when 5 are empty → the description surrounded
-	// by 5 empty slots means the result starts with "only-desc" and has
-	// trailing spaces. Just verify no panic and the populated field survives.
-	if got == "" {
-		t.Errorf("buildTarget returned empty for a session with a description")
+	if segs[0].kind != segName || segs[0].text != "only-desc" {
+		t.Errorf("segs[0] = %+v, want {text: only-desc, kind: segName}", segs[0])
+	}
+	if want, got := "only-desc", string(segs[0].runes); got != want {
+		t.Errorf("segs[0].runes decoded = %q, want %q", got, want)
+	}
+	hs, offs := joinSegmentsHaystack(segs)
+	if hs != "only-desc" {
+		t.Errorf("haystack = %q, want %q (no interstitial spaces)", hs, "only-desc")
+	}
+	if len(offs) != 1 || offs[0] != 0 {
+		t.Errorf("offsets = %v, want [0]", offs)
+	}
+}
+
+// TestJoinSegmentsHaystack_Offsets covers the multi-segment case: offsets
+// must point at each segment's first rune inside the joined haystack so
+// RenderMatchedSegment can slice haystack-wide MatchedIndexes to the right
+// column.
+func TestJoinSegmentsHaystack_Offsets(t *testing.T) {
+	segs := []rowSegment{
+		{text: "ab", kind: segName},
+		{text: "cd", kind: segDir},
+		{text: "e", kind: segKind},
+	}
+	hs, offs := joinSegmentsHaystack(segs)
+	if hs != "ab cd e" {
+		t.Errorf("haystack = %q, want %q", hs, "ab cd e")
+	}
+	wantOffs := []int{0, 3, 6}
+	for i := range segs {
+		if offs[i] != wantOffs[i] {
+			t.Errorf("offs[%d] = %d, want %d", i, offs[i], wantOffs[i])
+		}
+	}
+}
+
+// TestBuildRowSegments_NameSegmentFirst pins the "name is always
+// segments[0] when present" invariant that View relies on to render the
+// name line without scanning.
+func TestBuildRowSegments_NameSegmentFirst(t *testing.T) {
+	s := session.Info{
+		Description:   "the-name",
+		WorkDir:       "/wd",
+		CurrentBranch: "main",
+		AgentKind:     "claude",
+	}
+	segs := buildRowSegments(s, "")
+	if len(segs) == 0 || segs[0].kind != segName {
+		t.Fatalf("segments[0] = %+v, want kind=segName", segs)
 	}
 }
